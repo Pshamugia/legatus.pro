@@ -47,7 +47,7 @@ class AuthController extends Controller
             $user = User::create(['name' => $data['name'], 'email' => $data['email'], 'password' => Hash::make($data['password'])]);
             $org = Organization::create(['name' => $data['business_name'], 'slug' => Str::slug($data['business_name']).'-'.Str::lower(Str::random(5))]);
             $org->users()->attach($user, ['role' => 'owner']);
-            $org->agents()->create(['name' => 'Legatus', 'slug' => Str::slug($data['business_name']).'-legatus-'.Str::lower(Str::random(4)), 'business_name' => $data['business_name'], 'channels' => ['web'], 'settings' => ['handoff_threshold' => .72, 'discount_limit' => 10, 'delivery_policy' => null]]);
+            $org->agents()->create(['name' => 'AI Assistant', 'slug' => Str::slug($data['business_name']).'-legatus-'.Str::lower(Str::random(4)), 'business_name' => $data['business_name'], 'channels' => ['web'], 'settings' => ['handoff_threshold' => .72, 'discount_limit' => 10, 'delivery_policy' => null]]);
             Auth::login($user);
         });
         $r->session()->regenerate();

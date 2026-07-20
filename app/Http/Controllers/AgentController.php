@@ -7,6 +7,7 @@ use App\Models\Lead;
 use App\Services\KnowledgeIngestionService;
 use App\Services\TenantContext;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class AgentController extends Controller
 {
@@ -58,42 +59,92 @@ class AgentController extends Controller
         return view('dashboard', compact('agent', 'conversations', 'metrics', 'products', 'channelStatuses'));
     }
 
-    public function onboarding()
+    public function onboarding(TenantContext $tenant)
     {
-        return view('onboarding');
+        $tenant->authorize(['owner', 'admin']);
+        $agent = $tenant->agent();
+        $agent->load([
+            'knowledgeSources' => fn ($query) => $query->latest(),
+            'commerceConnection',
+        ]);
+
+        return view('onboarding', compact('agent'));
     }
 
     public function store(Request $r, TenantContext $tenant, KnowledgeIngestionService $ingestion)
     {
         $tenant->authorize(['owner', 'admin']);
-        $data = $r->validate(['business_name' => 'required|max:120', 'website' => 'nullable|url|max:2000', 'catalog' => 'nullable|file|max:10240|mimes:csv,txt,pdf', 'description' => 'nullable|max:1000']);
+        $r->merge([
+            'business_name' => $this->trimUnicodeWhitespace($r->input('business_name')),
+            'agent_name' => $this->trimUnicodeWhitespace($r->input('agent_name')),
+            'website' => is_string($r->input('website')) ? trim($r->input('website')) : $r->input('website'),
+            'catalog_url' => is_string($r->input('catalog_url')) ? trim($r->input('catalog_url')) : $r->input('catalog_url'),
+        ]);
+        $data = $r->validate([
+            'business_name' => $this->identityRules(120),
+            'agent_name' => $this->identityRules(80),
+            'website' => $this->publicUrlRules(),
+            'catalog_url' => $this->publicUrlRules(),
+            'catalog' => ['nullable', 'file', 'max:10240', 'mimes:csv,txt,pdf'],
+            'description' => ['nullable', 'string', 'max:1000'],
+        ]);
         $agent = $tenant->agent();
-        $settings = array_merge($agent->settings ?? [], ['website' => $data['website'] ?? null]);
+        $settings = array_merge($agent->settings ?? [], [
+            'website' => $data['website'] ?? null,
+            'catalog_url' => $data['catalog_url'] ?? null,
+        ]);
         if (! empty($data['website'])) {
             $origin = $this->origin($data['website']);
             if ($origin !== null) {
                 $settings['widget_allowed_origins'] = array_values(array_unique([$origin, $this->alternateWwwOrigin($origin)]));
             }
+        } else {
+            $settings['widget_allowed_origins'] = [];
         }
 
-        $agent->update([
-            'name' => 'Legatus',
-            'business_name' => $data['business_name'],
-            'description' => $data['description'] ?? null,
-            'channels' => ['web'],
-            'settings' => $settings,
-        ]);
+        DB::transaction(function () use ($agent, $data, $settings): void {
+            $agent->organization()->update(['name' => $data['business_name']]);
+            $agent->update([
+                'name' => trim($data['agent_name']),
+                'business_name' => $data['business_name'],
+                'description' => $data['description'] ?? null,
+                'channels' => ['web'],
+                'settings' => $settings,
+            ]);
+        });
 
         $learned = [];
         $warnings = [];
-        if (! empty($data['website'])) {
-            $source = $agent->knowledgeSources()->updateOrCreate(['type' => 'url', 'url' => $data['website']], ['name' => parse_url($data['website'], PHP_URL_HOST), 'status' => 'pending']);
+        $urlSources = collect([
+            [
+                'url' => $data['catalog_url'] ?? null,
+                'name' => ! empty($data['catalog_url']) ? parse_url($data['catalog_url'], PHP_URL_HOST).' product catalog' : null,
+                'purpose' => 'catalog',
+            ],
+            [
+                'url' => $data['website'] ?? null,
+                'name' => ! empty($data['website']) ? parse_url($data['website'], PHP_URL_HOST) : null,
+                'purpose' => 'website',
+            ],
+        ])->filter(fn (array $source): bool => filled($source['url']))->unique('url');
+
+        foreach ($urlSources as $urlSource) {
+            $source = $agent->knowledgeSources()->firstOrNew(['type' => 'url', 'url' => $urlSource['url']]);
+            $source->name = $urlSource['name'];
+            if (! $source->exists) {
+                $source->status = 'pending';
+            }
+            $source->save();
             try {
                 $ingestion->ingest($source);
                 $learned[] = $source->name;
+                if ($urlSource['purpose'] === 'catalog'
+                    && ! $agent->products()->where('metadata->source_id', $source->id)->where('is_active', true)->exists()) {
+                    $warnings[] = 'The catalog URL was readable, but it did not expose structured products with verified prices. Use a supported JSON feed, structured product data, CSV, or the live store connector.';
+                }
             } catch (\Throwable $exception) {
                 report($exception);
-                $warnings[] = "Website could not be learned: {$source->fresh()->error}";
+                $warnings[] = "URL could not be learned: {$source->fresh()->error}";
             }
         }
         if ($r->hasFile('catalog')) {
@@ -109,17 +160,71 @@ class AgentController extends Controller
             }
         }
 
-        return redirect()->route('channels.index')->with('success', 'Legatus is ready'.($learned ? ' and learned '.implode(', ', $learned) : '').'.')->with('warnings', $warnings);
+        $success = match (true) {
+            $warnings !== [] && $learned !== [] => 'Setup saved. Some sources were learned; the items below still need attention.',
+            $warnings !== [] => 'Setup saved, but one or more sources still need attention.',
+            $learned !== [] => 'Setup saved and learned '.implode(', ', $learned).'.',
+            default => 'Setup saved.',
+        };
+
+        return redirect()->route('channels.index')
+            ->with('success', $success)
+            ->with('warnings', $warnings);
+    }
+
+    private function publicUrlRules(): array
+    {
+        return ['nullable', 'string', 'max:2000', function (string $attribute, mixed $value, \Closure $fail): void {
+            if ($value === null || $value === '') {
+                return;
+            }
+
+            $parts = is_string($value) ? parse_url($value) : false;
+            $scheme = is_array($parts) ? strtolower((string) ($parts['scheme'] ?? '')) : '';
+            if (! is_array($parts)
+                || ! in_array($scheme, ['http', 'https'], true)
+                || empty($parts['host'])
+                || isset($parts['user'])
+                || isset($parts['pass'])
+                || preg_match('/[\x00-\x20\x7f]/', (string) $value) === 1) {
+                $fail('Enter a public HTTP(S) URL without embedded credentials.');
+            }
+        }];
+    }
+
+    private function identityRules(int $maximum): array
+    {
+        return ['bail', 'required', 'string', "max:{$maximum}", function (string $attribute, mixed $value, \Closure $fail): void {
+            if (! is_string($value) || ! mb_check_encoding($value, 'UTF-8')) {
+                $fail('Use valid Unicode text for this name.');
+
+                return;
+            }
+
+            if (preg_match('/[\p{Cc}]/u', $value) === 1) {
+                $fail('Names cannot contain control characters.');
+            }
+        }];
+    }
+
+    private function trimUnicodeWhitespace(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        return preg_replace('/^[\s\p{Z}]+|[\s\p{Z}]+$/u', '', $value) ?? $value;
     }
 
     private function origin(string $url): ?string
     {
         $parts = parse_url($url);
-        if (! in_array($parts['scheme'] ?? null, ['http', 'https'], true) || empty($parts['host'])) {
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        if (! in_array($scheme, ['http', 'https'], true) || empty($parts['host'])) {
             return null;
         }
 
-        return strtolower($parts['scheme'].'://'.$parts['host']).(isset($parts['port']) ? ':'.(int) $parts['port'] : '');
+        return strtolower($scheme.'://'.$parts['host']).(isset($parts['port']) ? ':'.(int) $parts['port'] : '');
     }
 
     private function alternateWwwOrigin(string $origin): string

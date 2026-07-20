@@ -5,22 +5,7 @@
 @section('body')
 @php($connectedMetaCount = $metaChannels->where('connected', true)->count())
 <div class="dash-shell channels-page">
-    <aside class="side">
-        <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
-        <div class="menu">
-            <a href="{{ route('dashboard') }}">◫ &nbsp; Overview</a>
-            <a href="{{ route('inbox.index') }}">◌ &nbsp; Inbox</a>
-            <a href="{{ route('knowledge.index') }}">◇ &nbsp; Knowledge</a>
-            <a href="{{ route('dashboard') }}#products">▦ &nbsp; Products</a>
-            <a class="active" href="{{ route('channels.index') }}">⌁ &nbsp; Channels</a>
-            <a href="{{ route('analytics.index') }}">↗ &nbsp; Analytics</a>
-            <a href="{{ route('settings.index') }}">⚙ &nbsp; Settings</a>
-        </div>
-        <div class="side-bottom">
-            <b style="color:white">ერთი AI თანამშრომელი</b><br>
-            საიტი, Messenger და Instagram ერთ inbox-ში.
-        </div>
-    </aside>
+    @include('partials.workspace-navigation', ['active' => 'channels'])
 
     <main class="main channels-main">
         <div class="topline channels-heading">
@@ -38,6 +23,12 @@
                 <div><b>მზადაა</b><p>{{ session('success') ?? session('channel_success') ?? session('commerce_success') ?? session('status') }}</p></div>
             </div>
         @endif
+        @foreach((array) session('warnings', []) as $warning)
+            <div class="channel-alert channel-alert--error" role="alert">
+                <span>!</span>
+                <div><b>წყაროს შემოწმება სჭირდება · Source needs attention</b><p>{{ $warning }}</p></div>
+            </div>
+        @endforeach
         @if(session('error') || session('channel_error') || session('commerce_error'))
             <div class="channel-alert channel-alert--error" role="alert">
                 <span>!</span>

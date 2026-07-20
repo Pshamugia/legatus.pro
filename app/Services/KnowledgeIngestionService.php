@@ -159,51 +159,41 @@ class KnowledgeIngestionService
     {
         $source->agent->products()->where('metadata->source_id', $source->id)->update(['is_active' => false]);
         $response = $this->fetchPublicUrl($source->url);
-        $html = $response->body();
-        if (strlen($html) > 5_000_000) {
+        $body = $response->body();
+        if (strlen($body) > 5_000_000) {
             throw new \RuntimeException('Page exceeds the 5 MB safety limit.');
         }
-        $found = $created = $webChunks = 0;
+
+        $json = $this->catalogJsonPayload($response->header('Content-Type'), $body);
+        if ($json !== null) {
+            $products = $this->catalogJsonProducts($json);
+            $this->assertCompleteJsonCatalog($json, count($products));
+            $result = $this->importUrlProducts($source, $products, $this->catalogPayloadCurrency($json));
+            if ($result['found'] === 0) {
+                throw new \RuntimeException('The JSON catalog did not contain any valid products with a name and price in the workspace currency.');
+            }
+
+            return [
+                'items_found' => $result['found'],
+                'items_created' => $result['created'],
+                'items_updated' => $result['updated'],
+                'content_hash' => hash('sha256', $body),
+            ];
+        }
+
+        $webChunks = 0;
         $dom = new \DOMDocument;
-        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$body);
         $xpath = new \DOMXPath($dom);
+        $products = [];
         foreach ($xpath->query('//script[@type="application/ld+json"]') as $node) {
             $json = json_decode($node->textContent, true);
-            foreach ($this->findProducts($json) as $p) {
-                $name = trim($p['name'] ?? '');
-                if ($name === '') {
-                    continue;
-                }
-                $offer = is_array($p['offers'] ?? null) ? $p['offers'] : [];
-                if (array_is_list($offer)) {
-                    $offer = collect($offer)->first(fn ($candidate) => is_array($candidate)) ?? [];
-                }
-                $currency = strtoupper((string) ($offer['priceCurrency'] ?? $p['priceCurrency'] ?? ''));
-                $workspaceCurrency = strtoupper((string) ($source->agent->organization?->settings['currency'] ?? 'GEL'));
-                if ($currency !== '' && $currency !== $workspaceCurrency) {
-                    continue;
-                }
-                $rawPrice = $offer['price'] ?? $offer['lowPrice'] ?? null;
-                if ($rawPrice === null) {
-                    continue;
-                }
-                $price = $this->number($rawPrice);
-                if ($price <= 0) {
-                    continue;
-                }
-                $found++;
-                $sku = $p['sku'] ?? null;
-                $existing = $sku ? $source->agent->products()->where('sku', $sku)->first() : $source->agent->products()->where('name', $name)->first();
-                $values = ['name' => $name, 'sku' => $sku, 'category' => $p['category'] ?? null, 'description' => strip_tags($p['description'] ?? ''), 'price' => $price, 'stock' => Str::contains($offer['availability'] ?? '', 'InStock') ? 1 : 0, 'image' => is_array($p['image'] ?? null) ? ($p['image'][0] ?? null) : ($p['image'] ?? null), 'is_active' => true, 'metadata' => ['source_id' => $source->id, 'source_url' => $source->url, 'currency' => $currency ?: $workspaceCurrency]];
-                if ($existing) {
-                    $existing->update($values);
-                } else {
-                    $existing = $source->agent->products()->create($values);
-                    $created++;
-                }
-                $this->chunk($source, 'product', $name, json_encode($existing->only(['id', 'name', 'category', 'description', 'price', 'stock']), JSON_UNESCAPED_UNICODE), ['product_id' => $existing->id, 'url' => $source->url]);
+            if (is_array($json)) {
+                $products = array_merge($products, $this->findProducts($json));
+                $this->assertCatalogItemLimit(count($products));
             }
         }
+        $result = $this->importUrlProducts($source, $products);
         foreach ($xpath->query('//script|//style|//nav|//footer') as $node) {
             $node->parentNode?->removeChild($node);
         }
@@ -212,11 +202,347 @@ class KnowledgeIngestionService
             $this->chunk($source, 'webpage', $source->name.' · '.($i + 1), $content, ['url' => $source->url]);
             $webChunks++;
         }
-        if ($found === 0 && $webChunks === 0) {
+        if ($result['found'] === 0 && $webChunks === 0) {
             throw new \RuntimeException('The website did not contain any accepted products or searchable content.');
         }
 
-        return ['items_found' => $found ?: $webChunks, 'items_created' => $created, 'items_updated' => max(0, $found - $created), 'content_hash' => hash('sha256', $html)];
+        return [
+            'items_found' => $result['found'] ?: $webChunks,
+            'items_created' => $result['created'],
+            'items_updated' => $result['updated'],
+            'content_hash' => hash('sha256', $body),
+        ];
+    }
+
+    private function catalogJsonPayload(?string $contentType, string $body): ?array
+    {
+        $trimmed = ltrim($body);
+        $looksLikeJson = str_contains(mb_strtolower((string) $contentType), 'json')
+            || str_starts_with($trimmed, '{')
+            || str_starts_with($trimmed, '[');
+        if (! $looksLikeJson) {
+            return null;
+        }
+
+        try {
+            $payload = json_decode($body, true, 64, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new \RuntimeException('The catalog URL returned invalid JSON.', previous: $exception);
+        }
+
+        if (! is_array($payload)) {
+            throw new \RuntimeException('The catalog URL must return a JSON object or array.');
+        }
+
+        return $payload;
+    }
+
+    /** @return list<array> */
+    private function catalogJsonProducts(array $payload): array
+    {
+        $jsonLdProducts = $this->findProducts($payload);
+        if ($jsonLdProducts !== []) {
+            $this->assertCatalogItemLimit(count($jsonLdProducts));
+
+            return array_values($jsonLdProducts);
+        }
+
+        $products = $this->catalogProductsFromKnownShape($payload);
+        $this->assertCatalogItemLimit(count($products));
+
+        return $products;
+    }
+
+    /** @return list<array> */
+    private function catalogProductsFromKnownShape(array $payload, int $depth = 0): array
+    {
+        if ($depth > 4) {
+            return [];
+        }
+        if (array_is_list($payload)) {
+            return array_values(array_filter($payload, 'is_array'));
+        }
+        if ($this->looksLikeCatalogProduct($payload)) {
+            return [$payload];
+        }
+
+        foreach (['products', 'items', 'data', 'catalog', 'results'] as $key) {
+            if (! is_array($payload[$key] ?? null)) {
+                continue;
+            }
+            $products = $this->catalogProductsFromKnownShape($payload[$key], $depth + 1);
+            if ($products !== []) {
+                return $products;
+            }
+        }
+
+        return [];
+    }
+
+    private function looksLikeCatalogProduct(array $product): bool
+    {
+        $hasName = array_key_exists('name', $product) || array_key_exists('title', $product);
+        $hasPrice = array_key_exists('price', $product) || array_key_exists('offers', $product);
+
+        return $hasName && $hasPrice;
+    }
+
+    private function assertCompleteJsonCatalog(array $payload, int $received): void
+    {
+        $meta = is_array($payload['meta'] ?? null) ? $payload['meta'] : [];
+        $total = $meta['total'] ?? null;
+        if ($total !== null) {
+            if (! is_int($total) && ! (is_string($total) && ctype_digit($total))) {
+                throw new \RuntimeException('The JSON catalog total must be a non-negative integer.');
+            }
+            $total = (int) $total;
+            if ($total < 0) {
+                throw new \RuntimeException('The JSON catalog total must be a non-negative integer.');
+            }
+            $this->assertCatalogItemLimit($total);
+            if ($total !== $received) {
+                throw new \RuntimeException('The catalog URL returned a partial product list. Use a URL that exposes the complete catalog.');
+            }
+        }
+
+        $currentPage = $meta['current_page'] ?? 1;
+        $lastPage = $meta['last_page'] ?? 1;
+        if ((string) $currentPage !== '1' || (string) $lastPage !== '1') {
+            throw new \RuntimeException('The catalog URL is paginated. Use a URL that exposes the complete catalog.');
+        }
+    }
+
+    private function assertCatalogItemLimit(int $count): void
+    {
+        $maximum = max(1, min(10_000, (int) config('legatus.commerce_max_catalog_products', 10_000)));
+        if ($count > $maximum) {
+            throw new \RuntimeException("Catalog contains {$count} products; the safe limit is {$maximum}.");
+        }
+    }
+
+    private function catalogPayloadCurrency(array $payload): ?string
+    {
+        $hasRootCurrency = array_key_exists('currency', $payload);
+        $hasMetaCurrency = is_array($payload['meta'] ?? null) && array_key_exists('currency', $payload['meta']);
+        if (! $hasRootCurrency && ! $hasMetaCurrency) {
+            return null;
+        }
+        $currency = $hasRootCurrency ? $payload['currency'] : $payload['meta']['currency'];
+
+        return is_scalar($currency) && ! is_bool($currency) ? (string) $currency : '';
+    }
+
+    /** @param list<array> $products
+     * @return array{found: int, created: int, updated: int}
+     */
+    private function importUrlProducts(KnowledgeSource $source, array $products, ?string $payloadCurrency = null): array
+    {
+        $this->assertCatalogItemLimit(count($products));
+        $found = $created = $updated = 0;
+
+        foreach ($products as $product) {
+            $values = $this->normalizeUrlProduct($source, $product, $payloadCurrency);
+            if ($values === null) {
+                continue;
+            }
+
+            $found++;
+            $sku = $values['sku'];
+            $existing = $sku
+                ? $source->agent->products()->where('sku', $sku)->first()
+                : $source->agent->products()->where('name', $values['name'])->first();
+            if ($existing) {
+                $existing->update($values);
+                $updated++;
+            } else {
+                $existing = $source->agent->products()->create($values);
+                $created++;
+            }
+
+            $this->chunk(
+                $source,
+                'product',
+                $values['name'],
+                json_encode($existing->only(['id', 'name', 'sku', 'category', 'description', 'price', 'stock']), JSON_UNESCAPED_UNICODE),
+                ['product_id' => $existing->id, 'url' => $values['metadata']['product_url'] ?? $source->url],
+            );
+        }
+
+        return compact('found', 'created', 'updated');
+    }
+
+    private function normalizeUrlProduct(KnowledgeSource $source, array $product, ?string $payloadCurrency): ?array
+    {
+        $offer = is_array($product['offers'] ?? null) ? $product['offers'] : [];
+        if (array_is_list($offer)) {
+            $offer = collect($offer)->first(fn ($candidate) => is_array($candidate)) ?? [];
+        }
+        $priceValue = $product['price'] ?? $offer['price'] ?? $offer['lowPrice'] ?? null;
+        $priceObject = is_array($priceValue) ? $priceValue : [];
+        $rawPrice = $priceObject['amount'] ?? $priceObject['value'] ?? $priceObject['price'] ?? $priceValue;
+        if ($rawPrice === null || is_bool($rawPrice) || ! is_scalar($rawPrice)) {
+            return null;
+        }
+
+        $name = $this->catalogText($product['name'] ?? $product['title'] ?? null, 255);
+        $price = $this->number($rawPrice);
+        if ($name === '' || ! is_finite($price) || $price <= 0 || $price > 99_999_999.99) {
+            return null;
+        }
+
+        $workspaceCurrency = strtoupper((string) ($source->agent->organization?->settings['currency'] ?? 'GEL'));
+        if (! preg_match('/^[A-Z]{3}$/', $workspaceCurrency)) {
+            $workspaceCurrency = 'GEL';
+        }
+        $currencyValue = $product['currency']
+            ?? $product['priceCurrency']
+            ?? $product['price_currency']
+            ?? $priceObject['currency']
+            ?? $priceObject['currency_code']
+            ?? $offer['priceCurrency']
+            ?? $offer['currency']
+            ?? $payloadCurrency
+            ?? $this->currencyFromPrice($rawPrice);
+        if ($currencyValue !== null && (! is_scalar($currencyValue) || is_bool($currencyValue))) {
+            return null;
+        }
+        $currency = $currencyValue === null ? $workspaceCurrency : strtoupper(trim((string) $currencyValue));
+        if (! preg_match('/^[A-Z]{3}$/', $currency) || $currency !== $workspaceCurrency) {
+            return null;
+        }
+
+        $stock = $this->catalogStock($product, $offer);
+        if ($stock === null) {
+            return null;
+        }
+
+        $sku = $this->catalogText($product['sku'] ?? $product['id'] ?? null, 191) ?: null;
+        $image = $this->catalogUrl($product['image_url'] ?? $product['image'] ?? null);
+        $productUrl = $this->catalogUrl($product['url'] ?? null);
+
+        return [
+            'name' => $name,
+            'sku' => $sku,
+            'category' => $this->catalogText($product['category'] ?? null, 255) ?: null,
+            'description' => $this->catalogText($product['description'] ?? null, 4000) ?: null,
+            'price' => $price,
+            'stock' => $stock,
+            'image' => $image,
+            'is_active' => true,
+            'metadata' => [
+                'source_id' => $source->id,
+                'source_url' => $source->url,
+                'product_url' => $productUrl,
+                'external_id' => $this->catalogText($product['id'] ?? null, 191) ?: null,
+                'currency' => $currency,
+                'text_trust' => 'untrusted_catalog_data',
+            ],
+        ];
+    }
+
+    private function currencyFromPrice(mixed $price): ?string
+    {
+        if (! is_string($price)) {
+            return null;
+        }
+
+        return match (true) {
+            str_contains($price, '₾'), str_contains(mb_strtolower($price), 'gel'), str_contains($price, 'ლარ') => 'GEL',
+            str_contains($price, '$'), str_contains(mb_strtolower($price), 'usd') => 'USD',
+            str_contains($price, '€'), str_contains(mb_strtolower($price), 'eur') => 'EUR',
+            str_contains($price, '£'), str_contains(mb_strtolower($price), 'gbp') => 'GBP',
+            default => null,
+        };
+    }
+
+    private function catalogStock(array $product, array $offer): ?int
+    {
+        foreach (['stock', 'quantity'] as $field) {
+            if (! array_key_exists($field, $product)) {
+                continue;
+            }
+            $value = $product[$field];
+            if ($value === null || (is_string($value) && trim($value) === '')) {
+                continue;
+            }
+            if (is_int($value)) {
+                return $value >= 0 && $value <= 4_294_967_295 ? $value : null;
+            }
+            if (is_float($value) && is_finite($value) && floor($value) === $value) {
+                return $value >= 0 && $value <= 4_294_967_295 ? (int) $value : null;
+            }
+            if (is_string($value) && preg_match('/^\s*\d+\s*$/D', $value)) {
+                $validated = filter_var(trim($value), FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
+
+                return $validated === false || $validated > 4_294_967_295 ? null : $validated;
+            }
+
+            return null;
+        }
+
+        $availability = $product['in_stock'] ?? $product['availability'] ?? $offer['availability'] ?? null;
+        if (is_bool($availability)) {
+            return $availability ? 1 : 0;
+        }
+        if ($availability === 1 || $availability === '1') {
+            return 1;
+        }
+        if ($availability === 0 || $availability === '0') {
+            return 0;
+        }
+        if (is_string($availability)) {
+            $availability = mb_strtolower(trim($availability));
+            if (Str::contains($availability, ['outofstock', 'out_of_stock', 'out of stock', 'unavailable', 'soldout', 'sold_out'])) {
+                return 0;
+            }
+            if (Str::contains($availability, ['instock', 'in_stock', 'in stock', 'available'])) {
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    private function catalogText(mixed $value, int $limit): string
+    {
+        if (is_array($value)) {
+            $value = $value['name'] ?? $value['title'] ?? null;
+        }
+        if (! is_scalar($value) || is_bool($value)) {
+            return '';
+        }
+
+        $text = html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace('/<(script|style)\b[^>]*>.*?<\/\1>/isu', ' ', $text) ?? '';
+        $text = strip_tags($text);
+        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', ' ', $text) ?? '';
+        $text = preg_replace([
+            '/\b(?:ignore|disregard|override|forget)\s+(?:all\s+)?(?:previous|prior|above|system|developer)\s+(?:instructions?|messages?|prompts?|rules?)\b/iu',
+            '/\b(?:reveal|expose|print|return|leak)\s+(?:the\s+)?(?:system|developer)\s+(?:prompt|message|instructions?)\b/iu',
+            '/\b(?:send|reveal|expose|leak)\s+(?:all\s+)?(?:secrets?|credentials?|api\s*keys?)\b/iu',
+            '/\b(?:system|developer|assistant|tool)\s*(?:message|prompt)?\s*:/iu',
+        ], '[catalog directive removed]', $text) ?? '';
+        $text = preg_replace('/\s+/u', ' ', trim($text)) ?? '';
+
+        return Str::limit($text, $limit, '');
+    }
+
+    private function catalogUrl(mixed $value): ?string
+    {
+        if (is_array($value)) {
+            $value = $value['url'] ?? $value[0] ?? null;
+            if (is_array($value)) {
+                $value = $value['url'] ?? null;
+            }
+        }
+        if (! is_string($value) || strlen($value) > 2048 || filter_var($value, FILTER_VALIDATE_URL) === false) {
+            return null;
+        }
+        $parts = parse_url($value);
+
+        return in_array($parts['scheme'] ?? null, ['http', 'https'], true) && ! isset($parts['user']) && ! isset($parts['pass'])
+            ? $value
+            : null;
     }
 
     private function assertConfiguredPayload(KnowledgeSource $source): void

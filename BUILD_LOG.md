@@ -224,9 +224,12 @@ The automated suite covers these behavior families:
 - Responses API tool execution, structured output, and moderation handling with mocked HTTP;
 - CSV normalization/deduplication, atomic refresh rollback, complete embedding batches, source-product lifecycle, and unsafe/DNS-pinned URL handling;
 - onboarding website/catalogue ingestion with mocked public HTTP;
+- dedicated catalogue URL ingestion for JSON/Universal Commerce envelopes, legacy URL recovery, bounded product validation, and honest unstructured-source warnings;
 - shopping preference, hard budget/stock ranking, and comparison behavior;
 - operator ownership, replies, release, and close flows;
 - authentication, membership roles, and cross-tenant denial;
+- multi-business workspace creation/switching, active-tenant session validation, business/assistant identity separation, and complete logout invalidation;
+- tenant-scoped widget palette presets/custom colors, contrast enforcement, safe stored-theme fallback, and synchronized launcher/frame rendering;
 - widget script/frame, stateless signed visitor/history ownership, human-reply synchronization, feedback authorization, durable cache-loss idempotency, and CSP nonce behavior;
 - explicit Meta account selection, OAuth state binding, signed/stateless webhooks, native human echoes, attachment handoff, provider deduplication, durable outbox recovery, monotonic delivery states, and ambiguous-send handling;
 - authoritative live-commerce reconciliation, signed connector requests, public-origin/DNS controls, response/schema limits, unchanged-product write avoidance, and live price/stock/delivery validation;
@@ -257,13 +260,21 @@ Live checks consume OpenAI credits and require the private key in `.env`.
 
 ## Final release-verification snapshot
 
-- `php artisan test`: **157 passed, 986 assertions**.
+- `php artisan test`: **191 passed, 1,402 assertions**.
 - `php artisan legatus:eval`: **10 passed, 0 failed**, including price, stock, delivery, shopping, budget, handoff, wholesale, discount approval, and prompt-injection boundaries.
 - Live `gpt-5.6-sol` shopping health check: completed in Georgian with `save_shopping_preferences`, `recommend_products`, and `check_stock`; no server guardrail or handoff was triggered.
 - Demo database: 12 products, 3 knowledge sources, 4 knowledge chunks, 6 customer stories, 14 story messages, 2 qualified leads, 1 pending reservation, and 10 active eval cases.
 - HTTP smoke: landing, Privacy, Terms, Data Deletion, demo chat, widget frame, widget loader, and health endpoint returned 200; the unconfigured Meta verification route failed closed with 503, and the widget loader remained stateless with no `Set-Cookie` header.
 - Production cache build, Vite production build, strict Composer validation, Pint, Composer advisory audit, and npm audit all passed; both dependency audits reported zero known vulnerabilities.
 - The temporary local smoke-test server was stopped and Laravel's local optimized caches were cleared after verification so deployment cannot inherit stale local configuration.
+
+### July 21 self-service workspace release
+
+- Guided setup now preserves and visibly restores the business website, dedicated full-catalogue URL, uploaded sources, and live-commerce status.
+- Failed or unstructured catalogue sources are shown as actionable warnings instead of a misleading ready state.
+- A user can create and switch between isolated business workspaces; owner/admin configuration and team-member removal are tenant-scoped.
+- Business name, AI employee name, and widget colors are independently configurable per workspace. Five accessible presets and synchronized visual custom-color controls include a live launcher/chat preview.
+- The widget loader revalidates immediately after branding changes, while malformed stored colors fail closed to the safe default theme.
 
 ## Evidence boundaries and unfinished external work — July 20 release
 

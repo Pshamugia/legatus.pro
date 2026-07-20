@@ -2,7 +2,7 @@
 @section('title','Inbox · Legatus')
 @section('body')
 <div class="dash-shell">
-<aside class="side"><a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> legatus</a><div class="menu"><a href="{{ route('dashboard') }}">◫ &nbsp; Overview</a><a class="active" href="{{ route('inbox.index') }}">◌ &nbsp; Inbox @if($needsHumanCount)<span class="pill">{{ $needsHumanCount }}</span>@endif</a><a href="{{ route('knowledge.index') }}">◇ &nbsp; Knowledge</a><a href="{{ route('dashboard') }}#products">▦ &nbsp; Products</a><a href="{{ route('channels.index') }}">⌁ &nbsp; Channels</a><a href="{{ route('analytics.index') }}">↗ &nbsp; Analytics</a><a href="{{ route('settings.index') }}">⚙ &nbsp; Settings</a></div><div class="side-bottom"><b style="color:white">Human in control</b><br>Low confidence, policy exceptions and approval limits are escalated automatically.</div></aside>
+@include('partials.workspace-navigation', ['active' => 'inbox'])
 <main class="main" style="padding-bottom:0"><div class="topline"><div><span class="eyebrow">Omnichannel workspace</span><h1>Conversation inbox</h1></div><div style="display:flex;gap:8px"><a class="tag" href="{{ route('inbox.index') }}">All</a><a class="tag" href="{{ route('inbox.index',['status'=>'human']) }}">Needs human</a><a class="tag" href="{{ route('inbox.index',['status'=>'ai']) }}">AI handling</a></div></div>
 @if(session('success'))<div class="panel" style="margin:14px 0;color:#267244;padding:12px">✓ {{ session('success') }}</div>@endif
 @if(session('error'))<div class="panel" style="margin:14px 0;color:#9a3d25;background:#fff2ed;padding:12px">{{ session('error') }}</div>@endif

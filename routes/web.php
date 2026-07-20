@@ -12,6 +12,7 @@ use App\Http\Controllers\MetaConnectionController;
 use App\Http\Controllers\MetaWebhookController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\WidgetController;
+use App\Http\Controllers\WorkspaceController;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -67,6 +68,14 @@ Route::withoutMiddleware([
 });
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/app/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');
+    Route::post('/app/workspaces', [WorkspaceController::class, 'store'])
+        ->middleware('throttle:10,1')
+        ->name('workspaces.store');
+    Route::post('/app/workspaces/{workspace}/switch', [WorkspaceController::class, 'switch'])
+        ->whereNumber('workspace')
+        ->middleware('throttle:30,1')
+        ->name('workspaces.switch');
     Route::get('/app', [AgentController::class, 'dashboard'])->name('dashboard');
     Route::get('/onboarding', [AgentController::class, 'onboarding'])->name('onboarding');
     Route::post('/onboarding', [AgentController::class, 'store'])->name('onboarding.store');

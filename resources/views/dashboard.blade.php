@@ -2,22 +2,11 @@
 @section('title', 'Legatus · Mission Control')
 @section('body')
 <div class="dash-shell">
-    <aside class="side">
-        <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> legatus</a>
-        <div class="menu">
-            <a class="active" href="{{ route('dashboard') }}">◫ &nbsp; Overview</a>
-            <a href="{{ route('inbox.index') }}">◌ &nbsp; Inbox @if($metrics['needs_human'])<span class="pill">{{ $metrics['needs_human'] }}</span>@endif</a>
-            <a href="{{ route('knowledge.index') }}">◇ &nbsp; Knowledge</a>
-            <a href="{{ route('dashboard') }}#products">▦ &nbsp; Products <span class="pill">{{ $agent->products_count }}</span></a>
-            <a href="{{ route('channels.index') }}">⌁ &nbsp; Channels</a>
-            <a href="{{ route('analytics.index') }}">↗ &nbsp; Analytics</a>
-            <a href="{{ route('settings.index') }}">⚙ &nbsp; Settings</a>
-        </div>
-        <div class="side-bottom"><b style="color:white">Knowledge readiness</b><br>{{ $metrics['knowledge_readiness'] }}% verified<div class="progress" style="margin-top:10px"><i style="width:{{ $metrics['knowledge_readiness'] }}%"></i></div></div>
-    </aside>
+    @include('partials.workspace-navigation', ['active' => 'dashboard'])
     <main class="main">
-        <div class="topline"><div><span class="eyebrow">Mission control</span><h1>გამარჯობა 👋</h1><p style="color:var(--muted);margin:4px 0">რეალური შედეგები {{ $agent->business_name }}-ის ყველა საუბრის მიხედვით.</p></div><div style="display:flex;gap:9px"><a class="btn ghost" href="{{ route('chat.show',$agent) }}">Preview agent</a><a class="btn" href="{{ route('onboarding') }}">Configure Legatus</a></div></div>
+        <div class="topline"><div><span class="eyebrow">Mission control</span><h1>გამარჯობა 👋</h1><p style="color:var(--muted);margin:4px 0">რეალური შედეგები {{ $agent->business_name }}-ის ყველა საუბრის მიხედვით.</p></div><div style="display:flex;gap:9px"><a class="btn ghost" href="{{ route('chat.show',$agent) }}">Preview agent</a><a class="btn" href="{{ route('onboarding') }}">Manage setup</a></div></div>
 
+        @if(session('status'))<div class="panel" style="margin:18px 0;color:#267244;padding:14px">✓ {{ session('status') }}</div>@endif
         @if(session('success'))<div class="panel" style="margin:18px 0;color:#267244;padding:14px">✓ {{ session('success') }}</div>@endif
         @foreach(session('warnings',[]) as $warning)<div class="panel" style="margin:10px 0;color:#9b5b12;background:#fff8e8;padding:14px">! {{ $warning }}</div>@endforeach
 

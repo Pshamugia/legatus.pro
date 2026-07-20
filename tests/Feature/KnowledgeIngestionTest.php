@@ -263,6 +263,174 @@ HTML;
         $this->assertSame(2, $source->chunks()->count());
     }
 
+    public function test_json_catalog_url_imports_universal_commerce_envelope_and_safe_fields(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        Http::fake(['https://example.com/products.json' => Http::response([
+            'data' => [
+                [
+                    'id' => 77,
+                    'title' => 'Universal Catalog Book',
+                    'category' => ['name' => 'Books'],
+                    'description' => '<script>bad()</script><b>A verified description</b>',
+                    'price' => ['amount' => '27.50', 'currency' => 'GEL'],
+                    'quantity' => '7',
+                    'image' => ['url' => 'https://example.com/book.jpg'],
+                    'url' => 'https://example.com/books/77',
+                ],
+                [
+                    'id' => 'BOOK-78',
+                    'sku' => 'SKU-78',
+                    'name' => 'Availability Book',
+                    'price' => 19.90,
+                    'currency' => 'gel',
+                    'availability' => 'https://schema.org/InStock',
+                ],
+            ],
+            'meta' => [
+                'sync_mode' => 'authoritative_snapshot',
+                'current_page' => 1,
+                'last_page' => 1,
+                'total' => 2,
+            ],
+        ])]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'JSON catalog',
+            'url' => 'https://example.com/products.json',
+        ]);
+
+        app(KnowledgeIngestionService::class)->ingest($source);
+
+        $source->refresh();
+        $this->assertSame('ready', $source->status);
+        $this->assertSame(2, $source->items_found);
+        $this->assertSame(2, $source->items_created);
+        $this->assertSame(2, $source->chunks()->where('kind', 'product')->count());
+        $this->assertDatabaseHas('products', [
+            'agent_id' => $agent->id,
+            'sku' => '77',
+            'name' => 'Universal Catalog Book',
+            'category' => 'Books',
+            'price' => 27.50,
+            'stock' => 7,
+            'image' => 'https://example.com/book.jpg',
+        ]);
+        $product = $agent->products()->where('sku', '77')->firstOrFail();
+        $this->assertSame('A verified description', $product->description);
+        $this->assertSame('https://example.com/books/77', $product->metadata['product_url']);
+        $this->assertSame('untrusted_catalog_data', $product->metadata['text_trust']);
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'SKU-78', 'stock' => 1]);
+    }
+
+    public function test_json_catalog_skips_missing_prices_invalid_rows_and_other_currencies(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        Http::fake(['https://example.com/items.json' => Http::response([
+            'products' => [
+                ['id' => 'GOOD-1', 'name' => 'Valid Product', 'price' => '24,90 ₾', 'stock' => 4],
+                ['id' => 'NO-PRICE', 'name' => 'Missing Price', 'quantity' => 2],
+                ['id' => 'USD-1', 'name' => 'Wrong Currency', 'price' => 18, 'currency' => 'USD', 'stock' => 1],
+                ['id' => 'BAD-CURRENCY', 'name' => 'Invalid Currency', 'price' => 18, 'currency' => 'GE', 'stock' => 1],
+                ['id' => 'BAD-STOCK', 'name' => 'Invalid Stock', 'price' => 18, 'currency' => 'GEL', 'stock' => 'many'],
+                ['id' => 'SYMBOL-USD', 'name' => 'Dollar Price', 'price' => '$19.90', 'stock' => 1],
+            ],
+        ])]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Validated JSON catalog',
+            'url' => 'https://example.com/items.json',
+        ]);
+
+        app(KnowledgeIngestionService::class)->ingest($source);
+
+        $this->assertSame(1, $source->fresh()->items_found);
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'GOOD-1', 'price' => 24.90, 'stock' => 4]);
+        foreach (['NO-PRICE', 'USD-1', 'BAD-CURRENCY', 'BAD-STOCK', 'SYMBOL-USD'] as $sku) {
+            $this->assertDatabaseMissing('products', ['agent_id' => $agent->id, 'sku' => $sku]);
+        }
+    }
+
+    public function test_json_catalog_refresh_updates_products_deactivates_missing_rows_and_rolls_back_failures(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        Http::fakeSequence()
+            ->push(['items' => [
+                ['id' => 'REFRESH-A', 'name' => 'Refresh A', 'price' => 20, 'quantity' => 2],
+                ['id' => 'REFRESH-B', 'name' => 'Refresh B', 'price' => 30, 'quantity' => 3],
+            ]])
+            ->push(['products' => [
+                ['id' => 'REFRESH-A', 'name' => 'Refresh A updated', 'price' => 22.50, 'quantity' => 8],
+            ]])
+            ->push('{"items":', 200, ['Content-Type' => 'application/json']);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Refreshable JSON catalog',
+            'url' => 'https://example.com/refresh.json',
+        ]);
+        $service = app(KnowledgeIngestionService::class);
+
+        $service->ingest($source);
+        $service->ingest($source->fresh());
+
+        $this->assertDatabaseHas('products', [
+            'agent_id' => $agent->id,
+            'sku' => 'REFRESH-A',
+            'name' => 'Refresh A updated',
+            'price' => 22.50,
+            'stock' => 8,
+            'is_active' => true,
+        ]);
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'REFRESH-B', 'is_active' => false]);
+        $this->assertSame(0, $source->fresh()->items_created);
+        $this->assertSame(1, $source->fresh()->items_updated);
+        $lastKnownHash = $source->fresh()->content_hash;
+
+        try {
+            $service->ingest($source->fresh());
+            $this->fail('Malformed JSON must not replace a working catalog.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('invalid JSON', $exception->getMessage());
+        }
+
+        $source->refresh();
+        $this->assertSame('ready', $source->status);
+        $this->assertSame($lastKnownHash, $source->content_hash);
+        $this->assertNotNull($source->error);
+        $this->assertTrue($agent->products()->where('sku', 'REFRESH-A')->firstOrFail()->is_active);
+        $this->assertFalse($agent->products()->where('sku', 'REFRESH-B')->firstOrFail()->is_active);
+        $this->assertSame('Refresh A updated', $source->chunks()->where('kind', 'product')->value('title'));
+    }
+
+    public function test_json_catalog_enforces_the_configured_item_limit(): void
+    {
+        $this->seed();
+        config(['legatus.commerce_max_catalog_products' => 1]);
+        $agent = Agent::firstOrFail();
+        Http::fake(['https://example.com/large.json' => Http::response(['data' => [
+            ['id' => 'LIMIT-1', 'name' => 'First', 'price' => 10],
+            ['id' => 'LIMIT-2', 'name' => 'Second', 'price' => 12],
+        ]])]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Too large JSON catalog',
+            'url' => 'https://example.com/large.json',
+        ]);
+
+        try {
+            app(KnowledgeIngestionService::class)->ingest($source);
+            $this->fail('An oversized catalog must be rejected.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('safe limit is 1', $exception->getMessage());
+        }
+
+        $this->assertSame('failed', $source->fresh()->status);
+        $this->assertSame(0, $agent->products()->whereIn('sku', ['LIMIT-1', 'LIMIT-2'])->count());
+    }
+
     public function test_embedding_batches_do_not_skip_chunks_after_updates(): void
     {
         $this->seed();

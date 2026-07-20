@@ -1,9 +1,25 @@
 @extends('layouts.app')
-@section('title', $agent->business_name.' · AI assistant')
+@php
+    $assistantName = $agent->assistantDisplayName();
+    $assistantIntroduction = $agent->hasCustomAssistantName()
+        ? "მე ვარ {$assistantName} — {$agent->business_name}-ის AI ასისტენტი."
+        : "მე ვარ {$agent->business_name}-ის AI ასისტენტი.";
+    $widgetTheme = $agent->widgetTheme();
+@endphp
+@section('title', $assistantName.' · '.$agent->business_name)
 @section('body')
+<style nonce="{{ request()->attributes->get('csp_nonce') }}">
+    .chatwindow{--chat-primary:{{ $widgetTheme['primary'] }};--chat-accent:{{ $widgetTheme['accent'] }};--chat-primary-foreground:{{ $widgetTheme['primary_foreground'] }};--chat-accent-foreground:{{ $widgetTheme['accent_foreground'] }}}
+    .chatwindow .demo-head{background:var(--chat-primary);color:var(--chat-primary-foreground)}
+    .chatwindow .demo-head .avatar{background:var(--chat-accent);color:var(--chat-accent-foreground)}
+    .chatwindow .demo-head .person small{color:var(--chat-primary-foreground);opacity:.76}
+    .chatwindow .demo-head .tag{border-color:currentColor;background:transparent;color:var(--chat-primary-foreground)}
+    .chatwindow .bubble.user{background:var(--chat-primary);color:var(--chat-primary-foreground)}
+    .chatwindow .composer .btn{background:var(--chat-accent);color:var(--chat-accent-foreground)}
+</style>
 <div class="chatpage"><div class="chatwindow">
-    <div class="demo-head"><div class="person"><span class="avatar">{{ mb_strtoupper(mb_substr($agent->business_name, 0, 1)) }}</span><div><strong>{{ $agent->business_name }}</strong><small>● Online · AI sales & shopping ambassador · Powered by Legatus</small></div></div><div style="display:flex;gap:7px"><button type="button" class="tag" id="new-conversation" style="cursor:pointer">New conversation ↻</button><span class="tag">Instagram-style demo</span>@auth<a class="tag" href="{{ route('dashboard') }}">Dashboard ↗</a>@endauth</div></div>
-    <div id="messages"><div class="bubble ai">გამარჯობა! 👋 მე ვარ {{ $agent->business_name }}-ის AI ასისტენტი. დაგეხმარებით არჩევანში, ფასისა და მარაგის გადამოწმებაში, მიწოდებასა და საბითუმო მოთხოვნაში. რას ეძებთ?</div></div>
+    <div class="demo-head"><div class="person"><span class="avatar">{{ mb_strtoupper(mb_substr($assistantName, 0, 1)) }}</span><div><strong>{{ $assistantName }} · {{ $agent->business_name }}</strong><small>● Online · AI sales & shopping ambassador · Powered by Legatus</small></div></div><div style="display:flex;gap:7px"><button type="button" class="tag" id="new-conversation" style="cursor:pointer">New conversation ↻</button><span class="tag">Instagram-style demo</span>@auth<a class="tag" href="{{ route('dashboard') }}">Dashboard ↗</a>@endauth</div></div>
+    <div id="messages"><div class="bubble ai">გამარჯობა! 👋 {{ $assistantIntroduction }} დაგეხმარებით არჩევანში, ფასისა და მარაგის გადამოწმებაში, მიწოდებასა და საბითუმო მოთხოვნაში. რას ეძებთ?</div></div>
     <div class="suggestions"><button data-q="ვეძებ ოსტატი და მარგარიტას მსგავს თანამედროვე და იდუმალ წიგნს, 30 ლარამდე">✨ Personal shopper</button><button data-q="Piranesi რა ღირს და 2 ცალი მარაგშია?">💸 Price + stock</button><button data-q="თბილისში ხვალ ჩამომივა?">🚚 Delivery</button><button data-q="Convenience Store Woman-ის 10 ცალი მინდა და 18% ფასდაკლებას ვითხოვ">📦 Wholesale offer</button><button data-q="ოპერატორთან დამაკავშირე">🙋 Human handoff</button></div>
     <form class="composer" id="chat-form"><input id="message" autocomplete="off" maxlength="1500" placeholder="დაწერეთ შეტყობინება..."><button class="btn" type="submit">გაგზავნა ↑</button></form>
 </div></div>
@@ -20,7 +36,7 @@ function saveToken(value){visitorToken=value;try{localStorage.setItem(storageKey
 function clearToken(){visitorToken=null;cursor=0;seen.clear();try{localStorage.removeItem(storageKey)}catch{}}
 function requestId(){return crypto.randomUUID?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&3|8)).toString(16)})}
 function bubble(text,role,{products=[],sources=[],tools=[],confidence=null,reason=null,messageId=null,human=false}={}){
- const el=document.createElement('div');el.className='bubble '+role;if(human){const badge=document.createElement('small');badge.textContent='Human operator';badge.style.cssText='display:block;color:#3c735e;font-weight:700;margin-bottom:5px';el.append(badge)}const copy=document.createElement('div');copy.textContent=text;el.append(copy);
+ const el=document.createElement('div');el.className='bubble '+role;if(human){const badge=document.createElement('small');badge.textContent='Human operator';badge.style.cssText='display:block;color:var(--chat-primary);font-weight:700;margin-bottom:5px';el.append(badge)}const copy=document.createElement('div');copy.textContent=text;el.append(copy);
  if(products.length){const row=document.createElement('div');row.className='product-row';products.forEach(product=>{let productUrl=null;try{const candidate=new URL(product.url);if(candidate.protocol==='https:'||candidate.protocol==='http:')productUrl=candidate.href}catch{}const card=document.createElement(productUrl?'a':'div');card.className='product-mini';if(productUrl){card.href=productUrl;card.target='_blank';card.rel='noopener noreferrer';card.style.color='inherit';card.style.textDecoration='none'}const name=document.createElement('b'),meta=document.createElement('span');name.textContent=product.name;meta.textContent=Number(product.price).toFixed(2)+' ₾ · '+(product.stock>0?product.stock+' მარაგში':'ამოიწურა');card.append(name,meta);row.append(card)});el.append(row)}
  if(role==='ai'&&(sources.length||tools.length||confidence!==null||reason)){const proof=document.createElement('div');proof.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;padding-top:9px;border-top:1px solid #e7ece8';sources.slice(0,4).forEach(source=>proof.append(chip('Grounded · '+(source.label||source.type||'Knowledge')+freshness(source),'#edf4ef','#426557')));if(confidence!==null)proof.append(chip('Confidence · '+Math.round(confidence*100)+'%','#eef4ff','#365c8a'));tools.slice(0,5).forEach(tool=>proof.append(chip('Action · '+tool,'#f1f0ff','#554c8a')));if(reason)proof.append(chip('Escalated · '+reason,'#fff3df','#8a5b19'));el.append(proof)}
  if(role==='ai'&&messageId){const rate=document.createElement('div');rate.style.cssText='display:flex;gap:6px;margin-top:9px';const label=document.createElement('small');label.textContent='Was this useful?';label.style.color='#76847f';rate.append(label);[['👍','helpful'],['👎','unhelpful']].forEach(([icon,value])=>{const button=document.createElement('button');button.type='button';button.textContent=icon;button.style.cssText='border:1px solid #dfe7e1;background:white;border-radius:8px;cursor:pointer';button.onclick=()=>feedback(messageId,value,rate);rate.append(button)});el.append(rate)}
