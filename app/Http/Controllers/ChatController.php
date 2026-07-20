@@ -46,7 +46,7 @@ class ChatController extends Controller
             $visitorToken = $identity['token'];
         }
 
-        $respond = fn (): array => Cache::lock('public-chat-conversation:'.$agent->id.':'.hash('sha256', $visitorId), 600)
+        $respond = fn (): array => Cache::lock('public-chat-conversation:'.$agent->id.':'.hash('sha256', $visitorId), 60)
             ->block(10, fn (): array => $this->processMessage(
                 $agent,
                 $service,
@@ -71,7 +71,7 @@ class ChatController extends Controller
         }
 
         try {
-            $payload = Cache::lock($cacheKey.':lock', 90)->block(10, function () use ($cacheKey, $respond, $visitorToken, $data): array {
+            $payload = Cache::lock($cacheKey.':lock', 60)->block(10, function () use ($cacheKey, $respond, $visitorToken, $data): array {
                 if ($cached = Cache::get($cacheKey)) {
                     return $this->ownedResponse($cached, $visitorToken, $data['request_id']);
                 }

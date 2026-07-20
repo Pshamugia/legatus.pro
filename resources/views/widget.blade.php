@@ -36,6 +36,7 @@
     const messageUrl = @json(route('chat.message', $agent));
     const historyUrl = @json(route('chat.history', $agent));
     const storageKey = 'legatus_widget_visitor_token_{{ $agent->slug }}';
+    const requestDeadlineMs = 38000;
     let visitorToken = readToken();
     let cursor = 0;
     let sending = false;
@@ -200,29 +201,33 @@
         }
     }
 
-    async function postMessage(payload) {
+    async function postMessage(payload, signal) {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
                 const response = await fetch(messageUrl, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                     body: JSON.stringify(payload),
+                    signal,
                 });
                 if (response.status === 401 && payload.visitor_token && attempt === 0) {
                     clearToken();
                     payload.visitor_token = null;
                     continue;
                 }
-                if (response.status === 409 && attempt === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 450));
-                    continue;
-                }
                 return response;
             } catch (error) {
-                if (attempt === 1) throw error;
+                if (error.name === 'AbortError' || attempt === 1) throw error;
                 await new Promise(resolve => setTimeout(resolve, 450));
             }
         }
+    }
+
+    async function responseData(response) {
+        const type = response.headers.get('content-type') || '';
+        if (!type.includes('application/json')) throw new Error(`Unexpected server response (${response.status})`);
+
+        return response.json();
     }
 
     async function send(text) {
@@ -234,6 +239,8 @@
         input.value = '';
         input.disabled = true;
         sendButton.disabled = true;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), requestDeadlineMs);
 
         try {
             const response = await postMessage({
@@ -241,11 +248,12 @@
                 visitor_token: visitorToken,
                 request_id: requestId(),
                 channel: 'widget',
-            });
+            }, controller.signal);
 
-            if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+            const data = await responseData(response);
 
-            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || `Request failed: ${response.status}`);
+
             saveToken(data.visitor_token);
             if (data.customer_message_id) seen.add(data.customer_message_id);
             if (data.message_id) seen.add(data.message_id);
@@ -256,8 +264,9 @@
                 reason: data.escalation_reason || null,
             });
         } catch (error) {
-            add('კავშირი შეფერხდა. კიდევ სცადეთ.', 'ai');
+            add(error.name === 'AbortError' ? 'პასუხმა დროის ლიმიტს გადააჭარბა. გთხოვთ ხელახლა სცადოთ.' : 'კავშირი შეფერხდა. გთხოვთ ხელახლა სცადოთ.', 'ai');
         } finally {
+            clearTimeout(timer);
             sending = false;
             input.disabled = false;
             sendButton.disabled = false;

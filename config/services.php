@@ -4,15 +4,17 @@ return [
 
     'openai' => [
         'key' => env('OPENAI_API_KEY'),
-        'model' => env('OPENAI_MODEL', 'gpt-5.6-sol'),
+        'model' => env('OPENAI_MODEL', 'gpt-5.6-luna'),
         'moderation_model' => env('OPENAI_MODERATION_MODEL', 'omni-moderation-latest'),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
-        'timeout' => (int) env('OPENAI_TIMEOUT', 45),
-        'connect_timeout' => (int) env('OPENAI_CONNECT_TIMEOUT', 10),
-        'retries' => (int) env('OPENAI_RETRIES', 2),
-        'max_tool_rounds' => (int) env('OPENAI_MAX_TOOL_ROUNDS', 4),
+        'timeout' => (int) env('OPENAI_TIMEOUT', 18),
+        'connect_timeout' => (int) env('OPENAI_CONNECT_TIMEOUT', 5),
+        'retries' => (int) env('OPENAI_RETRIES', 1),
+        'max_tool_rounds' => (int) env('OPENAI_MAX_TOOL_ROUNDS', 2),
         'max_output_tokens' => (int) env('OPENAI_MAX_OUTPUT_TOKENS', 900),
-        'reasoning_effort' => env('OPENAI_REASONING_EFFORT', 'low'),
+        'reasoning_effort' => env('OPENAI_REASONING_EFFORT', 'none'),
+        'total_timeout' => (int) env('OPENAI_TOTAL_TIMEOUT', 28),
+        'moderation_timeout' => (int) env('OPENAI_MODERATION_TIMEOUT', 7),
     ],
 
     /*
