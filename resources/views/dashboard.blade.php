@@ -41,7 +41,23 @@
             </section>
             <aside>
                 <div class="agent-card"><div class="person"><span class="avatar" style="background:var(--lime);color:var(--green)">L</span><div><strong>{{ $agent->name }}</strong><small style="color:#bcd0c9">AI Sales Employee</small></div></div><p>{{ $agent->business_name }}-ის პროდუქტებს, პოლიტიკას და ბრენდის ტონს იყენებს გადამოწმებული პასუხებისთვის.</p><div style="display:flex;justify-content:space-between;font-size:12px"><span>Knowledge readiness</span><b>{{ $metrics['knowledge_readiness'] }}%</b></div><div class="progress" style="margin-top:9px"><i style="width:{{ $metrics['knowledge_readiness'] }}%"></i></div></div>
-                <div class="panel" style="margin-top:18px"><h3>Channel status</h3><p>● Website demo & widget <span class="up">Available</span></p><p>◉ Messenger <span class="channel">Not connected</span></p><p>◎ Instagram <span class="channel">Not connected</span></p><p style="color:var(--muted);font-size:12px">Meta channels require a public HTTPS webhook and approved Meta credentials; they are not part of this local demo.</p></div>
+                <div class="panel" style="margin-top:18px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><h3>Channel status</h3><a class="channel" href="{{ route('channels.index') }}">Manage →</a></div>
+                    <p>● Website widget <span class="up">Ready</span></p>
+                    @foreach(['facebook' => 'Messenger', 'instagram' => 'Instagram'] as $provider => $label)
+                        @php($channelState = $channelStatuses[$provider])
+                        <p>{{ $provider === 'facebook' ? '◉' : '◎' }} {{ $label }}
+                            @if($channelState['connected'])
+                                <span class="up">Connected{{ $channelState['name'] ? ' · '.$channelState['name'] : '' }}</span>
+                            @elseif($channelState['needs_attention'])
+                                <span style="color:#9b5b12">Needs attention</span>
+                            @else
+                                <span class="channel">Not connected</span>
+                            @endif
+                        </p>
+                    @endforeach
+                    <p style="color:var(--muted);font-size:12px">Website, Facebook, and Instagram use the same grounded agent and human Inbox.</p>
+                </div>
             </aside>
         </div>
         <section class="panel" id="products" style="margin-top:18px;scroll-margin-top:20px">

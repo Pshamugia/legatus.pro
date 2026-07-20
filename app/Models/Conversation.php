@@ -18,9 +18,19 @@ class Conversation extends Model
         return $this->belongsTo(Agent::class);
     }
 
+    public function channelConnection(): BelongsTo
+    {
+        return $this->belongsTo(ChannelConnection::class);
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(Message::class);
+    }
+
+    public function channelMessages(): HasMany
+    {
+        return $this->hasMany(ChannelMessage::class);
     }
 
     public function lead(): HasOne

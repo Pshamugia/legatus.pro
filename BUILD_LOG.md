@@ -154,7 +154,7 @@ The release-candidate pass added:
 - application security headers and fully stateless public message/history/feedback JSON endpoints with cookie, session, and CSRF middleware removed;
 - production-default controls for registration, demo login, and offline fallback.
 
-The project now exposes six Legatus Artisan commands: demo bootstrap, evaluation, knowledge sync, OpenAI verification, privacy purge, and reservation expiry.
+The project now exposes nine Legatus Artisan commands: demo bootstrap, evaluation, knowledge sync, OpenAI verification, privacy purge, reservation expiry, commerce connection/sync, and durable channel-outbox recovery.
 
 ### Iteration 11 — Model-independent claims and public-channel durability
 
@@ -228,6 +228,9 @@ The automated suite covers these behavior families:
 - operator ownership, replies, release, and close flows;
 - authentication, membership roles, and cross-tenant denial;
 - widget script/frame, stateless signed visitor/history ownership, human-reply synchronization, feedback authorization, durable cache-loss idempotency, and CSP nonce behavior;
+- explicit Meta account selection, OAuth state binding, signed/stateless webhooks, native human echoes, attachment handoff, provider deduplication, durable outbox recovery, monotonic delivery states, and ambiguous-send handling;
+- authoritative live-commerce reconciliation, signed connector requests, public-origin/DNS controls, response/schema limits, unchanged-product write avoidance, and live price/stock/delivery validation;
+- public Privacy, Terms, and Data Deletion pages required for a deployer-owned Meta application;
 - server-side discount, exact HMAC consent evidence, pre-persistence/retention redaction, delivery-policy, quota/failure, low-confidence, strict factual-claim coverage, and model-intent-independent guardrails;
 - Analytics tenant scoping and evaluation runs;
 - response feedback recording and helpfulness aggregation.
@@ -244,6 +247,8 @@ php artisan legatus:verify-openai --shopping
 php artisan legatus:eval --live
 php artisan legatus:purge-expired-data
 php artisan legatus:expire-reservations
+php artisan legatus:sync-commerce
+php artisan legatus:dispatch-channel-outbox
 ```
 
 Live checks consume OpenAI credits and require the private key in `.env`.
@@ -252,24 +257,26 @@ Live checks consume OpenAI credits and require the private key in `.env`.
 
 ## Final release-verification snapshot
 
-- `php artisan test`: **95 passed, 537 assertions**.
+- `php artisan test`: **140 passed, 873 assertions**.
 - `php artisan legatus:eval`: **10 passed, 0 failed**, including price, stock, delivery, shopping, budget, handoff, wholesale, discount approval, and prompt-injection boundaries.
 - Live `gpt-5.6-sol` shopping health check: completed in Georgian with `save_shopping_preferences`, `recommend_products`, and `check_stock`; no server guardrail or handoff was triggered.
 - Demo database: 12 products, 3 knowledge sources, 4 knowledge chunks, 6 customer stories, 14 story messages, 2 qualified leads, 1 pending reservation, and 10 active eval cases.
-- HTTP smoke: landing, demo chat, widget frame, widget loader, health endpoint, and authenticated dashboard returned 200; CSP nonce and framing policy checks passed.
+- HTTP smoke: landing, Privacy, Terms, Data Deletion, demo chat, widget frame, widget loader, and health endpoint returned 200; the unconfigured Meta verification route failed closed with 503, and the widget loader remained stateless with no `Set-Cookie` header.
 - Production cache build, Vite production build, strict Composer validation, Pint, Composer advisory audit, and npm audit all passed; both dependency audits reported zero known vulnerabilities.
 - The temporary local smoke-test server was stopped and Laravel's local optimized caches were cleared after verification so deployment cannot inherit stale local configuration.
 
-## Evidence boundaries and unfinished external work
+## Evidence boundaries and unfinished external work — July 20 release
 
-The repository demonstrates the standalone application, live OpenAI path, web widget, tools, ingestion, handoff, tenant controls, Analytics, guardrails, and evaluations. Seeded social conversations and seeded model runs are explicitly simulated demo data; only a newly completed web/OpenAI run is evidence of a live execution.
+The repository now implements the standalone application, live OpenAI path, one-script website widget, Facebook/Instagram OAuth and signed webhook transport, durable queue/outbox processing, human Inbox, signed commerce connector, tools, ingestion, tenant controls, Analytics, guardrails, evaluations, and Meta-required public legal pages. Seeded social conversations and seeded model runs remain explicitly simulated demo data.
+
+The OpenAI path was executed against `gpt-5.6-sol` and completed a Georgian shopping flow with real tool calls. The Bukinistebi connector was also executed against its real local catalogue database: the authoritative snapshot exposed 2,114 visible products and live search/availability/delivery returned real store values. This is implementation evidence, not a claim that the new release is already deployed publicly.
 
 It does **not** claim that the following external work is complete:
 
-- a public HTTPS deployment;
+- deployment of this July 20 code snapshot to both public hosts;
 - a recorded demo video or final screenshots;
-- Instagram/Messenger OAuth, app review, or webhook integration;
-- Shopify/WooCommerce integration;
+- Meta Business Verification/App Review or real Facebook/Instagram acceptance message IDs;
+- a native Shopify/WooCommerce app (the implemented boundary is the signed Universal Commerce API);
 - production privacy/compliance certification;
 - external penetration testing.
 

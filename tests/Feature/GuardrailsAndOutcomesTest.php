@@ -212,6 +212,36 @@ class GuardrailsAndOutcomesTest extends TestCase
         $this->assertDatabaseHas('agent_runs', ['response_id' => 'ungrounded-price']);
     }
 
+    public function test_reservation_factual_claim_without_a_successful_hold_is_blocked(): void
+    {
+        [$agent] = $this->salesContext();
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'ungrounded-reservation', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'text' => 'Done.',
+                'intent' => 'discovery',
+                'confidence' => .99,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [],
+                'sources' => [],
+                'factual_claims' => [[
+                    'type' => 'reservation',
+                    'product_id' => null,
+                    'amount' => null,
+                    'quantity' => 1,
+                    'reference' => 'reservation created',
+                ]],
+            ])]]]], 'usage' => []]);
+
+        $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Please reserve one.'])
+            ->assertOk()
+            ->assertJsonPath('handoff', true)
+            ->assertJsonPath('escalation_reason', 'A reservation factual claim was not backed by a successful hold.')
+            ->assertJsonMissing(['text' => 'Done.']);
+    }
+
     public function test_empty_knowledge_search_cannot_authorize_an_unsupported_policy_claim(): void
     {
         [$agent] = $this->salesContext();

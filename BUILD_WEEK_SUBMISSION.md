@@ -35,7 +35,7 @@ For a shopper, Legatus can:
 - escalate low-confidence, policy-sensitive, or discount-approval cases;
 - give the operator the transcript, handoff reason, summary, priority, and suggested reply.
 
-The implemented customer surface is a one-line embeddable web widget plus the live demo interface. Instagram and Messenger adapters are planned next integrations, not claimed as completed connectors.
+The implemented customer surfaces are a one-line embeddable web widget, Facebook Messenger, and Instagram Direct. Meta transport code is complete, but public availability is described separately from implementation: it still depends on the deployed Meta app's permissions/App Review and real-account acceptance evidence.
 
 ## Why this is an agent, not a chatbot
 
@@ -139,11 +139,11 @@ The project’s core promise is not “replace the owner.” It is “never wast
 - Guardrails, traces, Analytics, and evaluations
 - Curated demo data and complete local/deployment documentation
 
-The curated social-inbox conversations and model traces are explicitly labeled `simulated_instagram`, `simulated_messenger`, and `simulated`; they demonstrate the UX without claiming a live Meta connector or a live GPT‑5.6 execution. The web demo/widget is the real implemented customer channel.
+Curated social-inbox rows remain explicitly labeled `simulated_instagram`, `simulated_messenger`, and `simulated`; they are never used as proof of public Meta traffic. Proof of the implementation comes from signed-webhook/OAuth/queue integration tests, while proof of launch requires recorded real Facebook and Instagram message IDs. Real GPT‑5.6 execution is verified separately through the live OpenAI health command.
 
 ## What comes next
 
-- Meta Messenger and Instagram webhook/OAuth adapters
+- Meta App Review and public-account acceptance beyond owned/test accounts
 - Shopify and WooCommerce catalogue/order connectors
 - streaming responses and background ingestion jobs
 - billing, plan entitlements, organization-wide budgets, and deeper revenue attribution (basic daily agent run/token ceilings already exist)

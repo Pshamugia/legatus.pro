@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Agent extends Model
 {
@@ -30,8 +31,18 @@ class Agent extends Model
         return $this->hasMany(Conversation::class);
     }
 
+    public function channelConnections(): HasMany
+    {
+        return $this->hasMany(ChannelConnection::class);
+    }
+
     public function knowledgeSources(): HasMany
     {
         return $this->hasMany(KnowledgeSource::class);
+    }
+
+    public function commerceConnection(): HasOne
+    {
+        return $this->hasOne(CommerceConnection::class);
     }
 }

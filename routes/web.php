@@ -7,6 +7,8 @@ use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\KnowledgeController;
+use App\Http\Controllers\MetaConnectionController;
+use App\Http\Controllers\MetaWebhookController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\WidgetController;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -17,6 +19,23 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('/', [AgentController::class, 'landing'])->name('landing');
+Route::view('/privacy', 'privacy')->name('privacy');
+Route::view('/terms', 'terms')->name('terms');
+Route::view('/data-deletion', 'data-deletion')->name('data-deletion');
+Route::withoutMiddleware([
+    EncryptCookies::class,
+    AddQueuedCookiesToResponse::class,
+    StartSession::class,
+    ShareErrorsFromSession::class,
+    ValidateCsrfToken::class,
+])->group(function (): void {
+    Route::get('/webhooks/meta', [MetaWebhookController::class, 'verify'])
+        ->middleware('throttle:120,1')
+        ->name('webhooks.meta.verify');
+    Route::post('/webhooks/meta', [MetaWebhookController::class, 'receive'])
+        ->middleware('throttle:600,1')
+        ->name('webhooks.meta.receive');
+});
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'login'])->name('login');
     Route::post('/login', [AuthController::class, 'authenticate'])->middleware('throttle:10,1')->name('login.store');
@@ -35,8 +54,16 @@ Route::withoutMiddleware([
     Route::get('/demo/{agent:slug}/history', [ChatController::class, 'history'])->middleware('throttle:public-history')->name('chat.history');
     Route::post('/demo/{agent:slug}/messages/{message}/feedback', [ChatController::class, 'feedback'])->middleware('throttle:30,1')->name('chat.feedback');
 });
-Route::get('/widget/{agent:slug}.js', [WidgetController::class, 'script'])->name('widget.script');
-Route::get('/widget/{agent:slug}', [WidgetController::class, 'frame'])->name('widget.frame');
+Route::withoutMiddleware([
+    EncryptCookies::class,
+    AddQueuedCookiesToResponse::class,
+    StartSession::class,
+    ShareErrorsFromSession::class,
+    ValidateCsrfToken::class,
+])->group(function (): void {
+    Route::get('/widget/{agent:slug}.js', [WidgetController::class, 'script'])->name('widget.script');
+    Route::get('/widget/{agent:slug}', [WidgetController::class, 'frame'])->name('widget.frame');
+});
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/app', [AgentController::class, 'dashboard'])->name('dashboard');
@@ -54,6 +81,21 @@ Route::middleware('auth')->group(function () {
     Route::post('/app/inbox/{conversation}/close', [InboxController::class, 'close'])->name('inbox.close');
     Route::get('/app/inbox/{conversation}/poll', [InboxController::class, 'poll'])->name('inbox.poll');
     Route::get('/app/channels', [ChannelController::class, 'index'])->name('channels.index');
+    Route::get('/app/channels/meta/{provider}/connect', [MetaConnectionController::class, 'connect'])
+        ->whereIn('provider', ['facebook', 'instagram'])
+        ->name('channels.meta.connect');
+    Route::get('/auth/meta/{provider}/callback', [MetaConnectionController::class, 'callback'])
+        ->whereIn('provider', ['facebook', 'instagram'])
+        ->name('channels.meta.callback');
+    Route::get('/app/channels/meta/{provider}/select/{selection}', [MetaConnectionController::class, 'selection'])
+        ->whereIn('provider', ['facebook', 'instagram'])
+        ->name('channels.meta.selection');
+    Route::post('/app/channels/meta/{provider}/select/{selection}', [MetaConnectionController::class, 'select'])
+        ->whereIn('provider', ['facebook', 'instagram'])
+        ->middleware('throttle:20,1')
+        ->name('channels.meta.select');
+    Route::delete('/app/channels/meta/{connection}', [MetaConnectionController::class, 'disconnect'])
+        ->name('channels.meta.disconnect');
     Route::get('/app/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
     Route::get('/app/settings', [SettingsController::class, 'index'])->name('settings.index');
     Route::put('/app/settings', [SettingsController::class, 'update'])->name('settings.update');

@@ -44,13 +44,17 @@ This is a standalone OpenAI Build Week project, designed as an independent SaaS 
 
 - Includes registration, login, organizations, team roles, settings, and tenant-scoped resources.
 - Provides a real one-line embeddable website widget with agent-bound, expiring signed visitor tokens and persistent conversation history. Its public message, history, and feedback JSON routes are stateless and do not depend on browser cookies or a Laravel session.
+- Connects a business-owned Facebook Page and Instagram Professional account through official Meta OAuth buttons, verifies signed webhooks, deduplicates provider events, and sends queued replies back to the originating channel.
+- Uses one channel-neutral conversation engine for website, Messenger, and Instagram traffic, so grounding, commercial guardrails, human handoff, and audit evidence stay identical across surfaces.
+- Supports signed live-commerce connections for authoritative catalogue reconciliation, real-time price/stock checks, delivery quotes, and product links without exposing the commerce secret to the browser.
+- Refreshes authoritative commerce discovery catalogues hourly by default, preloads existing identities, and skips unchanged rows; customer-facing price and stock are still verified live for each question.
 - Synchronizes human Inbox replies back into the customer chat and protects retries with visitor-scoped UUID request IDs, a database uniqueness constraint, durable response snapshots, cache-assisted replay, and per-conversation locks. The same completed request can be replayed after a cache loss without creating another customer message or model run.
 - Sends a per-request CSP nonce with every HTML response and permits inline scripts only when they carry that nonce; `script-src` does not enable `unsafe-inline`.
 - Reports real conversation, automation, handoff, lead, influenced-value, recommendation, helpfulness, token, and latency metrics.
 - Includes deterministic offline evaluations and optional live GPT‑5.6 evaluations.
 - Ships with a Georgian-first, responsive demo experience and curated demo data.
 
-The implemented customer channel is the web demo/widget. Instagram and Messenger webhook adapters are deliberately listed as future integrations; the current product does not claim a live Meta connection. Seeded rows labeled `simulated_instagram` or `simulated_messenger`, and runs labeled `simulated`, are fictional judge-facing examples and are excluded or identified separately in judge-facing metrics.
+The web widget and the Facebook/Instagram transport are implemented and covered by automated integration tests. A public Meta launch still requires the deployer's Meta app credentials, correct Page/account selection, webhook configuration, permissions/App Review, a persistent queue worker, and real-account acceptance evidence. Seeded rows labeled `simulated_instagram` or `simulated_messenger`, and runs labeled `simulated`, remain fictional judge-facing examples and are never presented as real Meta traffic.
 
 ## Safety model
 
@@ -74,7 +78,7 @@ See [SECURITY.md](SECURITY.md) for the complete threat and control model.
 ## Architecture
 
 ```text
-Customer web chat / widget
+Website widget / Facebook Messenger / Instagram Direct
           │
           ▼
 Laravel conversation service ───────────────► Human operator Inbox
@@ -139,12 +143,13 @@ OPENAI_API_KEY=your_private_key
 OPENAI_MODEL=gpt-5.6-sol
 OPENAI_MODERATION_MODEL=omni-moderation-latest
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_TIMEOUT=45
-OPENAI_CONNECT_TIMEOUT=10
-OPENAI_RETRIES=2
+OPENAI_TIMEOUT=22
+OPENAI_CONNECT_TIMEOUT=5
+OPENAI_RETRIES=1
 OPENAI_MAX_TOOL_ROUNDS=4
 OPENAI_MAX_OUTPUT_TOKENS=900
-OPENAI_REASONING_EFFORT=low
+OPENAI_REASONING_EFFORT=none
+OPENAI_TOTAL_TIMEOUT=45
 
 LEGATUS_OFFLINE_FALLBACK=true
 LEGATUS_DAILY_AI_RUN_LIMIT=200
@@ -156,11 +161,13 @@ LEGATUS_WIDGET_FRAME_ANCESTORS=*
 
 The deterministic fallback is a local-development and offline-evaluation aid. It runs only when `LEGATUS_OFFLINE_FALLBACK=true`; production should set it to `false`. With fallback disabled, a missing key, exhausted quota, moderation outage, provider error, failed verification tool, or incomplete tool loop fails closed and creates a human handoff instead of returning an unverified sales claim.
 
+The browser waits 55 seconds while the server enforces a stricter 45-second total AI workflow budget. Keep `OPENAI_MAX_TOOL_ROUNDS=4`: a grounded shopping request may need recommendation, stock, and comparison rounds before the final answer. In production, configure PHP/web-proxy execution time above the browser deadline rather than silently cutting the request off at 30 seconds.
+
 `LEGATUS_WIDGET_FRAME_ANCESTORS=*` keeps local/demo embedding convenient. Before a public launch, replace `*` with the reviewed storefront origin (for example, `https://shop.example`); multiple CSP origins may be separated by spaces or commas.
 
 ## Artisan commands and verification
 
-The project ships with six Legatus commands:
+The project ships with nine Legatus commands:
 
 ```bash
 php artisan legatus:bootstrap-demo-tenant
@@ -169,6 +176,9 @@ php artisan legatus:sync-knowledge [--source=ID]
 php artisan legatus:verify-openai [--shopping] [--agent=SLUG_OR_ID]
 php artisan legatus:purge-expired-data
 php artisan legatus:expire-reservations
+php artisan legatus:connect-commerce AGENT_SLUG https://store.example CONNECTOR_KEY_ID
+php artisan legatus:sync-commerce [--connection=ID]
+php artisan legatus:dispatch-channel-outbox
 ```
 
 Run the complete verification set with:
@@ -179,6 +189,8 @@ php artisan legatus:verify-openai --shopping
 php artisan legatus:sync-knowledge
 php artisan legatus:purge-expired-data
 php artisan legatus:expire-reservations
+php artisan legatus:sync-commerce
+php artisan legatus:dispatch-channel-outbox
 php artisan legatus:eval
 php artisan legatus:eval --live
 php artisan test
@@ -194,4 +206,4 @@ php artisan test
 - [CHANGELOG_BUILD_WEEK.md](CHANGELOG_BUILD_WEEK.md) — concise implementation history
 - [DEPLOYMENT.md](DEPLOYMENT.md) — public HTTPS deployment checklist
 
-Public hosting, a recorded video, and final screenshots are intentionally not included in this repository and must be added by the project owner after choosing the deployment destination. Meta OAuth/webhook adapters, app review, and credentials are future integration work—not a connector waiting only for credentials.
+Production credentials, Meta App Review, a recorded video, and final screenshots are intentionally not stored in this repository. The Meta OAuth/webhook transport is implemented; public-channel availability is claimed only after the real acceptance matrix in [BUKINISTEBI_ACCEPTANCE.md](BUKINISTEBI_ACCEPTANCE.md) passes.

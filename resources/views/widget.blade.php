@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ $agent->name }} · Legatus</title>
     <style>
-        *{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#17352c;background:#f6f8f4}.shell{height:100vh;display:flex;flex-direction:column}.head{background:#173f33;color:white;padding:15px;display:flex;align-items:center;gap:10px}.avatar{width:40px;height:40px;background:#d9ff72;color:#173f33;border-radius:13px;display:grid;place-items:center;font-weight:800}.head div{flex:1}.head b,.head small{display:block}.head small{color:#b9d1c9;margin-top:2px}.close{border:0;background:#ffffff15;color:white;width:32px;height:32px;border-radius:10px;cursor:pointer}.messages{flex:1;overflow:auto;padding:17px}.bubble{max-width:86%;padding:11px 13px;border-radius:15px;margin:8px 0;font-size:13px;line-height:1.5;background:white;border:1px solid #e4e9e5}.bubble.user{margin-left:auto;background:#214d3e;color:white;border:0}.bubble.human{border-left:3px solid #5b8c77}.operator{display:block;color:#3c735e;font-size:10px;font-weight:700;margin-bottom:5px}.products{display:flex;gap:7px;overflow:auto;margin-top:8px}.product{min-width:135px;padding:9px;background:#eff4ed;border-radius:10px}.product b,.product small{display:block}.product small{margin-top:4px;color:#557166}.trace{margin-top:10px;padding-top:9px;border-top:1px solid #e5ebe6;color:#557166;font-size:10px}.trace-row{display:flex;align-items:flex-start;gap:5px;margin-top:5px}.trace-label{font-weight:700;white-space:nowrap}.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#eff5ef;border-radius:99px;padding:2px 6px}.suggest{display:flex;gap:6px;padding:8px 14px;overflow:auto}.suggest button{white-space:nowrap;border:1px solid #dce4de;background:white;border-radius:99px;padding:7px 9px;font-size:10px;cursor:pointer}.composer{display:flex;gap:7px;padding:12px;background:white;border-top:1px solid #e2e8e3}.composer input{min-width:0;flex:1;border:1px solid #dce4de;border-radius:12px;padding:11px}.composer button{border:0;background:#d9ff72;border-radius:12px;padding:0 14px;font-weight:700;cursor:pointer}.composer button:disabled{cursor:wait;opacity:.65}
+        *{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#17352c;background:#f6f8f4}.shell{height:100vh;display:flex;flex-direction:column}.head{background:#173f33;color:white;padding:15px;display:flex;align-items:center;gap:10px}.avatar{width:40px;height:40px;background:#d9ff72;color:#173f33;border-radius:13px;display:grid;place-items:center;font-weight:800}.head div{flex:1}.head b,.head small{display:block}.head small{color:#b9d1c9;margin-top:2px}.close{border:0;background:#ffffff15;color:white;width:32px;height:32px;border-radius:10px;cursor:pointer}.messages{flex:1;overflow:auto;padding:17px}.bubble{max-width:86%;padding:11px 13px;border-radius:15px;margin:8px 0;font-size:13px;line-height:1.5;background:white;border:1px solid #e4e9e5}.bubble.user{margin-left:auto;background:#214d3e;color:white;border:0}.bubble.human{border-left:3px solid #5b8c77}.operator{display:block;color:#3c735e;font-size:10px;font-weight:700;margin-bottom:5px}.products{display:flex;gap:7px;overflow:auto;margin-top:8px}.product{display:block;min-width:135px;padding:9px;background:#eff4ed;border-radius:10px;color:inherit;text-decoration:none}.product[href]:hover{outline:2px solid #d1e3d5}.product b,.product small{display:block}.product small{margin-top:4px;color:#557166}.trace{margin-top:10px;padding-top:9px;border-top:1px solid #e5ebe6;color:#557166;font-size:10px}.trace-row{display:flex;align-items:flex-start;gap:5px;margin-top:5px}.trace-label{font-weight:700;white-space:nowrap}.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#eff5ef;border-radius:99px;padding:2px 6px}.suggest{display:flex;gap:6px;padding:8px 14px;overflow:auto}.suggest button{white-space:nowrap;border:1px solid #dce4de;background:white;border-radius:99px;padding:7px 9px;font-size:10px;cursor:pointer}.composer{display:flex;gap:7px;padding:12px;background:white;border-top:1px solid #e2e8e3}.composer input{min-width:0;flex:1;border:1px solid #dce4de;border-radius:12px;padding:11px}.composer button{border:0;background:#d9ff72;border-radius:12px;padding:0 14px;font-weight:700;cursor:pointer}.composer button:disabled{cursor:wait;opacity:.65}
     </style>
 </head>
 <body>
@@ -36,7 +36,7 @@
     const messageUrl = @json(route('chat.message', $agent));
     const historyUrl = @json(route('chat.history', $agent));
     const storageKey = 'legatus_widget_visitor_token_{{ $agent->slug }}';
-    const requestDeadlineMs = 38000;
+    const requestDeadlineMs = 55000;
     let visitorToken = readToken();
     let cursor = 0;
     let sending = false;
@@ -152,10 +152,20 @@
             const row = document.createElement('div');
             row.className = 'products';
             products.forEach(product => {
-                const card = document.createElement('div');
+                let productUrl = null;
+                try {
+                    const candidate = new URL(product.url);
+                    if (candidate.protocol === 'https:' || candidate.protocol === 'http:') productUrl = candidate.href;
+                } catch (error) {}
+                const card = document.createElement(productUrl ? 'a' : 'div');
                 const name = document.createElement('b');
                 const detail = document.createElement('small');
                 card.className = 'product';
+                if (productUrl) {
+                    card.href = productUrl;
+                    card.target = '_blank';
+                    card.rel = 'noopener noreferrer';
+                }
                 name.textContent = product.name || 'Product';
                 detail.textContent = `${product.price ?? '—'} ₾ · ${product.stock ? 'მარაგშია' : 'ამოიწურა'}`;
                 card.append(name, detail);

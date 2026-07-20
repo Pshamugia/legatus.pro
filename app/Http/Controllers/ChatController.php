@@ -5,13 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Agent;
 use App\Models\Conversation;
 use App\Models\Message;
-use App\Models\Reservation;
-use App\Services\SalesAgentService;
+use App\Services\ConversationEngine;
 use App\Services\TenantContext;
-use App\Support\PrivacyRedactor;
 use App\Support\SignedVisitorToken;
 use Illuminate\Cache\LockTimeoutException;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -25,7 +22,7 @@ class ChatController extends Controller
         return view('chat', compact('agent'));
     }
 
-    public function message(Request $request, Agent $agent, SalesAgentService $service, SignedVisitorToken $tokens)
+    public function message(Request $request, Agent $agent, ConversationEngine $engine, SignedVisitorToken $tokens)
     {
         $this->ensureActive($agent);
         $data = $request->validate([
@@ -49,7 +46,7 @@ class ChatController extends Controller
         $respond = fn (): array => Cache::lock('public-chat-conversation:'.$agent->id.':'.hash('sha256', $visitorId), 60)
             ->block(10, fn (): array => $this->processMessage(
                 $agent,
-                $service,
+                $engine,
                 $data['message'],
                 $data['channel'] ?? 'web',
                 $visitorId,
@@ -156,173 +153,17 @@ class ChatController extends Controller
 
     private function processMessage(
         Agent $agent,
-        SalesAgentService $service,
+        ConversationEngine $engine,
         string $text,
         string $channel,
         string $visitorId,
         string $visitorToken,
         ?string $requestId,
     ): array {
-        $customerMessage = $requestId === null ? null : Message::query()
-            ->where('role', 'customer')
-            ->where('request_id', $requestId)
-            ->whereHas('conversation', fn ($query) => $query
-                ->where('agent_id', $agent->id)
-                ->where('visitor_id', $visitorId))
-            ->with('conversation')
-            ->latest('id')
-            ->first();
+        $payload = $engine->handle($agent, $text, $channel, $visitorId, $requestId);
+        unset($payload['conversation_id']);
 
-        if ($customerMessage && ($replay = $this->replayResponse($customerMessage, $visitorToken, $requestId))) {
-            return $replay;
-        }
-
-        $conversation = $customerMessage?->conversation ?? $agent->conversations()
-            ->where('visitor_id', $visitorId)
-            ->whereIn('status', ['ai', 'open', 'human'])
-            ->latest('id')
-            ->first() ?? $agent->conversations()->create([
-                'visitor_id' => $visitorId,
-                'status' => 'ai',
-                'channel' => $channel,
-                'customer_name' => 'Website visitor',
-            ]);
-
-        if (! $customerMessage) {
-            try {
-                $redactedText = PrivacyRedactor::text($text);
-                $messageMetadata = [
-                    'contact_evidence' => PrivacyRedactor::contactEvidence($text),
-                ];
-                if ($redactedText !== $text) {
-                    $messageMetadata['pii_redacted'] = true;
-                }
-                $customerMessage = $conversation->messages()->create([
-                    'role' => 'customer',
-                    'content' => $redactedText,
-                    'request_id' => $requestId,
-                    'metadata' => $messageMetadata,
-                ]);
-            } catch (UniqueConstraintViolationException $exception) {
-                if ($requestId === null) {
-                    throw $exception;
-                }
-
-                $customerMessage = $conversation->messages()
-                    ->where('role', 'customer')
-                    ->where('request_id', $requestId)
-                    ->firstOrFail();
-
-                if ($replay = $this->replayResponse($customerMessage, $visitorToken, $requestId)) {
-                    return $replay;
-                }
-            }
-        }
-
-        if ($conversation->status === 'human') {
-            $conversation->update(['last_message_at' => now()]);
-
-            $payload = [
-                'text' => 'შეტყობინება მიღებულია — ოპერატორი უკვე ჩართულია და ამავე საუბარში გიპასუხებთ.',
-                'intent' => 'handoff',
-                'confidence' => 1,
-                'handoff' => true,
-                'escalation_reason' => $conversation->handoff_reason,
-                'products' => [],
-                'sources' => [],
-                'tools_used' => ['human_queue'],
-                'visitor_token' => $visitorToken,
-                'customer_message_id' => $customerMessage->public_id,
-                'cursor' => $customerMessage->id,
-                'request_id' => $requestId,
-            ];
-
-            return $this->rememberResponse($customerMessage, $payload);
-        }
-
-        $reply = $service->reply($agent, $text, $conversation);
-        $reply['text'] = PrivacyRedactor::text($reply['text']);
-        $reply['products'] = $this->publicProducts($reply['products'] ?? [], $conversation);
-
-        $assistant = $conversation->messages()->create([
-            'role' => 'assistant',
-            'content' => $reply['text'],
-            'confidence' => $reply['confidence'],
-            'metadata' => [
-                'intent' => $reply['intent'],
-                'sources' => $reply['sources'] ?? [],
-                'tools_used' => $reply['tools_used'] ?? [],
-                'escalation_reason' => $reply['escalation_reason'] ?? null,
-                'products' => $reply['products'],
-                'handoff' => (bool) $reply['handoff'],
-                'request_id' => $requestId,
-            ],
-        ]);
-        $conversation->update([
-            'intent' => $reply['intent'],
-            'status' => $reply['handoff'] ? 'human' : 'ai',
-            'last_message_at' => now(),
-        ]);
-
-        $payload = $reply + [
-            'visitor_token' => $visitorToken,
-            'message_id' => $assistant->public_id,
-            'customer_message_id' => $customerMessage->public_id,
-            'cursor' => $assistant->id,
-            'request_id' => $requestId,
-        ];
-
-        return $this->rememberResponse($customerMessage, $payload);
-    }
-
-    private function replayResponse(Message $customerMessage, string $visitorToken, string $requestId): ?array
-    {
-        $snapshot = data_get($customerMessage->metadata, 'response_payload');
-        if (is_array($snapshot)) {
-            return $this->ownedResponse($snapshot, $visitorToken, $requestId);
-        }
-
-        $assistant = $customerMessage->conversation->messages()
-            ->where('role', 'assistant')
-            ->where('metadata->request_id', $requestId)
-            ->latest('id')
-            ->first();
-
-        if (! $assistant) {
-            return null;
-        }
-
-        $metadata = $assistant->metadata ?? [];
-        $payload = [
-            'text' => $assistant->content,
-            'intent' => $metadata['intent'] ?? $customerMessage->conversation->intent ?? 'answer',
-            'confidence' => $assistant->confidence,
-            'handoff' => (bool) ($metadata['handoff'] ?? false),
-            'escalation_reason' => $metadata['escalation_reason'] ?? null,
-            'products' => $metadata['products'] ?? [],
-            'sources' => $metadata['sources'] ?? [],
-            'tools_used' => $metadata['tools_used'] ?? [],
-            'message_id' => $assistant->public_id,
-            'customer_message_id' => $customerMessage->public_id,
-            'cursor' => $assistant->id,
-            'request_id' => $requestId,
-        ];
-
-        return $this->rememberResponse(
-            $customerMessage,
-            $this->ownedResponse($payload, $visitorToken, $requestId),
-        );
-    }
-
-    private function rememberResponse(Message $customerMessage, array $payload): array
-    {
-        $customerMessage->update([
-            'metadata' => array_merge($customerMessage->metadata ?? [], [
-                'response_payload' => $this->responseSnapshot($payload),
-            ]),
-        ]);
-
-        return $payload;
+        return $this->ownedResponse($payload, $visitorToken, $requestId);
     }
 
     private function responseSnapshot(array $payload): array
@@ -354,33 +195,6 @@ class ChatController extends Controller
             'tools_used' => $message->metadata['tools_used'] ?? [],
             'escalation_reason' => $message->metadata['escalation_reason'] ?? null,
         ];
-    }
-
-    private function publicProducts(iterable $products, Conversation $conversation): array
-    {
-        $products = collect($products)->values();
-        $ids = $products->pluck('id')->filter()->map(fn ($id) => (int) $id)->unique();
-        $heldByOthers = Reservation::query()
-            ->whereIn('product_id', $ids)
-            ->where('conversation_id', '!=', $conversation->id)
-            ->where('status', 'pending')
-            ->where('expires_at', '>', now())
-            ->selectRaw('product_id, SUM(quantity) as held_quantity')
-            ->groupBy('product_id')
-            ->pluck('held_quantity', 'product_id');
-
-        return $products->map(function ($product) use ($heldByOthers): array {
-            $id = (int) data_get($product, 'id');
-            $stock = max(0, (int) data_get($product, 'stock', 0) - (int) ($heldByOthers[$id] ?? 0));
-
-            return [
-                'id' => $id,
-                'name' => data_get($product, 'name'),
-                'price' => (float) data_get($product, 'price', 0),
-                'stock' => $stock,
-                'image' => data_get($product, 'image'),
-            ];
-        })->values()->all();
     }
 
     private function providedToken(Request $request): ?string

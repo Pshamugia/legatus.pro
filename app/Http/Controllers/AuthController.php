@@ -52,7 +52,7 @@ class AuthController extends Controller
         });
         $r->session()->regenerate();
 
-        return redirect()->route('dashboard');
+        return redirect()->route('onboarding');
     }
 
     public function logout(Request $r)

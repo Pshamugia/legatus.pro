@@ -26,6 +26,10 @@ Legatus is designed so the language model can reason and communicate, while Lara
 | Unnecessary lead-contact retention | Lead creation requires explicit consent and the exact contact value in the same customer message. Keyed, non-reversible HMAC fingerprints verify the value after immediate transcript redaction; the lead receives a 90-day deadline and a scheduled command removes expired name/email/phone fields while retaining anonymized outcome counts. |
 | Browser script injection / framing | HTML responses receive a fresh per-request CSP nonce. `script-src` accepts same-origin files and nonce-bearing inline blocks only and does not enable `unsafe-inline`; widget `frame-ancestors` is restricted by a validated origin list in production. |
 | Unbounded semantic scoring | Embedding retrieval scores only the newest configurable candidate pool (default 2,000, server-clamped to 50-5,000) before thresholding and final ranking. |
+| Forged or replayed social events | Meta webhook bodies require the `X-Hub-Signature-256` HMAC, provider message IDs are deduplicated in the database, and the webhook routes are stateless. Original provider payloads are not retained. |
+| Social-channel credential exposure | Meta Page tokens and pending account-selection candidates use encrypted model casts. OAuth state is session-bound, short-lived, tenant/user-bound, and account selection is explicit instead of silently connecting every managed Page. |
+| Duplicate or uncertain Meta delivery | A durable channel outbox, unique queued jobs, database status transitions, and a scheduled recovery sweep protect queue-insertion failures. Ambiguous network/5xx sends are marked `delivery_unknown` and are not automatically resent; permanent 4xx failures are surfaced to the operator. |
+| Untrusted commerce connector | Connections require a public HTTPS origin, DNS/IP validation and pinning, no redirects, HMAC-signed nonces, bounded JSON, full authoritative snapshots, strict product/live-fact schemas, atomic reconciliation, and last-known-good preservation. |
 
 ## Data handling
 
@@ -50,9 +54,10 @@ The deterministic fallback exists for local development and credit-free offline 
 
 The public demo and widget endpoints are intentionally accessible to shoppers. Signed visitor ownership protects transcript history and feedback. The public message, history, and feedback JSON routes explicitly remove cookie encryption/queuing, session startup/error sharing, and CSRF middleware, so identity never falls back to a browser session. Database-backed request IDs, response snapshots, cache, and locks protect retries; Laravel throttles protect login, registration, chat, history, and feedback routes. Application middleware adds CSP, MIME-sniffing, referrer, permissions, cross-origin-resource, and frame controls. Each HTML response gets a new script nonce and `script-src` has no `unsafe-inline` allowance. Widget framing defaults to `*` for local/demo convenience but production must set `LEGATUS_WIDGET_FRAME_ANCESTORS` to reviewed storefront origins. Production operators should still add infrastructure-level rate limiting, bot protection, abuse monitoring, and cost alerts. Source ingestion, team management, settings, Analytics, and Inbox operations remain authenticated.
 
-The current implementation does not include:
+The current implementation does not claim completion of:
 
-- Meta/Instagram/Messenger OAuth and webhook adapters, app review, or credentials
+- Meta Business Verification/App Review or production credentials for a deployer-owned Meta app
+- real-account Facebook/Instagram acceptance until recorded provider message IDs prove both directions on the public deployment
 - payment processing
 - autonomous order fulfillment
 - compliance certification
