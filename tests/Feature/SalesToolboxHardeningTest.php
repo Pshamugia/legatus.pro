@@ -8,6 +8,7 @@ use App\Services\SalesToolbox;
 use App\Support\PrivacyRedactor;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class SalesToolboxHardeningTest extends TestCase
@@ -225,6 +226,127 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame($product->id, $search['products'][0]['id']);
         $this->assertSame($product->id, $recommendations['recommendations'][0]['id']);
         $this->assertContains('verified', $recommendations['recommendations'][0]['matched_signals']);
+    }
+
+    public function test_product_search_matches_common_georgian_author_inflections(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'ქართველი ერის ისტორია',
+            'description' => 'ივანე ჯავახიშვილი',
+        ]);
+        $agent->products()->create([
+            'name' => 'თარგმანები',
+            'description' => 'ივანე მაჩაბელი',
+            'price' => 15,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+        $toolbox = app(SalesToolbox::class);
+
+        foreach (['ივანე ჯავახიშვილს', 'ივანე ჯავახიშვილის'] as $query) {
+            $result = $toolbox->execute('search_products', [
+                'query' => $query,
+                'category' => null,
+                'max_price' => null,
+            ], $agent, $conversation);
+
+            $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+        }
+    }
+
+    public function test_product_search_treats_wildcards_as_literal_text(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update(['name' => 'Save 100% Today']);
+        $agent->products()->create([
+            'name' => 'Save 1000 Today',
+            'price' => 15,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => '100%',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+    }
+
+    public function test_connected_product_search_exposes_only_a_safe_confirmable_typo_suggestion(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $agent->commerceConnection()->create([
+            'provider' => 'universal_api',
+            'name' => 'Bukinistebi live catalogue',
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'bukinistebi-test',
+            'secret' => str_repeat('s', 32),
+            'status' => 'active',
+        ]);
+        Http::fake(fn () => Http::response([
+            'data' => [],
+            'meta' => [
+                'total' => 0,
+                'did_you_mean' => 'ჯავახიშვილი',
+                'suggestion_requires_confirmation' => true,
+            ],
+        ]));
+
+        $typo = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ჯახიშვილის',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+        $this->assertSame([], $typo['products']);
+        $this->assertSame('ჯავახიშვილი', $typo['did_you_mean']);
+        $this->assertTrue($typo['suggestion_requires_confirmation']);
+
+        $unrelated = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'სრულიადუცნობი',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+        $this->assertNull($unrelated['did_you_mean']);
+        $this->assertFalse($unrelated['suggestion_requires_confirmation']);
+
+        $product->update(['description' => 'ივანე ჯავახიშვილი']);
+        $exact = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ივანე ჯავახიშვილი',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+        $this->assertSame([$product->id], collect($exact['products'])->pluck('id')->all());
+        $this->assertNull($exact['did_you_mean']);
+        Http::assertSentCount(2);
+    }
+
+    public function test_product_typo_suggestions_are_tenant_isolated(): void
+    {
+        [$agent, , $conversation] = $this->context(stock: 4);
+        $other = Agent::create([
+            'name' => 'Other assistant',
+            'slug' => 'other-tenant-suggestion',
+            'business_name' => 'Other Store',
+        ]);
+        $other->products()->create([
+            'name' => 'ქართველი ერის ისტორია',
+            'description' => 'ივანე ჯავახიშვილი',
+            'price' => 20,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ჯახიშვილის',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertNull($result['did_you_mean']);
     }
 
     private function context(int $stock = 10): array

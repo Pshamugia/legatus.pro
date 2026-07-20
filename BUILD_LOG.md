@@ -257,7 +257,7 @@ Live checks consume OpenAI credits and require the private key in `.env`.
 
 ## Final release-verification snapshot
 
-- `php artisan test`: **140 passed, 873 assertions**.
+- `php artisan test`: **157 passed, 986 assertions**.
 - `php artisan legatus:eval`: **10 passed, 0 failed**, including price, stock, delivery, shopping, budget, handoff, wholesale, discount approval, and prompt-injection boundaries.
 - Live `gpt-5.6-sol` shopping health check: completed in Georgian with `save_shopping_preferences`, `recommend_products`, and `check_stock`; no server guardrail or handoff was triggered.
 - Demo database: 12 products, 3 knowledge sources, 4 knowledge chunks, 6 customer stories, 14 story messages, 2 qualified leads, 1 pending reservation, and 10 active eval cases.

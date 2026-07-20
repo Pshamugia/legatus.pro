@@ -17,7 +17,7 @@ class SyncCommerceCatalogs extends Command
         $failed = false;
         $connections = CommerceConnection::query()
             ->when($this->option('connection'), fn ($query, $id) => $query->whereKey($id))
-            ->whereIn('status', ['active', 'pending', 'error'])
+            ->where('status', 'active')
             ->get();
 
         foreach ($connections as $connection) {

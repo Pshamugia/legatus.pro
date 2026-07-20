@@ -154,6 +154,6 @@ class SalesAgentService
             return ['text' => $summary ? "რა თქმა უნდა: {$summary}. რომელი დაგაინტერესათ?" : 'რომელი პროდუქტის ფასი გაინტერესებთ?', 'intent' => 'price', 'confidence' => .96, 'handoff' => false, 'products' => $selection->values()];
         }
 
-        return ['text' => "გამარჯობა! მე ვარ {$agent->name}, {$agent->business_name}-ის AI კონსულტანტი. შემიძლია პროდუქტის შერჩევა, ფასისა და მარაგის შემოწმება, მიწოდების დაზუსტება ან ოპერატორთან დაკავშირება. რას ეძებთ?", 'intent' => 'discovery', 'confidence' => .82, 'handoff' => false, 'products' => []];
+        return ['text' => "გამარჯობა! მე ვარ {$agent->business_name}-ის AI ასისტენტი. შემიძლია პროდუქტის შერჩევა, ფასისა და მარაგის შემოწმება, მიწოდების დაზუსტება ან ოპერატორთან დაკავშირება. რას ეძებთ?", 'intent' => 'discovery', 'confidence' => .82, 'handoff' => false, 'products' => []];
     }
 }

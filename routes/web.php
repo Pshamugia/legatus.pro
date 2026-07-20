@@ -5,6 +5,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\CommerceConnectionController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\KnowledgeController;
 use App\Http\Controllers\MetaConnectionController;
@@ -81,6 +82,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/app/inbox/{conversation}/close', [InboxController::class, 'close'])->name('inbox.close');
     Route::get('/app/inbox/{conversation}/poll', [InboxController::class, 'poll'])->name('inbox.poll');
     Route::get('/app/channels', [ChannelController::class, 'index'])->name('channels.index');
+    Route::post('/app/channels/commerce', [CommerceConnectionController::class, 'connect'])
+        ->middleware('throttle:10,1')
+        ->name('channels.commerce.connect');
+    Route::post('/app/channels/commerce/sync', [CommerceConnectionController::class, 'sync'])
+        ->middleware('throttle:10,1')
+        ->name('channels.commerce.sync');
+    Route::delete('/app/channels/commerce', [CommerceConnectionController::class, 'disconnect'])
+        ->middleware('throttle:10,1')
+        ->name('channels.commerce.disconnect');
     Route::get('/app/channels/meta/{provider}/connect', [MetaConnectionController::class, 'connect'])
         ->whereIn('provider', ['facebook', 'instagram'])
         ->name('channels.meta.connect');

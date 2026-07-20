@@ -40,6 +40,11 @@ class ChannelController extends Controller
 
         $productCount = $agent->products()->where('is_active', true)->count();
         $knowledgeSourceCount = $agent->knowledgeSources()->count();
+        $commerceConnection = $agent->commerceConnection()->first();
+        $commerceProductCount = $commerceConnection
+            ? $agent->products()->where('commerce_connection_id', $commerceConnection->id)->where('is_active', true)->count()
+            : 0;
+        $canManageChannels = in_array($tenant->role(), ['owner', 'admin'], true);
         $widgetDomains = collect(data_get($agent->settings, 'widget_allowed_origins', []))
             ->filter(fn (mixed $origin): bool => is_string($origin))
             ->map(fn (string $origin): string => (string) (parse_url($origin, PHP_URL_HOST) ?: $origin))
@@ -54,6 +59,9 @@ class ChannelController extends Controller
             'productCount',
             'knowledgeSourceCount',
             'widgetDomains',
+            'commerceConnection',
+            'commerceProductCount',
+            'canManageChannels',
         ));
     }
 

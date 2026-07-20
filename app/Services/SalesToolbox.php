@@ -24,7 +24,7 @@ class SalesToolbox
     public function definitions(): array
     {
         return [
-            $this->tool('search_products', 'Search the verified product catalog by customer needs.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
+            $this->tool('search_products', 'Search the verified product catalog by customer needs. If products is empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact or claim the item is absent.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
             $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5]], ['query', 'budget', 'category', 'mood', 'occasion', 'limit']),
@@ -55,13 +55,20 @@ class SalesToolbox
 
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
-        $pattern = '%'.$a['query'].'%';
-        $q = $agent->products()->where('is_active', true)->where(fn ($query) => $query
-            ->whereLike('name', $pattern)
-            ->orWhereLike('description', $pattern)
-            ->orWhereLike('category', $pattern));
+        $patterns = collect($this->searchVariants((string) $a['query']))
+            ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
+        $q = $agent->products()->where('is_active', true)->where(function ($query) use ($patterns): void {
+            foreach ($patterns as $pattern) {
+                $query->orWhere(fn ($candidate) => $candidate
+                    ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
+                    ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
+                    ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern]));
+            }
+        });
         if ($a['category']) {
-            $q->whereLike('category', '%'.$a['category'].'%');
+            $q->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
+                $this->literalContainsPattern(Str::lower((string) $a['category'])),
+            ]);
         }
         if ($a['max_price']) {
             $q->where('price', '<=', $a['max_price']);
@@ -85,12 +92,17 @@ class SalesToolbox
             ->filter(fn (array $product) => $product['available_stock'] > 0)
             ->take(6)
             ->values();
+        $didYouMean = $products->isEmpty()
+            ? $this->commerceSearchSuggestion($agent, $a)
+            : null;
 
         return [
             'ok' => true,
             'data_boundary' => $this->catalogDataBoundary(),
             'source' => $this->catalogSource($agent),
             'products' => $products->all(),
+            'did_you_mean' => $didYouMean,
+            'suggestion_requires_confirmation' => $didYouMean !== null,
         ];
     }
 
@@ -520,6 +532,122 @@ class SalesToolbox
             ->sum('quantity');
 
         return max(0, (int) $product->stock - (int) $held);
+    }
+
+    /** @return list<string> */
+    private function searchVariants(string $term): array
+    {
+        $term = preg_replace('/\s+/u', ' ', trim(Str::lower($term))) ?? '';
+        if ($term === '') {
+            return [];
+        }
+
+        $nominative = collect(explode(' ', $term))
+            ->map(fn (string $token): string => $this->georgianNominative($token))
+            ->implode(' ');
+
+        return array_values(array_unique([$term, $nominative]));
+    }
+
+    private function georgianNominative(string $token): string
+    {
+        if (! preg_match('/^[\x{10D0}-\x{10FF}]+$/u', $token)) {
+            return $token;
+        }
+
+        foreach (['ის', 'მა', 'ით', 'ად', 'ზე', 'ში', 'ს', 'ო'] as $suffix) {
+            if (Str::endsWith($token, $suffix) && mb_strlen($token) > mb_strlen($suffix) + 2) {
+                return mb_substr($token, 0, -mb_strlen($suffix)).'ი';
+            }
+        }
+
+        return $token;
+    }
+
+    private function literalContainsPattern(string $term): string
+    {
+        return '%'.strtr($term, [
+            '!' => '!!',
+            '%' => '!%',
+            '_' => '!_',
+            '\\' => '!\\',
+        ]).'%';
+    }
+
+    private function commerceSearchSuggestion(Agent $agent, array $arguments): ?string
+    {
+        $connection = $agent->commerceConnection()->where('status', 'active')->first();
+        if (! $connection) {
+            return null;
+        }
+
+        try {
+            $response = $this->commerce->search($connection, (string) $arguments['query'], [
+                'available_only' => 1,
+                'max_price' => $arguments['max_price'] ?? null,
+                'limit' => 6,
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return null;
+        }
+
+        return $this->validatedSearchSuggestion(
+            (string) $arguments['query'],
+            data_get($response, 'meta.did_you_mean'),
+        );
+    }
+
+    private function validatedSearchSuggestion(string $query, mixed $suggestion): ?string
+    {
+        if (! is_string($suggestion)) {
+            return null;
+        }
+
+        $suggestion = preg_replace('/\s+/u', ' ', trim(Str::lower($suggestion))) ?? '';
+        if (
+            $suggestion === ''
+            || mb_strlen($suggestion) > 120
+            || preg_match('/[\x{0000}-\x{001F}\x{007F}]/u', $suggestion)
+        ) {
+            return null;
+        }
+
+        $normalizedQuery = collect($this->searchVariants($query))->last();
+        $needle = is_string($normalizedQuery)
+            ? collect(explode(' ', $normalizedQuery))->last()
+            : null;
+        if (! is_string($needle) || mb_strlen($needle) < 4 || $needle === $suggestion) {
+            return null;
+        }
+
+        $distance = $this->utf8Distance($needle, $suggestion);
+        $length = max(mb_strlen($needle), mb_strlen($suggestion));
+        $maximumDistance = min(3, max(1, (int) floor($length * 0.25)));
+
+        return $distance <= $maximumDistance ? $suggestion : null;
+    }
+
+    private function utf8Distance(string $left, string $right): int
+    {
+        $a = preg_split('//u', $left, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $b = preg_split('//u', $right, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $previous = range(0, count($b));
+
+        foreach ($a as $i => $leftCharacter) {
+            $current = [$i + 1];
+            foreach ($b as $j => $rightCharacter) {
+                $current[$j + 1] = min(
+                    $current[$j] + 1,
+                    $previous[$j + 1] + 1,
+                    $previous[$j] + ($leftCharacter === $rightCharacter ? 0 : 1),
+                );
+            }
+            $previous = $current;
+        }
+
+        return $previous[count($b)];
     }
 
     private function normalizedPhone(mixed $phone): ?string

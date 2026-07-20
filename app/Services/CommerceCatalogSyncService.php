@@ -4,9 +4,12 @@ namespace App\Services;
 
 use App\Models\Agent;
 use App\Models\CommerceConnection;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Throwable;
 
 class CommerceCatalogSyncService
 {
@@ -14,18 +17,37 @@ class CommerceCatalogSyncService
 
     public function sync(CommerceConnection $connection): array
     {
-        if (! $connection->exists) {
+        $connectionId = (int) $connection->getKey();
+        $agentId = (int) $connection->agent_id;
+        if (! $connection->exists || $connectionId <= 0 || $agentId <= 0) {
             throw new \InvalidArgumentException('A saved commerce connection is required for synchronization.');
         }
 
-        return $this->withAgentLock((int) $connection->agent_id, function () use ($connection): array {
+        return $this->withAgentLock($agentId, function () use ($agentId, $connectionId): array {
+            // Commands may preload models before a tenant disconnects. Reload under
+            // the same agent lock so deleted or disabled credentials can never be
+            // used for one final remote request from a stale in-memory model.
+            $connection = CommerceConnection::query()
+                ->whereKey($connectionId)
+                ->where('agent_id', $agentId)
+                ->first();
+            if (! $connection) {
+                throw new \InvalidArgumentException('The commerce connection is no longer connected.');
+            }
+            if ($connection->status !== 'active') {
+                throw new \RuntimeException('The commerce connection is not active. Reconnect it before synchronizing.');
+            }
+
             try {
                 return $this->applySnapshot($connection, $this->inspect($connection));
-            } catch (\Throwable $exception) {
-                CommerceConnection::whereKey($connection->id)->update([
-                    'status' => 'error',
-                    'last_error' => Str::limit($exception->getMessage(), 1500),
-                ]);
+            } catch (Throwable $exception) {
+                CommerceConnection::query()
+                    ->whereKey($connectionId)
+                    ->where('agent_id', $agentId)
+                    ->update([
+                        'status' => 'error',
+                        'last_error' => $this->classifiedFailure($exception),
+                    ]);
                 throw $exception;
             }
         });
@@ -62,6 +84,29 @@ class CommerceCatalogSyncService
                 $connection->setRelation('agent', $agent);
 
                 return $this->persistSnapshot($connection, $snapshot);
+            });
+        });
+    }
+
+    /** @return array{disconnected: bool, deactivated: int} */
+    public function disconnect(Agent $agent): array
+    {
+        return $this->withAgentLock((int) $agent->id, function () use ($agent): array {
+            return DB::transaction(function () use ($agent): array {
+                $connection = CommerceConnection::where('agent_id', $agent->id)->lockForUpdate()->first();
+                if (! $connection) {
+                    return ['disconnected' => false, 'deactivated' => 0];
+                }
+
+                // Keep historical product rows for conversations and outcomes, but
+                // never leave disconnected live inventory available to the agent.
+                $deactivated = $agent->products()
+                    ->where('commerce_connection_id', $connection->id)
+                    ->where('is_active', true)
+                    ->update(['is_active' => false]);
+                $connection->delete();
+
+                return ['disconnected' => true, 'deactivated' => $deactivated];
             });
         });
     }
@@ -217,6 +262,31 @@ class CommerceCatalogSyncService
         } finally {
             $lock->release();
         }
+    }
+
+    private function classifiedFailure(Throwable $exception): string
+    {
+        if ($exception instanceof ConnectionException) {
+            return 'transport_unreachable';
+        }
+
+        if ($exception instanceof RequestException) {
+            return match ($exception->response->status()) {
+                401, 403 => 'remote_auth_rejected',
+                404 => 'connector_endpoint_missing',
+                408, 504 => 'remote_timeout',
+                429 => 'remote_rate_limited',
+                default => $exception->response->serverError()
+                    ? 'remote_service_unavailable'
+                    : 'remote_request_rejected',
+            };
+        }
+
+        if ($exception instanceof \JsonException) {
+            return 'connector_response_invalid';
+        }
+
+        return 'catalog_validation_failed';
     }
 
     private function clean(mixed $value, int $limit): string

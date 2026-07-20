@@ -33,7 +33,7 @@ class CommerceConnectorTest extends TestCase
             'base_url' => 'https://8.8.8.8',
             'key_id' => 'legatus-test',
             'secret' => $secret,
-            'status' => 'pending',
+            'status' => 'active',
         ]);
 
         $this->assertNotSame($secret, DB::table('commerce_connections')->value('secret'));
@@ -521,6 +521,78 @@ class CommerceConnectorTest extends TestCase
         }
 
         $this->assertSame('active', $connection->fresh()->status);
+    }
+
+    public function test_stale_deleted_connection_is_rejected_before_any_remote_request(): void
+    {
+        $agent = Agent::create(['name' => 'Legatus', 'slug' => 'deleted-store', 'business_name' => 'Store']);
+        $connection = $agent->commerceConnection()->create([
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'key',
+            'secret' => str_repeat('s', 32),
+            'status' => 'active',
+        ]);
+        $staleConnection = $connection->fresh();
+        $connection->delete();
+        Http::fake();
+
+        try {
+            app(CommerceCatalogSyncService::class)->sync($staleConnection);
+            $this->fail('A deleted preloaded connection must not be used.');
+        } catch (\InvalidArgumentException $exception) {
+            $this->assertStringContainsString('no longer connected', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
+    public function test_non_active_connection_is_rejected_before_any_remote_request(): void
+    {
+        $agent = Agent::create(['name' => 'Legatus', 'slug' => 'inactive-store', 'business_name' => 'Store']);
+        $connection = $agent->commerceConnection()->create([
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'key',
+            'secret' => str_repeat('s', 32),
+            'status' => 'error',
+            'last_error' => 'remote_timeout',
+        ]);
+        Http::fake();
+
+        try {
+            app(CommerceCatalogSyncService::class)->sync($connection);
+            $this->fail('A non-active connection must not be used.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('not active', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
+        $this->assertSame('remote_timeout', $connection->fresh()->last_error);
+    }
+
+    public function test_sync_failure_persists_only_a_bounded_classified_error(): void
+    {
+        $reflectedSecret = 'must-never-be-persisted-'.str_repeat('x', 64);
+        $agent = Agent::create(['name' => 'Legatus', 'slug' => 'safe-error-store', 'business_name' => 'Store']);
+        $connection = $agent->commerceConnection()->create([
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'key',
+            'secret' => str_repeat('s', 32),
+            'status' => 'active',
+        ]);
+        Http::fake(['*' => Http::response(['message' => $reflectedSecret], 401)]);
+
+        try {
+            app(CommerceCatalogSyncService::class)->sync($connection);
+            $this->fail('A rejected request must fail synchronization.');
+        } catch (\Throwable) {
+            $this->addToAssertionCount(1);
+        }
+
+        $connection->refresh();
+        $this->assertSame('error', $connection->status);
+        $this->assertSame('remote_auth_rejected', $connection->last_error);
+        $this->assertLessThanOrEqual(64, strlen($connection->last_error));
+        $this->assertStringNotContainsString($reflectedSecret, $connection->last_error);
     }
 
     public function test_connector_origin_accepts_only_an_exact_public_standard_https_origin(): void
