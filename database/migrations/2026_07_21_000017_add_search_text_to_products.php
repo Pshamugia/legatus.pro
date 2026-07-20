@@ -10,7 +10,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('products', function (Blueprint $table): void {
-            $table->text('search_text')->nullable()->after('description');
+            // Imported Georgian/Unicode descriptions can exceed MySQL TEXT's
+            // 64 KiB byte ceiling even below the 32,000-character safety cap.
+            $table->mediumText('search_text')->nullable()->after('description');
         });
 
         DB::table('products')
