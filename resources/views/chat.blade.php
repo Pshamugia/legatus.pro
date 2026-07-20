@@ -2,7 +2,7 @@
 @section('title', $agent->name.' · '.$agent->business_name)
 @section('body')
 <div class="chatpage"><div class="chatwindow">
-    <div class="demo-head"><div class="person"><span class="avatar">L</span><div><strong>{{ $agent->name }} · {{ $agent->business_name }}</strong><small>● Online · AI sales & shopping ambassador</small></div></div><div style="display:flex;gap:7px"><span class="tag">Instagram-style demo</span>@auth<a class="tag" href="{{ route('dashboard') }}">Dashboard ↗</a>@endauth</div></div>
+    <div class="demo-head"><div class="person"><span class="avatar">L</span><div><strong>{{ $agent->name }} · {{ $agent->business_name }}</strong><small>● Online · AI sales & shopping ambassador</small></div></div><div style="display:flex;gap:7px"><button type="button" class="tag" id="new-conversation" style="cursor:pointer">New conversation ↻</button><span class="tag">Instagram-style demo</span>@auth<a class="tag" href="{{ route('dashboard') }}">Dashboard ↗</a>@endauth</div></div>
     <div id="messages"><div class="bubble ai">გამარჯობა! მე ვარ {{ $agent->name }} 👋 დაგეხმარებით არჩევანში, ფასისა და მარაგის გადამოწმებაში, მიწოდებასა და საბითუმო მოთხოვნაში. რას ეძებთ?</div></div>
     <div class="suggestions"><button data-q="ვეძებ ოსტატი და მარგარიტას მსგავს თანამედროვე და იდუმალ წიგნს, 30 ლარამდე">✨ Personal shopper</button><button data-q="Piranesi რა ღირს და 2 ცალი მარაგშია?">💸 Price + stock</button><button data-q="თბილისში ხვალ ჩამომივა?">🚚 Delivery</button><button data-q="Convenience Store Woman-ის 10 ცალი მინდა და 18% ფასდაკლებას ვითხოვ">📦 Wholesale offer</button><button data-q="ოპერატორთან დამაკავშირე">🙋 Human handoff</button></div>
     <form class="composer" id="chat-form"><input id="message" autocomplete="off" maxlength="1500" placeholder="დაწერეთ შეტყობინება..."><button class="btn" type="submit">გაგზავნა ↑</button></form>
@@ -12,6 +12,7 @@ const form=document.querySelector('#chat-form'),input=document.querySelector('#m
 const messageUrl=@json(route('chat.message',$agent)),historyUrl=@json(route('chat.history',$agent)),feedbackBase=@json(url('/demo/'.$agent->slug.'/messages'));
 const storageKey='legatus_visitor_token_{{ $agent->slug }}';
 const requestDeadlineMs=38000;
+if(new URLSearchParams(window.location.search).get('new')==='1'){try{localStorage.removeItem(storageKey)}catch{}window.history.replaceState({},'',window.location.pathname)}
 let visitorToken=readToken(),cursor=0,sending=false,polling=false;
 const seen=new Set();
 function readToken(){try{return localStorage.getItem(storageKey)}catch{return null}}
@@ -34,6 +35,7 @@ async function postMessage(payload,signal){for(let attempt=0;attempt<2;attempt++
 async function responseData(response){const type=response.headers.get('content-type')||'';if(!type.includes('application/json'))throw new Error(`Unexpected server response (${response.status})`);return response.json()}
 async function send(text){const clean=text.trim();if(!clean||sending)return;sending=true;bubble(clean,'user');input.value='';input.disabled=true;const typing=document.createElement('div');typing.className='bubble ai';typing.textContent='Legatus is checking verified data…';messages.append(typing);messages.scrollTop=messages.scrollHeight;const id=requestId(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),requestDeadlineMs);try{const response=await postMessage({message:clean,visitor_token:visitorToken,request_id:id,channel:'web'},controller.signal);const data=await responseData(response);if(!response.ok)throw new Error(data.message||'Request failed');saveToken(data.visitor_token);if(data.customer_message_id)seen.add(data.customer_message_id);if(data.message_id)seen.add(data.message_id);typing.remove();bubble(data.text,'ai',{products:data.products||[],sources:data.sources||[],tools:data.tools_used||[],confidence:data.confidence,reason:data.escalation_reason,messageId:data.message_id})}catch(error){typing.remove();bubble(error.name==='AbortError'?'პასუხმა დროის ლიმიტს გადააჭარბა. გთხოვთ ხელახლა სცადოთ.':'კავშირი შეფერხდა. გთხოვთ ხელახლა სცადოთ.','ai')}finally{clearTimeout(timer);sending=false;input.disabled=false;input.focus();pollHistory()}}
 form.addEventListener('submit',event=>{event.preventDefault();send(input.value)});document.querySelectorAll('[data-q]').forEach(button=>button.onclick=()=>send(button.dataset.q));
+document.querySelector('#new-conversation').onclick=()=>{clearToken();window.location.reload()};
 pollHistory();setInterval(pollHistory,2500);
 </script>
 @endsection
