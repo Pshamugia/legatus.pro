@@ -338,6 +338,23 @@ class CommerceCatalogSyncService
         }
 
         $descriptionParts = [$item['author'] ?? null, $item['description'] ?? null, $item['details'] ?? null];
+        $searchParts = [
+            $name,
+            $item['sku'] ?? null,
+            $item['category'] ?? null,
+            $item['author'] ?? null,
+            $item['genres'] ?? null,
+            $item['tags'] ?? null,
+            $item['brand'] ?? null,
+            $item['publisher'] ?? null,
+            $item['isbn'] ?? null,
+            $item['isbn_10'] ?? null,
+            $item['isbn_13'] ?? null,
+            $item['description'] ?? null,
+            $item['details'] ?? null,
+            $item['language'] ?? null,
+            $item['condition'] ?? null,
+        ];
 
         return [
             'external_id' => $externalId,
@@ -346,6 +363,7 @@ class CommerceCatalogSyncService
                 'sku' => $this->clean($item['sku'] ?? null, 255) ?: null,
                 'category' => $this->clean($item['category'] ?? null, 255) ?: null,
                 'description' => $this->clean(implode(' ', array_filter($descriptionParts, 'is_scalar')), 4000) ?: null,
+                'search_text' => $this->searchableText($searchParts),
                 'price' => (float) $item['price'],
                 'stock' => $quantity,
                 'image' => $this->safeHttpsUrl($item['image_url'] ?? null),
@@ -366,6 +384,22 @@ class CommerceCatalogSyncService
                 ],
             ],
         ];
+    }
+
+    private function searchableText(array $parts): ?string
+    {
+        $values = [];
+        array_walk_recursive($parts, function ($value) use (&$values): void {
+            if (is_scalar($value) && ! is_bool($value)) {
+                $clean = $this->clean($value, 4000);
+                if ($clean !== '') {
+                    $values[] = $clean;
+                }
+            }
+        });
+        $text = $this->clean(implode(' ', $values), 32_000);
+
+        return $text === '' ? null : $text;
     }
 
     private function integer(mixed $value, string $field, int $minimum): int

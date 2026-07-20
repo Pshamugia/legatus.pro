@@ -63,6 +63,9 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertOk()
             ->assertSee('<title>Maya · Bukinistebi.ge</title>', false)
             ->assertSee('<b>Maya · Bukinistebi.ge</b>', false)
+            ->assertSee('id="new-conversation"', false)
+            ->assertSee('ახალი საუბრის დაწყება')
+            ->assertSee("clearToken();\n        window.location.reload();", false)
             ->assertSee('მე ვარ Maya — Bukinistebi.ge-ის AI ასისტენტი')
             ->assertSee('Powered by Legatus')
             ->assertDontSee('Ask Maya');

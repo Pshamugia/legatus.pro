@@ -18,6 +18,126 @@ class CommerceConnectorTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_synced_catalog_is_searchable_by_natural_author_genre_details_and_isbn_queries(): void
+    {
+        $agent = Agent::create([
+            'name' => 'თამარი',
+            'slug' => 'bukinistebi-search-regression',
+            'business_name' => 'bukinistebi.ge',
+        ]);
+        $connection = $agent->commerceConnection()->create([
+            'provider' => 'universal_api',
+            'name' => 'Bukinistebi live catalog',
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'bukinistebi-search-test',
+            'secret' => str_repeat('s', 32),
+            'status' => 'active',
+        ]);
+        Http::fake(['*' => Http::response([
+            'data' => [
+                [
+                    'id' => 2316,
+                    'sku' => '978-9941-8-0001-2',
+                    'name' => 'საიუბილეო საარქივო გამოცემა',
+                    'author' => 'პაოლო იაშვილი',
+                    'category' => 'წიგნები',
+                    'genres' => ['პოეზია'],
+                    'description' => 'რჩეული ლექსები და წერილები',
+                    'details' => 'მეოცე საუკუნის ქართული ლიტერატურა',
+                    'price' => 60,
+                    'currency' => 'GEL',
+                    'quantity' => 1,
+                    'in_stock' => true,
+                    'purchasable' => true,
+                ],
+                [
+                    'id' => 2317,
+                    'sku' => 'OTHER-BOOK',
+                    'name' => 'სხვა წიგნი',
+                    'author' => 'რეზო კლდიაშვილი',
+                    'category' => 'წიგნები',
+                    'genres' => ['პროზა'],
+                    'description' => 'სხვა აღწერა',
+                    'price' => 20,
+                    'currency' => 'GEL',
+                    'quantity' => 2,
+                    'in_stock' => true,
+                    'purchasable' => true,
+                ],
+            ],
+            'meta' => [
+                'sync_mode' => 'authoritative_snapshot',
+                'current_page' => 1,
+                'last_page' => 1,
+                'total' => 2,
+            ],
+        ])]);
+
+        app(CommerceCatalogSyncService::class)->sync($connection);
+        $conversation = $agent->conversations()->create(['visitor_id' => 'searcher', 'status' => 'ai']);
+        $toolbox = app(SalesToolbox::class);
+
+        foreach (['იაშვილის რა გაქვთ?', 'პოეზია მაჩვენეთ', 'მეოცე საუკუნის ქართული ლიტერატურა', '978-9941-8-0001-2'] as $query) {
+            $result = $toolbox->execute('search_products', [
+                'query' => $query,
+                'category' => null,
+                'max_price' => null,
+            ], $agent, $conversation);
+
+            $this->assertNotEmpty($result['products'], $query);
+            $this->assertSame('საიუბილეო საარქივო გამოცემა', $result['products'][0]['name'], $query);
+            $this->assertSame('პაოლო იაშვილი', $result['products'][0]['author'], $query);
+            $this->assertNull($result['did_you_mean'], $query);
+        }
+    }
+
+    public function test_live_connector_search_is_a_tenant_scoped_index_not_a_source_of_product_facts(): void
+    {
+        $agent = Agent::create(['name' => 'Assistant', 'slug' => 'live-search-index', 'business_name' => 'Store']);
+        $connection = $agent->commerceConnection()->create([
+            'provider' => 'universal_api',
+            'name' => 'Live catalog',
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'live-search-test',
+            'secret' => str_repeat('s', 32),
+            'status' => 'active',
+        ]);
+        $verified = $agent->products()->create([
+            'commerce_connection_id' => $connection->id,
+            'external_product_id' => 'verified-42',
+            'name' => 'Verified local title',
+            'search_text' => 'different local wording',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => [
+                'commerce_connection_id' => $connection->id,
+                'external_product_id' => 'verified-42',
+                'author' => 'Verified Author',
+            ],
+        ]);
+        Http::fake(['*' => Http::response([
+            'data' => [
+                ['id' => 'unknown-product', 'name' => 'Do not expose me', 'price' => 1],
+                ['id' => 'verified-42', 'name' => 'Untrusted remote title', 'price' => 999],
+            ],
+            'meta' => ['total' => 2, 'did_you_mean' => null],
+        ])]);
+
+        $conversation = $agent->conversations()->create(['visitor_id' => 'remote-searcher', 'status' => 'ai']);
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'semantic phrase known by store',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([$verified->id], collect($result['products'])->pluck('id')->all());
+        $this->assertSame('Verified local title', $result['products'][0]['name']);
+        $this->assertSame(25.0, $result['products'][0]['price']);
+        $this->assertStringNotContainsString('Untrusted remote title', json_encode($result, JSON_UNESCAPED_UNICODE));
+        $this->assertStringNotContainsString('Do not expose me', json_encode($result, JSON_UNESCAPED_UNICODE));
+    }
+
     public function test_signed_connector_syncs_catalog_and_tools_verify_live_data(): void
     {
         $secret = 'test-shared-secret-that-is-not-logged';

@@ -87,6 +87,7 @@ Record the timestamp, channel, input, output, tools, source, and outcome for eve
 |---|---|---|
 | Website | Open a safe Bukinistebi book page | One launcher appears; no launcher appears on login or checkout |
 | Website | Ask for a specific available book's price and stock | Reply matches the live database and links to the real product |
+| Website | Ask `იაშვილის რა გაქვთ?` in a fresh conversation | `საიუბილეო საარქივო გამოცემა — პაოლო იაშვილი` ranks before surnames that only contain the same suffix |
 | Website | Ask for a modern book similar to a named title with a budget | Up to three grounded choices, reasons, trade-offs, and live checks |
 | Website | Ask for an unsupported discount | Human handoff with reason and suggested reply |
 | Facebook | Send a real visitor message to the Bukinistebi Page | Signed webhook is accepted, one conversation is created, and one reply is delivered |
@@ -100,6 +101,7 @@ Record the timestamp, channel, input, output, tools, source, and outcome for eve
 ## 5. Evidence required before calling it live
 
 - HTTP 200 evidence for the exact Bukinistebi widget script and frame, with the iframe CSP allowing only the reviewed Bukinistebi origins.
+- A fresh website conversation created with the widget's restart control after any previous human handoff.
 - A real OpenAI run showing model, tool calls, status, latency, and token usage.
 - A real Facebook inbound/outbound message ID and a real Instagram inbound/outbound message ID.
 - A screenshot of the correct connected Meta accounts and one human handoff in the Inbox.

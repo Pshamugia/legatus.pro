@@ -119,7 +119,28 @@ class KnowledgeIngestionService
                 $sku = trim($data['sku'] ?? '');
                 $query = $source->agent->products();
                 $existing = $sku !== '' ? $query->where('sku', $sku)->first() : $query->where('name', $name)->first();
-                $values = ['name' => $name, 'sku' => $sku ?: null, 'category' => $data['category'] ?? null, 'description' => $data['description'] ?? null, 'price' => $price, 'stock' => max(0, (int) $this->number($data['stock'] ?? $data['quantity'] ?? 0)), 'image' => $data['image'] ?? $data['image_url'] ?? null, 'is_active' => true, 'metadata' => ['source_id' => $source->id]];
+                $author = $this->catalogText($data['author'] ?? null, 255) ?: null;
+                $genres = $this->catalogText($data['genres'] ?? $data['genre'] ?? null, 1000) ?: null;
+                $isbn = $this->catalogText($data['isbn'] ?? $data['isbn_13'] ?? $data['isbn_10'] ?? null, 32) ?: null;
+                $category = $this->catalogText($data['category'] ?? null, 255) ?: null;
+                $description = $this->catalogText($data['description'] ?? null, 4000) ?: null;
+                $values = [
+                    'name' => $name,
+                    'sku' => $sku ?: null,
+                    'category' => $category,
+                    'description' => $description,
+                    'search_text' => $this->searchableProductText([$name, $sku, $category, $author, $genres, $isbn, $description]),
+                    'price' => $price,
+                    'stock' => max(0, (int) $this->number($data['stock'] ?? $data['quantity'] ?? 0)),
+                    'image' => $data['image'] ?? $data['image_url'] ?? null,
+                    'is_active' => true,
+                    'metadata' => [
+                        'source_id' => $source->id,
+                        'author' => $author,
+                        'genres' => $genres === null ? [] : preg_split('/\s*[,;|]\s*/u', $genres, -1, PREG_SPLIT_NO_EMPTY),
+                        'isbn' => $isbn,
+                    ],
+                ];
                 if ($existing) {
                     $existing->update($values);
                     $updated++;
@@ -420,11 +441,21 @@ class KnowledgeIngestionService
         $image = $this->catalogUrl($product['image_url'] ?? $product['image'] ?? null);
         $productUrl = $this->catalogUrl($product['url'] ?? null);
 
+        $author = $this->catalogText($product['author'] ?? $product['brand']['name'] ?? null, 255) ?: null;
+        $genres = $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [];
+        $isbn = $this->catalogText($product['isbn'] ?? $product['isbn_13'] ?? $product['isbn_10'] ?? null, 32) ?: null;
+        $category = $this->catalogText($product['category'] ?? null, 255) ?: null;
+        $description = $this->catalogText($product['description'] ?? null, 4000) ?: null;
+
         return [
             'name' => $name,
             'sku' => $sku,
-            'category' => $this->catalogText($product['category'] ?? null, 255) ?: null,
-            'description' => $this->catalogText($product['description'] ?? null, 4000) ?: null,
+            'category' => $category,
+            'description' => $description,
+            'search_text' => $this->searchableProductText([
+                $name, $sku, $category, $author, $genres, $isbn,
+                $product['publisher'] ?? null, $description,
+            ]),
             'price' => $price,
             'stock' => $stock,
             'image' => $image,
@@ -434,10 +465,42 @@ class KnowledgeIngestionService
                 'source_url' => $source->url,
                 'product_url' => $productUrl,
                 'external_id' => $this->catalogText($product['id'] ?? null, 191) ?: null,
+                'author' => $author,
+                'genres' => $this->searchableValues($genres, 120),
+                'isbn' => $isbn,
                 'currency' => $currency,
                 'text_trust' => 'untrusted_catalog_data',
             ],
         ];
+    }
+
+    private function searchableProductText(array $parts): ?string
+    {
+        $values = [];
+        array_walk_recursive($parts, function ($value) use (&$values): void {
+            $text = $this->catalogText($value, 4000);
+            if ($text !== '') {
+                $values[] = $text;
+            }
+        });
+        $text = $this->catalogText(implode(' ', $values), 32_000);
+
+        return $text === '' ? null : $text;
+    }
+
+    /** @return list<string> */
+    private function searchableValues(mixed $values, int $limit): array
+    {
+        $result = [];
+        $values = (array) $values;
+        array_walk_recursive($values, function ($value) use (&$result, $limit): void {
+            $text = $this->catalogText($value, $limit);
+            if ($text !== '') {
+                $result[] = $text;
+            }
+        });
+
+        return array_values(array_unique($result));
     }
 
     private function currencyFromPrice(mixed $price): ?string

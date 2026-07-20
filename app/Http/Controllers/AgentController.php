@@ -6,8 +6,10 @@ use App\Models\Agent;
 use App\Models\Lead;
 use App\Services\KnowledgeIngestionService;
 use App\Services\TenantContext;
+use App\Support\WidgetTheme;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class AgentController extends Controller
 {
@@ -87,12 +89,40 @@ class AgentController extends Controller
             'catalog_url' => $this->publicUrlRules(),
             'catalog' => ['nullable', 'file', 'max:10240', 'mimes:csv,txt,pdf'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'widget_theme_preset' => ['sometimes', 'string', Rule::in(WidgetTheme::allowedPresets())],
+            'widget_theme_primary' => ['bail', 'exclude_unless:widget_theme_preset,custom', 'required', 'string', 'regex:/\A#[0-9A-Fa-f]{6}\z/'],
+            'widget_theme_accent' => [
+                'bail',
+                'exclude_unless:widget_theme_preset,custom',
+                'required',
+                'string',
+                'regex:/\A#[0-9A-Fa-f]{6}\z/',
+                function (string $attribute, mixed $value, \Closure $fail) use ($r): void {
+                    $primary = WidgetTheme::normalizeHex($r->input('widget_theme_primary'));
+                    $accent = WidgetTheme::normalizeHex($value);
+
+                    if ($primary !== null && $accent !== null && ! WidgetTheme::hasSufficientPairContrast($primary, $accent)) {
+                        $fail('Choose primary and accent colors with at least a 3:1 contrast ratio.');
+                    }
+                },
+            ],
         ]);
         $agent = $tenant->agent();
+        $currentTheme = $agent->widgetTheme();
+        $widgetTheme = array_key_exists('widget_theme_preset', $data)
+            ? WidgetTheme::configured(
+                $data['widget_theme_preset'],
+                $data['widget_theme_primary'] ?? $currentTheme['primary'],
+                $data['widget_theme_accent'] ?? $currentTheme['accent'],
+            )
+            : null;
         $settings = array_merge($agent->settings ?? [], [
             'website' => $data['website'] ?? null,
             'catalog_url' => $data['catalog_url'] ?? null,
         ]);
+        if ($widgetTheme !== null) {
+            $settings['widget_theme'] = $widgetTheme;
+        }
         if (! empty($data['website'])) {
             $origin = $this->origin($data['website']);
             if ($origin !== null) {

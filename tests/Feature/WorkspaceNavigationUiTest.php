@@ -16,7 +16,7 @@ class WorkspaceNavigationUiTest extends TestCase
     public function test_every_authenticated_workspace_screen_exposes_the_active_business_and_account_controls(): void
     {
         $user = User::factory()->create(['name' => 'Workspace Owner']);
-        $active = $this->workspace($user, 'Bukinistebi.ge');
+        $active = $this->workspace($user, 'bukinistebi.ge');
         $other = $this->workspace($user, 'Second Store');
 
         $this->actingAs($user)->withSession([TenantContext::SESSION_KEY => $active->id]);
@@ -35,12 +35,32 @@ class WorkspaceNavigationUiTest extends TestCase
 
             $response->assertOk()
                 ->assertSee('Active business')
-                ->assertSee('Bukinistebi.ge')
+                ->assertSee('bukinistebi.ge')
+                ->assertSee('data-active-business="bukinistebi.ge"', false)
+                ->assertSee('data-workspace-switcher="bukinistebi.ge"', false)
+                ->assertSee('Workspace on Legatus')
                 ->assertSee('Business setup')
                 ->assertSee('+ Add business')
                 ->assertSee('method="post" action="'.route('logout').'"', false)
                 ->assertSee(route('workspaces.switch', $other), false);
         }
+    }
+
+    public function test_navigation_uses_the_active_workspace_name_instead_of_a_stale_agent_brand(): void
+    {
+        $user = User::factory()->create();
+        $active = $this->workspace($user, 'bukinistebi.ge');
+        $active->agents()->update(['business_name' => 'Outdated imported brand']);
+
+        $response = $this->actingAs($user)
+            ->withSession([TenantContext::SESSION_KEY => $active->id])
+            ->get(route('dashboard'));
+
+        $response->assertOk()
+            ->assertSee('data-active-business="bukinistebi.ge"', false)
+            ->assertSee('data-workspace-switcher="bukinistebi.ge"', false)
+            ->assertDontSee('data-active-business="Outdated imported brand"', false)
+            ->assertDontSee('data-workspace-switcher="Outdated imported brand"', false);
     }
 
     private function workspace(User $user, string $name): Organization

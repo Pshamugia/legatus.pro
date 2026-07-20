@@ -1,4 +1,4 @@
-<details class="workspace-switcher">
+<details class="workspace-switcher" data-workspace-switcher="{{ $navigationBusinessName }}">
     <summary aria-label="Switch active business">
         <span class="workspace-avatar" aria-hidden="true">{{ mb_strtoupper(mb_substr($navigationBusinessName, 0, 1)) }}</span>
         <span class="workspace-summary-copy">

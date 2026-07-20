@@ -260,7 +260,7 @@ Live checks consume OpenAI credits and require the private key in `.env`.
 
 ## Final release-verification snapshot
 
-- `php artisan test`: **191 passed, 1,402 assertions**.
+- `php artisan test`: **198 passed, 1,491 assertions**.
 - `php artisan legatus:eval`: **10 passed, 0 failed**, including price, stock, delivery, shopping, budget, handoff, wholesale, discount approval, and prompt-injection boundaries.
 - Live `gpt-5.6-sol` shopping health check: completed in Georgian with `save_shopping_preferences`, `recommend_products`, and `check_stock`; no server guardrail or handoff was triggered.
 - Demo database: 12 products, 3 knowledge sources, 4 knowledge chunks, 6 customer stories, 14 story messages, 2 qualified leads, 1 pending reservation, and 10 active eval cases.
@@ -275,6 +275,10 @@ Live checks consume OpenAI credits and require the private key in `.env`.
 - A user can create and switch between isolated business workspaces; owner/admin configuration and team-member removal are tenant-scoped.
 - Business name, AI employee name, and widget colors are independently configurable per workspace. Five accessible presets and synchronized visual custom-color controls include a live launcher/chat preview.
 - The widget loader revalidates immediately after branding changes, while malformed stored colors fail closed to the safe default theme.
+- Widget colors are now part of the guided Configure flow itself: five presets, custom primary/accent pickers, contrast validation, and a live tenant-specific preview.
+- Product discovery now indexes title, author, category, genres, description/details, SKU/ISBN and safe connector metadata; natural customer questions are tokenized instead of being treated as one impossible literal sentence.
+- The real Bukinistebi local catalogue regression `იაშვილის რა გაქვთ?` ranks `საიუბილეო საარქივო გამოცემა — პაოლო იაშვილი` first, ahead of suffix-only surname matches.
+- The embedded widget exposes a new-conversation control so an old human-owned thread cannot make every later test look like another AI failure.
 
 ## Evidence boundaries and unfinished external work — July 20 release
 

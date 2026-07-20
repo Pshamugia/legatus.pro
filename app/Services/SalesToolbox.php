@@ -55,45 +55,44 @@ class SalesToolbox
 
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
-        $patterns = collect($this->searchVariants((string) $a['query']))
-            ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
-        $q = $agent->products()->where('is_active', true)->where(function ($query) use ($patterns): void {
-            foreach ($patterns as $pattern) {
-                $query->orWhere(fn ($candidate) => $candidate
-                    ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
-                    ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
-                    ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern]));
+        $termGroups = $this->searchTermGroups((string) $a['query']);
+        $products = collect();
+
+        if ($termGroups !== []) {
+            $q = $agent->products()->where('is_active', true);
+            foreach ($termGroups as $variants) {
+                $patterns = collect($variants)
+                    ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
+                $q->where(function ($termQuery) use ($patterns): void {
+                    foreach ($patterns as $pattern) {
+                        $termQuery->orWhere(fn ($candidate) => $candidate
+                            ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
+                            ->orWhereRaw("LOWER(products.sku) LIKE ? ESCAPE '!'", [$pattern])
+                            ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern])
+                            ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
+                            ->orWhereRaw("LOWER(products.search_text) LIKE ? ESCAPE '!'", [$pattern]));
+                    }
+                });
             }
-        });
-        if ($a['category']) {
-            $q->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
-                $this->literalContainsPattern(Str::lower((string) $a['category'])),
-            ]);
-        }
-        if ($a['max_price']) {
-            $q->where('price', '<=', $a['max_price']);
+            $this->applyProductSearchFilters($q, $a);
+
+            $products = $this->presentSearchProducts(
+                $q->limit(100)->get([
+                    'id', 'name', 'sku', 'category', 'description', 'search_text', 'metadata',
+                    'price', 'stock', 'updated_at',
+                ]),
+                $conversation,
+                $termGroups,
+            );
         }
 
-        $products = $q->limit(30)->get(['id', 'name', 'category', 'description', 'price', 'stock', 'updated_at'])
-            ->map(function ($product) use ($conversation): array {
-                $available = $this->availableStock($product, $conversation);
-
-                return [
-                    'id' => $product->id,
-                    'name' => $product->name,
-                    'category' => $product->category,
-                    'description' => $product->description,
-                    'price' => (float) $product->price,
-                    'stock' => $available,
-                    'available_stock' => $available,
-                    'updated_at' => $product->updated_at,
-                ];
-            })
-            ->filter(fn (array $product) => $product['available_stock'] > 0)
-            ->take(6)
-            ->values();
+        $remoteSearch = null;
+        if ($products->isEmpty()) {
+            $remoteSearch = $this->commerceSearchResponse($agent, $a, $termGroups);
+            $products = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
+        }
         $didYouMean = $products->isEmpty()
-            ? $this->commerceSearchSuggestion($agent, $a)
+            ? $this->validatedSearchSuggestion((string) $a['query'], data_get($remoteSearch, 'meta.did_you_mean'))
             : null;
 
         return [
@@ -104,6 +103,50 @@ class SalesToolbox
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,
         ];
+    }
+
+    private function applyProductSearchFilters($query, array $arguments): void
+    {
+        if ($arguments['category']) {
+            $query->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
+                $this->literalContainsPattern(Str::lower((string) $arguments['category'])),
+            ]);
+        }
+        if ($arguments['max_price']) {
+            $query->where('price', '<=', $arguments['max_price']);
+        }
+    }
+
+    private function presentSearchProducts($candidates, Conversation $conversation, array $termGroups = [])
+    {
+        return $candidates
+            ->map(function ($product) use ($conversation, $termGroups): array {
+                $available = $this->availableStock($product, $conversation);
+
+                return [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'sku' => $product->sku,
+                    'author' => data_get($product->metadata, 'author'),
+                    'genres' => array_values(array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar')),
+                    'category' => $product->category,
+                    'description' => $product->description,
+                    'price' => (float) $product->price,
+                    'stock' => $available,
+                    'available_stock' => $available,
+                    'updated_at' => $product->updated_at,
+                    '_search_score' => $this->productSearchScore($product, $termGroups),
+                ];
+            })
+            ->filter(fn (array $product) => $product['available_stock'] > 0)
+            ->sortByDesc('_search_score')
+            ->take(6)
+            ->map(function (array $product): array {
+                unset($product['_search_score']);
+
+                return $product;
+            })
+            ->values();
     }
 
     private function knowledge(Agent $agent, array $a): array
@@ -534,19 +577,33 @@ class SalesToolbox
         return max(0, (int) $product->stock - (int) $held);
     }
 
-    /** @return list<string> */
-    private function searchVariants(string $term): array
+    /** @return list<list<string>> */
+    private function searchTermGroups(string $term): array
     {
-        $term = preg_replace('/\s+/u', ' ', trim(Str::lower($term))) ?? '';
-        if ($term === '') {
+        $term = Str::lower($term);
+        $term = preg_replace('/[^\p{L}\p{N}%_+\-.]+/u', ' ', $term) ?? '';
+        $tokens = preg_split('/\s+/u', trim($term), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($tokens === []) {
             return [];
         }
 
-        $nominative = collect(explode(' ', $term))
-            ->map(fn (string $token): string => $this->georgianNominative($token))
-            ->implode(' ');
+        $stopWords = [
+            'a', 'an', 'any', 'are', 'by', 'can', 'could', 'do', 'does', 'find', 'for', 'got',
+            'has', 'have', 'i', 'is', 'looking', 'me', 'need', 'of', 'please', 'show', 'the',
+            'to', 'want', 'what', 'which', 'would', 'you',
+            'ან', 'არის', 'გაქვთ', 'გაქვს', 'გთხოვ', 'გთხოვთ', 'და', 'თუ', 'იქნებ', 'მაჩვენე',
+            'მაჩვენეთ', 'მინდა', 'მირჩიე', 'მირჩიეთ', 'მომიძებნე', 'მომიძებნეთ', 'რა', 'რას',
+            'რომელი', 'შეგიძლიათ', 'შეიძლება', 'თქვენ', 'თქვენთან', 'ხომ',
+        ];
 
-        return array_values(array_unique([$term, $nominative]));
+        return collect($tokens)
+            ->filter(fn (string $token): bool => ! in_array($token, $stopWords, true))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 2)
+            ->map(function (string $token): array {
+                return array_values(array_unique([$token, $this->georgianNominative($token)]));
+            })
+            ->values()
+            ->all();
     }
 
     private function georgianNominative(string $token): string
@@ -574,29 +631,75 @@ class SalesToolbox
         ]).'%';
     }
 
-    private function commerceSearchSuggestion(Agent $agent, array $arguments): ?string
+    private function commerceSearchResponse(Agent $agent, array $arguments, array $termGroups): ?array
     {
         $connection = $agent->commerceConnection()->where('status', 'active')->first();
         if (! $connection) {
             return null;
         }
 
+        $connectorQuery = collect($termGroups)
+            ->map(fn (array $variants): string => (string) end($variants))
+            ->filter()
+            ->implode(' ');
+        if ($connectorQuery === '') {
+            $connectorQuery = trim((string) $arguments['query']);
+        }
+
         try {
-            $response = $this->commerce->search($connection, (string) $arguments['query'], [
+            return $this->commerce->search($connection, $connectorQuery, [
                 'available_only' => 1,
                 'max_price' => $arguments['max_price'] ?? null,
-                'limit' => 6,
+                'limit' => 30,
             ]);
         } catch (\Throwable $exception) {
             report($exception);
 
             return null;
         }
+    }
 
-        return $this->validatedSearchSuggestion(
-            (string) $arguments['query'],
-            data_get($response, 'meta.did_you_mean'),
-        );
+    private function productsFromCommerceSearch(
+        Agent $agent,
+        Conversation $conversation,
+        array $arguments,
+        ?array $response,
+    ) {
+        if (! is_array($response) || ! is_array($response['data'] ?? null) || ! array_is_list($response['data'])) {
+            return collect();
+        }
+
+        $connection = $agent->commerceConnection()->where('status', 'active')->first();
+        if (! $connection) {
+            return collect();
+        }
+
+        $externalIds = collect($response['data'])
+            ->map(fn ($product) => is_array($product) && is_scalar($product['id'] ?? null) && ! is_bool($product['id'])
+                ? trim((string) $product['id'])
+                : '')
+            ->filter(fn (string $id): bool => $id !== '' && mb_strlen($id) <= 191 && ! preg_match('/[\x00-\x1F\x7F]/', $id))
+            ->unique()
+            ->take(30)
+            ->values();
+        if ($externalIds->isEmpty()) {
+            return collect();
+        }
+
+        $rank = $externalIds->flip();
+        $query = $agent->products()
+            ->where('is_active', true)
+            ->where('commerce_connection_id', $connection->id)
+            ->whereIn('external_product_id', $externalIds->all());
+        $this->applyProductSearchFilters($query, $arguments);
+        $products = $query->get([
+            'id', 'name', 'sku', 'category', 'description', 'search_text', 'metadata',
+            'price', 'stock', 'updated_at', 'external_product_id',
+        ])->sortBy(fn ($product): int => (int) $rank->get((string) $product->external_product_id, PHP_INT_MAX));
+
+        // The remote endpoint determines semantic ordering, while every returned
+        // row remains bound to the tenant's last authoritative signed snapshot.
+        return $this->presentSearchProducts($products, $conversation);
     }
 
     private function validatedSearchSuggestion(string $query, mixed $suggestion): ?string
@@ -614,19 +717,77 @@ class SalesToolbox
             return null;
         }
 
-        $normalizedQuery = collect($this->searchVariants($query))->last();
-        $needle = is_string($normalizedQuery)
-            ? collect(explode(' ', $normalizedQuery))->last()
-            : null;
-        if (! is_string($needle) || mb_strlen($needle) < 4 || $needle === $suggestion) {
+        $queryTokens = collect($this->searchTermGroups($query))
+            ->map(fn (array $variants): string => (string) end($variants))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+            ->values();
+        $suggestionTokens = collect(preg_split('/[^\p{L}\p{N}]+/u', $suggestion, -1, PREG_SPLIT_NO_EMPTY) ?: [])
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+            ->values();
+        if ($queryTokens->isEmpty() || $suggestionTokens->isEmpty()) {
             return null;
         }
 
-        $distance = $this->utf8Distance($needle, $suggestion);
-        $length = max(mb_strlen($needle), mb_strlen($suggestion));
+        foreach ($queryTokens->all() as $key => $token) {
+            $matchingSuggestion = $suggestionTokens->search($token, true);
+            if ($matchingSuggestion !== false) {
+                $queryTokens->forget($key);
+                $suggestionTokens->forget($matchingSuggestion);
+            }
+        }
+        $queryDifference = $queryTokens->values()->implode(' ');
+        $suggestionDifference = $suggestionTokens->values()->implode(' ');
+        if ($queryDifference === '' || $suggestionDifference === '') {
+            return null;
+        }
+
+        $distance = $this->utf8Distance($queryDifference, $suggestionDifference);
+        $length = max(mb_strlen($queryDifference), mb_strlen($suggestionDifference));
         $maximumDistance = min(3, max(1, (int) floor($length * 0.25)));
 
         return $distance <= $maximumDistance ? $suggestion : null;
+    }
+
+    private function productSearchScore($product, array $termGroups): int
+    {
+        if ($termGroups === []) {
+            return 0;
+        }
+
+        $fields = [
+            'sku' => Str::lower((string) $product->sku),
+            'name' => Str::lower((string) $product->name),
+            'author' => Str::lower((string) data_get($product->metadata, 'author', '')),
+            'category' => Str::lower((string) $product->category),
+            'genres' => Str::lower(implode(' ', array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar'))),
+            'description' => Str::lower((string) $product->description),
+            'search_text' => Str::lower((string) $product->search_text),
+        ];
+        $tokens = collect($fields)->map(fn (string $field): array => preg_split('/[^\p{L}\p{N}%_+\-.]+/u', $field, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        $weights = ['sku' => 220, 'name' => 180, 'author' => 200, 'category' => 120, 'genres' => 120, 'description' => 70, 'search_text' => 40];
+        $score = 0;
+
+        foreach ($termGroups as $variants) {
+            $best = 0;
+            foreach ($variants as $variant) {
+                foreach ($fields as $name => $field) {
+                    if ($field === '') {
+                        continue;
+                    }
+                    $weight = $weights[$name];
+                    if ($field === $variant) {
+                        $best = max($best, $weight + 80);
+                    } elseif (in_array($variant, $tokens[$name], true)) {
+                        $best = max($best, $weight + 40);
+                    } elseif (str_contains($field, $variant)) {
+                        $best = max($best, $weight);
+                    }
+                }
+            }
+            $score += $best;
+        }
+
+        return $score;
     }
 
     private function utf8Distance(string $left, string $right): int
