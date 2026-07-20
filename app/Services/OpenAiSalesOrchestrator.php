@@ -463,13 +463,15 @@ class OpenAiSalesOrchestrator
         return $successful->flatMap(function ($call): array {
             $result = $call['result'] ?? [];
 
-            return match ($call['name'] ?? null) {
+            $facts = match ($call['name'] ?? null) {
                 'search_products', 'compare_products' => $result['products'] ?? [],
                 'recommend_products' => $result['recommendations'] ?? [],
                 'check_stock' => [array_merge($result, ['id' => $result['product_id'] ?? null])],
                 'build_offer' => collect($result['items'] ?? [])->map(fn ($item) => array_merge($item, ['id' => $item['product_id'] ?? null, 'price' => $item['unit_price'] ?? null]))->all(),
                 default => [],
             };
+
+            return $facts instanceof Collection ? $facts->all() : (is_array($facts) ? $facts : []);
         })->filter(fn ($product) => is_array($product) && isset($product['id']))->reduce(function (Collection $facts, array $product): Collection {
             $id = (int) $product['id'];
             $existing = $facts->get($id, []);
