@@ -10,10 +10,27 @@ use Illuminate\Support\Str;
 
 class SalesAgentService
 {
-    public function __construct(private OpenAiSalesOrchestrator $orchestrator, private SalesToolbox $tools) {}
+    public function __construct(
+        private OpenAiSalesOrchestrator $orchestrator,
+        private SalesToolbox $tools,
+        private VerifiedCatalogResponder $catalog,
+    ) {}
 
     public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
     {
+        if ($conversation && $reply = $this->catalog->respond($agent, $conversation, $message)) {
+            AgentRun::create([
+                'agent_id' => $agent->id,
+                'conversation_id' => $conversation->id,
+                'provider' => 'local',
+                'model' => 'verified-catalog-responder',
+                'status' => 'completed',
+                'tools_used' => collect($reply['tools_used'] ?? [])->map(fn ($name): array => ['name' => $name])->all(),
+            ]);
+
+            return $reply;
+        }
+
         if (config('services.openai.key') && $conversation) {
             if ($this->quotaExceeded($agent)) {
                 return $this->failClosed($agent, $conversation, $message, 'The workspace AI usage limit has been reached.');

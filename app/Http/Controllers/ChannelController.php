@@ -42,6 +42,9 @@ class ChannelController extends Controller
 
         $productCount = $agent->products()->where('is_active', true)->count();
         $knowledgeSourceCount = $agent->knowledgeSources()->count();
+        $failedKnowledgeSources = $agent->knowledgeSources()
+            ->where('status', 'failed')
+            ->get(['id', 'name', 'error']);
         $commerceConnection = $agent->commerceConnection()->first();
         $commerceProductCount = $commerceConnection
             ? $agent->products()->where('commerce_connection_id', $commerceConnection->id)->where('is_active', true)->count()
@@ -61,6 +64,7 @@ class ChannelController extends Controller
             'metaChannels',
             'productCount',
             'knowledgeSourceCount',
+            'failedKnowledgeSources',
             'widgetDomains',
             'commerceConnection',
             'commerceProductCount',

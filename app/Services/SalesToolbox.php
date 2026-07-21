@@ -588,12 +588,15 @@ class SalesToolbox
         }
 
         $stopWords = [
-            'a', 'an', 'any', 'are', 'by', 'can', 'could', 'do', 'does', 'find', 'for', 'got',
+            'a', 'an', 'any', 'are', 'available', 'by', 'can', 'cost', 'could', 'do', 'does', 'find', 'for', 'got',
             'has', 'have', 'i', 'is', 'looking', 'me', 'need', 'of', 'please', 'show', 'the',
-            'to', 'want', 'what', 'which', 'would', 'you',
+            'to', 'want', 'what', 'which', 'would', 'you', 'price', 'stock',
             'ან', 'არის', 'გაქვთ', 'გაქვს', 'გთხოვ', 'გთხოვთ', 'და', 'თუ', 'იქნებ', 'მაჩვენე',
             'მაჩვენეთ', 'მინდა', 'მირჩიე', 'მირჩიეთ', 'მომიძებნე', 'მომიძებნეთ', 'რა', 'რას',
-            'რომელი', 'შეგიძლიათ', 'შეიძლება', 'თქვენ', 'თქვენთან', 'ხომ',
+            'რომელი', 'რამდენი', 'შეგიძლიათ', 'შეიძლება', 'თქვენ', 'თქვენთან', 'ხომ',
+            'წიგნი', 'წიგნები', 'წიგნის', 'წიგნებს', 'პროდუქტი', 'პროდუქტები',
+            'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები',
+            'ფასი', 'ღირს', 'მარაგი', 'მარაგშია', 'მარაგში', 'ხელმისაწვდომი', 'ხელმისაწვდომია',
         ];
 
         return collect($tokens)
@@ -735,17 +738,27 @@ class SalesToolbox
                 $suggestionTokens->forget($matchingSuggestion);
             }
         }
-        $queryDifference = $queryTokens->values()->implode(' ');
-        $suggestionDifference = $suggestionTokens->values()->implode(' ');
-        if ($queryDifference === '' || $suggestionDifference === '') {
+        if ($queryTokens->isEmpty() || $suggestionTokens->isEmpty()) {
             return null;
         }
 
-        $distance = $this->utf8Distance($queryDifference, $suggestionDifference);
-        $length = max(mb_strlen($queryDifference), mb_strlen($suggestionDifference));
-        $maximumDistance = min(3, max(1, (int) floor($length * 0.25)));
+        // A connector may return only the corrected author/title token while
+        // the customer phrase also contains conversational catalogue words.
+        // Accept the suggestion only when at least one unmatched token is a
+        // close UTF-8 edit; unrelated suggestions remain rejected.
+        foreach ($queryTokens as $queryToken) {
+            foreach ($suggestionTokens as $suggestionToken) {
+                $distance = $this->utf8Distance($queryToken, $suggestionToken);
+                $length = max(mb_strlen($queryToken), mb_strlen($suggestionToken));
+                $maximumDistance = min(3, max(1, (int) floor($length * 0.25)));
 
-        return $distance <= $maximumDistance ? $suggestion : null;
+                if ($distance <= $maximumDistance) {
+                    return $suggestion;
+                }
+            }
+        }
+
+        return null;
     }
 
     private function productSearchScore($product, array $termGroups): int

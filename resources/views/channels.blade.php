@@ -33,6 +33,12 @@
                 <div><b>წყაროს შემოწმება სჭირდება · Source needs attention</b><p>{{ $warning }}</p></div>
             </div>
         @endforeach
+        @foreach($failedKnowledgeSources as $failedSource)
+            <div class="channel-alert channel-alert--error" role="alert">
+                <span>!</span>
+                <div><b>{{ $failedSource->name }} · Source is not usable</b><p>{{ $failedSource->error ?: 'No verified products were imported from this source.' }}</p></div>
+            </div>
+        @endforeach
         @if(session('error') || session('channel_error') || session('commerce_error'))
             <div class="channel-alert channel-alert--error" role="alert">
                 <span>!</span>
@@ -41,7 +47,7 @@
         @endif
 
         <ol class="setup-progress" aria-label="დაყენების სამი ნაბიჯი">
-            <li class="{{ $productCount > 0 || $knowledgeSourceCount > 0 ? 'is-ready' : '' }}">
+            <li class="{{ $productCount > 0 ? 'is-ready' : '' }}">
                 <span>1</span>
                 <div><b>ასწავლეთ</b><small>კატალოგი და წესები</small></div>
             </li>
@@ -64,10 +70,10 @@
                         <h2 id="knowledge-step-title">მიეცით Legatus-ს თქვენი ბიზნესის ცოდნა</h2>
                         <p>ატვირთეთ კატალოგი ან მიუთითეთ საიტი. პასუხები დაეფუძნება მხოლოდ თქვენს ფასებს, მარაგსა და წესებს.</p>
                     </div>
-                    @if($productCount > 0 || $knowledgeSourceCount > 0)
+                    @if($productCount > 0)
                         <span class="status-badge status-badge--connected">✓ მზადაა</span>
                     @else
-                        <span class="status-badge">გასაკეთებელია</span>
+                        <span class="status-badge">არ არის მზად · 0 პროდუქტი</span>
                     @endif
                 </div>
                 <div class="knowledge-summary">
