@@ -89,19 +89,19 @@ class SalesToolbox
         };
         $products = $localSearch();
 
-        $publicSearch = null;
-        if ($products->isEmpty()) {
-            $storefrontQuery = collect($termGroups)
-                ->map(fn (array $variants): string => (string) end($variants))
-                ->filter()
-                ->implode(' ');
-            $publicSearch = $this->storefront->discover(
-                $agent,
-                $storefrontQuery !== '' ? $storefrontQuery : trim((string) $a['query']),
-            );
-            if (($publicSearch['imported'] ?? 0) > 0) {
-                $products = $localSearch();
-            }
+        // A public storefront is a live source. Refresh the matching result
+        // even when an older local copy exists so sale prices and availability
+        // do not silently become stale between scheduled full syncs.
+        $storefrontQuery = collect($termGroups)
+            ->map(fn (array $variants): string => (string) end($variants))
+            ->filter()
+            ->implode(' ');
+        $publicSearch = $this->storefront->discover(
+            $agent,
+            $storefrontQuery !== '' ? $storefrontQuery : trim((string) $a['query']),
+        );
+        if (($publicSearch['imported'] ?? 0) > 0) {
+            $products = $localSearch();
         }
         $remoteSearch = null;
         if ($products->isEmpty()) {

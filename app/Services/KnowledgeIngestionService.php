@@ -450,6 +450,7 @@ class KnowledgeIngestionService
             $authorNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-author-link ") or contains(concat(" ", normalize-space(@class), " "), " book-author-text ")]', $card)->item(0);
             $imageNode = $xpath->query('.//img[@src]', $card)->item(0);
             $cartNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " toggle-cart-btn ")]', $card)->item(0);
+            $oldPriceNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " text-secondary ") or contains(translate(@style, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "line-through")]', $card)->item(0);
             $name = trim((string) ($titleNode?->getAttribute('title') ?: $titleNode?->textContent));
             $url = $this->absoluteCatalogUrl($origin, (string) $linkNode?->getAttribute('href'));
             $text = preg_replace('/\s+/u', ' ', trim((string) $card->textContent)) ?? '';
@@ -465,6 +466,7 @@ class KnowledgeIngestionService
                 'author' => trim((string) $authorNode?->textContent) ?: null,
                 'category' => 'Books',
                 'price' => str_replace(',', '.', $priceMatch[1]),
+                'original_price' => $this->priceFromText((string) $oldPriceNode?->textContent),
                 'priceCurrency' => 'GEL',
                 'stock' => $cartNode ? 1 : 0,
                 'stock_precision' => 'availability_only',
@@ -474,6 +476,28 @@ class KnowledgeIngestionService
         }
 
         return array_slice($products, 0, 100);
+    }
+
+    public function storefrontOriginalPriceFromHtml(string $html): ?float
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        $node = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " product-price ")]//*[contains(concat(" ", normalize-space(@class), " "), " old-price ")]')->item(0)
+            ?? $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " old-price ")]')->item(0);
+
+        return $this->priceFromText((string) $node?->textContent);
+    }
+
+    private function priceFromText(string $text): ?float
+    {
+        if (! preg_match('/([0-9]+(?:[.,][0-9]{1,2})?)/u', $text, $match)) {
+            return null;
+        }
+
+        $price = (float) str_replace(',', '.', $match[1]);
+
+        return is_finite($price) && $price > 0 ? $price : null;
     }
 
     private function absoluteCatalogUrl(string $origin, string $url): ?string
@@ -537,6 +561,12 @@ class KnowledgeIngestionService
         $sku = $this->catalogText($product['sku'] ?? $product['id'] ?? null, 191) ?: null;
         $image = $this->catalogUrl($product['image_url'] ?? $product['image'] ?? null);
         $productUrl = $this->catalogUrl($product['url'] ?? null);
+        $originalPrice = isset($product['original_price']) && is_scalar($product['original_price']) && ! is_bool($product['original_price'])
+            ? $this->number($product['original_price'])
+            : null;
+        if ($originalPrice === null || ! is_finite($originalPrice) || $originalPrice <= $price || $originalPrice > 99_999_999.99) {
+            $originalPrice = null;
+        }
 
         $author = $this->catalogText($product['author'] ?? $product['brand']['name'] ?? null, 255) ?: null;
         $genres = $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [];
@@ -566,6 +596,10 @@ class KnowledgeIngestionService
                 'genres' => $this->searchableValues($genres, 120),
                 'isbn' => $isbn,
                 'currency' => $currency,
+                'original_price' => $originalPrice,
+                'discount_percent' => $originalPrice
+                    ? round((1 - ($price / $originalPrice)) * 100, 1)
+                    : null,
                 'stock_precision' => ($product['stock_precision'] ?? null) === 'availability_only'
                     ? 'availability_only'
                     : 'exact',

@@ -32,6 +32,7 @@ class PublicStorefrontCatalog
             );
             $products = $this->ingestion->storefrontProductsFromHtml($searchPage->body(), $origin);
             if ($products !== []) {
+                $products = $this->enrichOriginalPrices($products, $parts);
                 $result = $this->ingestion->importDiscoveredUrlProducts($source, $products);
 
                 return [
@@ -140,5 +141,30 @@ class PublicStorefrontCatalog
         return ($parts['scheme'] ?? null) === ($catalogParts['scheme'] ?? null)
             && Str::lower((string) ($parts['host'] ?? '')) === Str::lower((string) ($catalogParts['host'] ?? ''))
             && str_starts_with((string) ($parts['path'] ?? ''), '/books/');
+    }
+
+    /** @param list<array> $products
+     * @return list<array>
+     */
+    private function enrichOriginalPrices(array $products, array $catalogParts): array
+    {
+        foreach (array_slice(array_keys($products), 0, 3) as $index) {
+            $url = (string) ($products[$index]['url'] ?? '');
+            if (($products[$index]['original_price'] ?? null) !== null || ! $this->sameOriginProductUrl($url, $catalogParts)) {
+                continue;
+            }
+
+            try {
+                $detail = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html']);
+                $originalPrice = $this->ingestion->storefrontOriginalPriceFromHtml($detail->body());
+                if ($originalPrice !== null && $originalPrice > (float) ($products[$index]['price'] ?? 0)) {
+                    $products[$index]['original_price'] = $originalPrice;
+                }
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return $products;
     }
 }

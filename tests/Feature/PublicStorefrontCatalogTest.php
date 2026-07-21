@@ -29,7 +29,7 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertDatabaseHas('products', [
             'agent_id' => $agent->id,
             'name' => 'საიუბილეო საარქივო გამოცემა',
-            'price' => 60,
+            'price' => 14,
             'stock' => 1,
             'is_active' => true,
         ]);
@@ -45,6 +45,10 @@ class PublicStorefrontCatalogTest extends TestCase
                 return Http::response($this->searchCardsHtml(), 200, ['Content-Type' => 'text/html']);
             }
 
+            if (str_contains($request->url(), '/books/paolo-iashvili/42')) {
+                return Http::response('<div class="product-price"><strong>14 ₾</strong><span class="old-price">20 ₾</span></div>', 200, ['Content-Type' => 'text/html']);
+            }
+
             return Http::response([], 404);
         });
         config(['services.openai.key' => 'must-not-be-called']);
@@ -54,17 +58,18 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertFalse($reply['handoff']);
         $this->assertCount(1, $reply['products']);
         $this->assertStringContainsString('პაოლო იაშვილი', $reply['text']);
-        $this->assertStringContainsString('60.00 ₾', $reply['text']);
+        $this->assertStringContainsString('20.00 ₾-ის ნაცვლად 14.00 ₾', $reply['text']);
+        $this->assertStringContainsString('30% ფასდაკლება', $reply['text']);
         $this->assertStringContainsString('ხელმისაწვდომია', $reply['text']);
         $this->assertStringNotContainsString('მარაგში 1 ც.', $reply['text']);
         $this->assertDatabaseHas('products', [
             'agent_id' => $agent->id,
             'name' => 'საიუბილეო საარქივო გამოცემა',
-            'price' => 60,
+            'price' => 14,
             'stock' => 1,
             'is_active' => true,
         ]);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_public_search_never_follows_a_cross_origin_product_url(): void
@@ -125,7 +130,7 @@ class PublicStorefrontCatalogTest extends TestCase
           </a>
           <h2 class="book-title-strong" title="საიუბილეო საარქივო გამოცემა">საიუბილეო საარქივო გამოცემა</h2>
           <a class="book-author-link">პაოლო იაშვილი</a>
-          <p>₾ <span>60.00</span></p>
+          <p>₾ <span>14.00</span></p>
           <button class="toggle-cart-btn" data-product-id="42">კალათაში</button>
         </div>
         </body></html>

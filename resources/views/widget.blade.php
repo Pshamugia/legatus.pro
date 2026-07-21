@@ -183,7 +183,12 @@
                     card.rel = 'noopener noreferrer';
                 }
                 name.textContent = product.name || 'Product';
-                detail.textContent = `${product.price ?? '—'} ₾ · ${product.stock ? 'მარაგშია' : 'ამოიწურა'}`;
+                const currentPrice = Number(product.price);
+                const originalPrice = Number(product.original_price || 0);
+                const priceText = originalPrice > currentPrice
+                    ? `${currentPrice.toFixed(2)} ₾ · ადრე ${originalPrice.toFixed(2)} ₾`
+                    : `${currentPrice.toFixed(2)} ₾`;
+                detail.textContent = `${priceText} · ${product.stock ? 'მარაგშია' : 'ამოიწურა'}`;
                 card.append(name, detail);
                 row.append(card);
             });

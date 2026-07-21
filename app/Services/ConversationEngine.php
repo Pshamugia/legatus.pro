@@ -8,6 +8,7 @@ use App\Models\Message;
 use App\Models\Reservation;
 use App\Support\PrivacyRedactor;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Str;
 
 /**
  * Channel-neutral conversation runtime.
@@ -84,6 +85,18 @@ class ConversationEngine
             }
         }
 
+        if ($conversation->status === 'human' && $this->isRecoverableTechnicalHandoff($conversation)) {
+            $conversation->update([
+                'status' => 'ai',
+                'handoff_reason' => null,
+                'handoff_summary' => null,
+                'suggested_reply' => null,
+                'assigned_to' => null,
+                'outcome' => null,
+            ]);
+            $conversation->refresh();
+        }
+
         if ($conversation->status === 'human') {
             $conversation->update(['last_message_at' => now()]);
 
@@ -106,6 +119,11 @@ class ConversationEngine
         $reply = $this->salesAgent->reply($agent, $text, $conversation);
         $reply['text'] = PrivacyRedactor::text($reply['text']);
         $reply['products'] = $this->publicProducts($reply['products'] ?? [], $conversation);
+        if ($reply['products'] !== []) {
+            $context = is_array($conversation->context) ? $conversation->context : [];
+            $context['last_catalog_product_ids'] = collect($reply['products'])->pluck('id')->filter()->values()->all();
+            $conversation->context = $context;
+        }
 
         $assistant = $conversation->messages()->create([
             'role' => 'assistant',
@@ -206,9 +224,27 @@ class ConversationEngine
                 'price' => (float) data_get($product, 'price', 0),
                 'stock' => $stock,
                 'image' => data_get($product, 'image'),
-                'url' => data_get($product, 'url') ?: data_get($product, 'metadata.url'),
+                'url' => data_get($product, 'url')
+                    ?: data_get($product, 'metadata.product_url')
+                    ?: data_get($product, 'metadata.url'),
+                'original_price' => ($original = data_get($product, 'metadata.original_price')) !== null ? (float) $original : null,
+                'discount_percent' => ($discount = data_get($product, 'metadata.discount_percent')) !== null ? (float) $discount : null,
             ];
         })->values()->all();
+    }
+
+    private function isRecoverableTechnicalHandoff(Conversation $conversation): bool
+    {
+        if ($conversation->assigned_to !== null) {
+            return false;
+        }
+
+        return Str::contains(Str::lower((string) $conversation->handoff_reason), [
+            'required verification tool was not called',
+            'catalog_search_mismatch',
+            'the ai provider or verification workflow failed safely',
+            'the verified ai service is unavailable',
+        ]);
     }
 
     private function defaultCustomerName(string $channel): string
