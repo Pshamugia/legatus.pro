@@ -92,13 +92,12 @@ class SalesToolbox
         // A public storefront is a live source. Refresh the matching result
         // even when an older local copy exists so sale prices and availability
         // do not silently become stale between scheduled full syncs.
-        $storefrontQuery = collect($termGroups)
-            ->map(fn (array $variants): string => (string) end($variants))
-            ->filter()
-            ->implode(' ');
+        $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
+        $storefrontQuery = $storefrontQueries[0] ?? trim((string) $a['query']);
         $publicSearch = $this->storefront->discover(
             $agent,
-            $storefrontQuery !== '' ? $storefrontQuery : trim((string) $a['query']),
+            $storefrontQuery,
+            array_slice($storefrontQueries, 1),
         );
         if (($publicSearch['imported'] ?? 0) > 0) {
             $products = $localSearch();
@@ -142,8 +141,9 @@ class SalesToolbox
         $presented = $candidates
             ->map(function ($product) use ($conversation, $termGroups): array {
                 $available = $this->availableStock($product, $conversation);
+                $precision = $this->stockPrecision($product);
 
-                return [
+                $presented = [
                     'id' => $product->id,
                     'name' => $product->name,
                     'sku' => $product->sku,
@@ -152,14 +152,22 @@ class SalesToolbox
                     'category' => $product->category,
                     'description' => $product->description,
                     'price' => (float) $product->price,
-                    'stock' => $available,
-                    'available_stock' => $available,
+                    'available' => $available > 0,
+                    'stock_precision' => $precision,
                     'updated_at' => $product->updated_at,
+                    '_available_stock' => $available,
                     '_search_score' => $this->productSearchScore($product, $termGroups),
                     '_matched_groups' => $this->productMatchedGroupCount($product, $termGroups),
                 ];
+
+                if ($precision === 'exact') {
+                    $presented['stock'] = $available;
+                    $presented['available_stock'] = $available;
+                }
+
+                return $presented;
             })
-            ->filter(fn (array $product) => $product['available_stock'] > 0);
+            ->filter(fn (array $product) => $product['_available_stock'] > 0);
         if ($termGroups !== []) {
             $maximumMatches = (int) $presented->max('_matched_groups');
             $presented = $presented->filter(fn (array $product): bool => $product['_search_score'] > 0
@@ -170,7 +178,7 @@ class SalesToolbox
             ->sortByDesc('_search_score')
             ->take(6)
             ->map(function (array $product): array {
-                unset($product['_search_score'], $product['_matched_groups']);
+                unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups']);
 
                 return $product;
             })
@@ -263,8 +271,19 @@ class SalesToolbox
             $available = $this->availableStock($p, $c);
             $score = $matched->count() * 2 + ($within ? 2 : -5) + ($available > 0 ? 2 : -6);
 
-            return ['id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'stock' => $available, 'available_stock' => $available, 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within];
-        })->filter(fn (array $product) => $product['available_stock'] > 0)->sortByDesc('score')->take($a['limit'])->values();
+            $result = ['id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available];
+            if ($result['stock_precision'] === 'exact') {
+                $result['stock'] = $available;
+                $result['available_stock'] = $available;
+            }
+
+            return $result;
+        })->filter(fn (array $product) => $product['_available_stock'] > 0)->sortByDesc('score')->take($a['limit'])->values()
+            ->map(function (array $product): array {
+                unset($product['_available_stock']);
+
+                return $product;
+            });
         RecommendationEvent::create(['conversation_id' => $c->id, 'query' => PrivacyRedactor::structured($a), 'ranked_products' => PrivacyRedactor::structured($ranked->all())]);
 
         return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'recommendations' => $ranked->all()];
@@ -272,7 +291,16 @@ class SalesToolbox
 
     private function compare(Agent $agent, Conversation $conversation, array $a): array
     {
-        $products = $agent->products()->where('is_active', true)->whereIn('id', $a['product_ids'])->get()->map(fn ($p) => ['id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'stock' => $this->availableStock($p, $conversation), 'metadata' => $p->metadata])->values();
+        $products = $agent->products()->where('is_active', true)->whereIn('id', $a['product_ids'])->get()->map(function ($p) use ($conversation): array {
+            $available = $this->availableStock($p, $conversation);
+            $precision = $this->stockPrecision($p);
+            $result = ['id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $precision, 'metadata' => $p->metadata];
+            if ($precision === 'exact') {
+                $result['stock'] = $available;
+            }
+
+            return $result;
+        })->values();
 
         return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'products' => $products, 'comparison_fields' => ['fit', 'category', 'price', 'availability']];
     }
@@ -338,6 +366,7 @@ class SalesToolbox
                     'catalog_stock' => $stock,
                     'stock' => $available,
                     'available_stock' => $available,
+                    'stock_precision' => 'exact',
                     'available' => $canFulfil,
                     'in_stock' => $remote['in_stock'],
                     'purchasable' => $remote['purchasable'],
@@ -352,7 +381,27 @@ class SalesToolbox
 
         $available = $p ? $this->availableStock($p, $conversation) : 0;
 
-        return $p ? ['ok' => true, 'product_id' => $p->id, 'name' => $p->name, 'price' => (float) $p->price, 'catalog_stock' => (int) $p->stock, 'stock' => $available, 'available_stock' => $available, 'available' => $available >= $a['quantity'], 'source' => $this->catalogSource($agent)] : ['ok' => false, 'error' => 'Active product not found'];
+        if (! $p) {
+            return ['ok' => false, 'error' => 'Active product not found'];
+        }
+
+        $result = [
+            'ok' => true,
+            'product_id' => $p->id,
+            'name' => $p->name,
+            'price' => (float) $p->price,
+            'stock_precision' => $this->stockPrecision($p),
+            'available' => $available >= $a['quantity'],
+            'in_stock' => $available > 0,
+            'source' => $this->catalogSource($agent),
+        ];
+        if ($result['stock_precision'] === 'exact') {
+            $result['catalog_stock'] = (int) $p->stock;
+            $result['stock'] = $available;
+            $result['available_stock'] = $available;
+        }
+
+        return $result;
     }
 
     private function delivery(Agent $agent, array $a): array
@@ -605,6 +654,13 @@ class SalesToolbox
         return max(0, (int) $product->stock - (int) $held);
     }
 
+    private function stockPrecision($product): string
+    {
+        return data_get($product->metadata, 'stock_precision') === 'availability_only'
+            ? 'availability_only'
+            : 'exact';
+    }
+
     /** @return list<list<string>> */
     private function searchTermGroups(string $term): array
     {
@@ -621,7 +677,7 @@ class SalesToolbox
             'to', 'want', 'what', 'which', 'would', 'you', 'price', 'stock',
             'ან', 'არის', 'გაქვთ', 'გაქვს', 'გთხოვ', 'გთხოვთ', 'და', 'თუ', 'იქნებ', 'მაჩვენე',
             'მაჩვენეთ', 'მინდა', 'მირჩიე', 'მირჩიეთ', 'მომიძებნე', 'მომიძებნეთ', 'რა', 'რას',
-            'რომელი', 'რამდენი', 'შეგიძლიათ', 'შეიძლება', 'თქვენ', 'თქვენთან', 'ხომ',
+            'რომელი', 'რამდენი', 'შეგიძლიათ', 'შეიძლება', 'თქვენ', 'თქვენთან', 'ხომ', 'ეს', 'მარტო',
             'წიგნი', 'წიგნები', 'წიგნის', 'წიგნებს', 'პროდუქტი', 'პროდუქტები',
             'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები',
             'ფასი', 'ღირს', 'მარაგი', 'მარაგშია', 'მარაგში', 'ხელმისაწვდომი', 'ხელმისაწვდომია',
@@ -630,26 +686,60 @@ class SalesToolbox
         return collect($tokens)
             ->filter(fn (string $token): bool => ! in_array($token, $stopWords, true))
             ->filter(fn (string $token): bool => mb_strlen($token) >= 2)
-            ->map(function (string $token): array {
-                return array_values(array_unique([$token, $this->georgianNominative($token)]));
-            })
+            ->map(fn (string $token): array => $this->georgianSearchVariants($token))
             ->values()
             ->all();
     }
 
-    private function georgianNominative(string $token): string
+    /** @return list<string> */
+    private function georgianSearchVariants(string $token): array
     {
         if (! preg_match('/^[\x{10D0}-\x{10FF}]+$/u', $token)) {
-            return $token;
+            return [$token];
         }
 
-        foreach (['ის', 'მა', 'ით', 'ად', 'ზე', 'ში', 'ს', 'ო'] as $suffix) {
-            if (Str::endsWith($token, $suffix) && mb_strlen($token) > mb_strlen($suffix) + 2) {
-                return mb_substr($token, 0, -mb_strlen($suffix)).'ი';
+        $variants = [$token];
+        foreach (['იდან', 'თან', 'თვის', 'გან', 'ის', 'ით', 'ად', 'ზე', 'ში', 'მა', 'ემ', 'ს', 'ო'] as $suffix) {
+            if (! Str::endsWith($token, $suffix) || mb_strlen($token) <= mb_strlen($suffix) + 2) {
+                continue;
             }
+
+            $stem = mb_substr($token, 0, -mb_strlen($suffix));
+            $variants[] = $stem;
+
+            // Georgian consonant-stem nouns commonly restore -ი, while many
+            // -ე surnames drop that vowel in oblique cases (ინასარიძის). Keep
+            // both linguistically plausible lemmas and let verified catalog
+            // evidence choose; no customer-facing guess is made.
+            if (! Str::endsWith($stem, ['ა', 'ე', 'ი', 'ო', 'უ'])) {
+                $variants[] = $stem.'ი';
+                $variants[] = $stem.'ე';
+            }
+            break;
         }
 
-        return $token;
+        return array_values(array_unique(array_filter($variants, fn (string $variant): bool => mb_strlen($variant) >= 2)));
+    }
+
+    /** @param list<list<string>> $termGroups
+     * @return list<string>
+     */
+    private function storefrontQueryCandidates(array $termGroups): array
+    {
+        if ($termGroups === []) {
+            return [];
+        }
+
+        $maximumVariants = max(array_map('count', $termGroups));
+        $queries = [];
+        for ($variant = 0; $variant < $maximumVariants; $variant++) {
+            $queries[] = collect($termGroups)
+                ->map(fn (array $group): string => (string) ($group[$variant] ?? $group[0] ?? ''))
+                ->filter()
+                ->implode(' ');
+        }
+
+        return collect($queries)->filter()->unique()->take(6)->values()->all();
     }
 
     private function literalContainsPattern(string $term): string
@@ -670,7 +760,9 @@ class SalesToolbox
         }
 
         $connectorQuery = collect($termGroups)
-            ->map(fn (array $variants): string => (string) end($variants))
+            // Preserve the customer's meaningful spelling for the remote
+            // catalogue so its own typo engine can return did_you_mean.
+            ->map(fn (array $variants): string => (string) ($variants[0] ?? ''))
             ->filter()
             ->implode(' ');
         if ($connectorQuery === '') {
@@ -749,8 +841,9 @@ class SalesToolbox
         }
 
         $queryTokens = collect($this->searchTermGroups($query))
-            ->map(fn (array $variants): string => (string) end($variants))
+            ->flatten()
             ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+            ->unique()
             ->values();
         $suggestionTokens = collect(preg_split('/[^\p{L}\p{N}]+/u', $suggestion, -1, PREG_SPLIT_NO_EMPTY) ?: [])
             ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
@@ -759,14 +852,9 @@ class SalesToolbox
             return null;
         }
 
-        foreach ($queryTokens->all() as $key => $token) {
-            $matchingSuggestion = $suggestionTokens->search($token, true);
-            if ($matchingSuggestion !== false) {
-                $queryTokens->forget($key);
-                $suggestionTokens->forget($matchingSuggestion);
-            }
-        }
-        if ($queryTokens->isEmpty() || $suggestionTokens->isEmpty()) {
+        // If the suggestion is already one of the query's legitimate
+        // inflection variants, it is not a typo and needs no confirmation.
+        if ($queryTokens->intersect($suggestionTokens)->isNotEmpty()) {
             return null;
         }
 

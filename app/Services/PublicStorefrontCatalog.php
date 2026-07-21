@@ -10,7 +10,7 @@ class PublicStorefrontCatalog
     public function __construct(private KnowledgeIngestionService $ingestion) {}
 
     /** @return array{imported: int, did_you_mean: ?string, source: ?array} */
-    public function discover(Agent $agent, string $query): array
+    public function discover(Agent $agent, string $query, array $alternatives = []): array
     {
         $source = $this->catalogSource($agent);
         if (! $source || ! $this->validQuery($query)) {
@@ -27,7 +27,7 @@ class PublicStorefrontCatalog
         // conversational words. Try the full query first, then a bounded set
         // of strongest contiguous phrases. This is generic query relaxation,
         // not a list of hard-coded customer sentences.
-        foreach ($this->queryCandidates($query) as $candidate) {
+        foreach ($this->queryCandidates($query, $alternatives) as $candidate) {
             try {
                 $searchPage = $this->ingestion->fetchPublicUrl(
                     $origin.'/search?title='.rawurlencode($candidate),
@@ -136,16 +136,13 @@ class PublicStorefrontCatalog
     }
 
     /** @return list<string> */
-    private function queryCandidates(string $query): array
+    private function queryCandidates(string $query, array $alternatives = []): array
     {
         $query = preg_replace('/\s+/u', ' ', trim($query)) ?? '';
         $tokens = preg_split('/[^\pL\pN%_+\-.]+/u', Str::lower($query), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        if (count($tokens) <= 2) {
-            return [$query];
-        }
 
         $phrases = [];
-        foreach ([3, 2] as $size) {
+        foreach (array_filter([3, 2], fn (int $size): bool => count($tokens) >= $size) as $size) {
             for ($offset = 0; $offset + $size <= count($tokens); $offset++) {
                 $slice = array_slice($tokens, $offset, $size);
                 $phrases[] = [
@@ -157,11 +154,12 @@ class PublicStorefrontCatalog
         usort($phrases, fn (array $left, array $right): int => $right['weight'] <=> $left['weight']);
 
         return collect([$query])
+            ->merge($alternatives)
             ->merge(collect($phrases)->pluck('text'))
             ->merge(collect($tokens)->sortByDesc(fn (string $token): int => mb_strlen($token)))
             ->filter(fn (string $candidate): bool => mb_strlen($candidate) >= 3)
             ->unique()
-            ->take(5)
+            ->take(8)
             ->values()
             ->all();
     }

@@ -20,7 +20,7 @@ class VerifiedCatalogResponder
 
     public function respond(Agent $agent, Conversation $conversation, string $message): ?array
     {
-        if ($this->isCartFollowUp($message) || $this->isExplicitContextFollowUp($message)) {
+        if ($this->isCartFollowUp($message)) {
             return $this->respondFromRecentProducts($agent, $conversation, $message);
         }
 
@@ -79,7 +79,7 @@ class VerifiedCatalogResponder
         });
         $verified = $checks
             ->filter(fn (array $check): bool => ($check['ok'] ?? false) === true)
-            ->filter(fn (array $check): bool => (int) ($check['available_stock'] ?? $check['stock'] ?? 0) > 0);
+            ->filter(fn (array $check): bool => $this->checkIsAvailable($check));
 
         if ($verified->isEmpty()) {
             return [
@@ -179,7 +179,7 @@ class VerifiedCatalogResponder
         if ($cart) {
             $product = $verifiedProducts->first();
             $check = $checks->get($product->id, []);
-            $available = (int) ($check['available_stock'] ?? $check['stock'] ?? 0) > 0;
+            $available = $this->checkIsAvailable($check);
 
             return [
                 'text' => $available
@@ -325,24 +325,6 @@ class VerifiedCatalogResponder
         ]);
     }
 
-    private function isExplicitContextFollowUp(string $message): bool
-    {
-        $text = Str::lower($message);
-        $reference = Str::contains($text, [
-            'ეს', 'ამის', 'მისი', 'იმის', 'პირველი', 'მეორე', 'მესამე',
-            ' it', 'this', 'that', 'first', 'second', 'third',
-        ]);
-        $question = Str::contains($text, [
-            'ფასი', 'ღირს', 'sale', 'აქცია', 'ფასდაკლებ', 'ძველი ფასი',
-            'მარაგ', 'ხელმისაწვდომ', 'დეტალ', 'ავტორ', 'ვინ დაწერა', 'რის შესახებ',
-            'ლინკ', 'ბმულ', 'მაჩვენ', 'მირჩი', 'მსგავს', 'სხვა ვარიანტ',
-            'price', 'cost', 'discount', 'stock', 'available', 'details', 'author',
-            'about', 'link', 'show', 'recommend', 'similar', 'another option',
-        ]);
-
-        return $reference && $question;
-    }
-
     private function productLine($product, array $check, bool $georgian): string
     {
         $author = trim((string) data_get($product->metadata, 'author', ''));
@@ -356,7 +338,7 @@ class VerifiedCatalogResponder
                 : $price.' GEL, reduced from '.$this->money($original).' GEL ('.round((1 - $currentPrice / $original) * 100).'% off)')
             : ($georgian ? "{$price} ₾" : "{$price} GEL");
         $stock = (int) ($check['available_stock'] ?? $check['stock'] ?? 0);
-        $availabilityOnly = data_get($product->metadata, 'stock_precision') === 'availability_only';
+        $availabilityOnly = ($check['stock_precision'] ?? data_get($product->metadata, 'stock_precision')) === 'availability_only';
 
         return match (true) {
             $georgian && $availabilityOnly => "• {$identity} — {$sale} · ხელმისაწვდომია",
@@ -364,6 +346,15 @@ class VerifiedCatalogResponder
             $availabilityOnly => "• {$identity} — {$sale} · available",
             default => "• {$identity} — {$sale} · {$stock} in stock",
         };
+    }
+
+    private function checkIsAvailable(array $check): bool
+    {
+        if (is_bool($check['available'] ?? null)) {
+            return $check['available'];
+        }
+
+        return (int) ($check['available_stock'] ?? $check['stock'] ?? 0) > 0;
     }
 
     private function isCatalogLookup(string $message): bool
@@ -377,7 +368,8 @@ class VerifiedCatalogResponder
             'ignore previous', 'system prompt', 'developer message', 'reveal your',
             'წინა ინსტრუქცი', 'სისტემური პრომპტ',
             'ოპერატორ', 'ადამიან', 'მენეჯერ', 'human', 'agent',
-            'ფასდაკლებ', 'discount', 'საბითუმო', 'wholesale', 'bulk',
+            'ფასდაკლებ', 'discount', 'sale', 'აქცია', 'ძველი ფასი', 'original price',
+            'საბითუმო', 'wholesale', 'bulk',
             'მიწოდებ', 'ჩამომივა', 'delivery', 'shipping',
             'დაბრუნებ', 'გარანტი', 'policy', 'return policy', 'refund',
             'მირჩი', 'მსგავს', 'შეადარ', 'აირჩი', 'გადაწყვიტ', 'სხვა ვარიანტ',

@@ -316,6 +316,35 @@ class GuardrailsAndOutcomesTest extends TestCase
             ->assertJsonMissing(['text' => "{$product->name} stock is 99 units."]);
     }
 
+    public function test_availability_only_check_cannot_be_represented_as_one_item_in_stock(): void
+    {
+        [$agent, $product] = $this->salesContext();
+        $product->update(['metadata' => ['stock_precision' => 'availability_only']]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'availability-only-tool', 'output' => [['type' => 'function_call', 'name' => 'check_stock', 'call_id' => 'availability-call', 'arguments' => json_encode(['product_id' => $product->id, 'quantity' => 1])]]])
+            ->push(['id' => 'availability-only-final', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'text' => "{$product->name} has 1 item in stock.",
+                'intent' => 'stock',
+                'confidence' => .99,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [$product->id],
+                'sources' => [],
+                'factual_claims' => [
+                    ['type' => 'product', 'product_id' => $product->id, 'amount' => null, 'quantity' => null, 'reference' => null],
+                    ['type' => 'stock', 'product_id' => $product->id, 'amount' => null, 'quantity' => 1, 'reference' => null],
+                ],
+            ])]]]], 'usage' => []]);
+
+        $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Tell me about the current situation.'])
+            ->assertOk()
+            ->assertJsonPath('handoff', true)
+            ->assertJsonPath('escalation_reason', 'A product stock claim was not bound to that product’s live stock result.')
+            ->assertJsonMissing(['text' => "{$product->name} has 1 item in stock."]);
+    }
+
     public function test_prefix_currency_claim_must_match_the_bound_product_fact(): void
     {
         [$agent, $product] = $this->salesContext();

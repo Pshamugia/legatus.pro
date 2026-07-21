@@ -148,6 +148,38 @@ class VerifiedCatalogResponderTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_named_catalog_question_wins_over_pronoun_context_from_the_previous_answer(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $previous = $agent->products()->create([
+            'name' => 'არისტოტელე ყველაფერი',
+            'search_text' => 'არისტოტელე ყველაფერი ფილოსოფია',
+            'price' => 14,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['author' => 'არისტოტელე'],
+        ]);
+        $expected = $agent->products()->create([
+            'name' => 'ქართველი ერის ისტორია',
+            'search_text' => 'ქართველი ერის ისტორია ივანე ჯავახიშვილი',
+            'price' => 30,
+            'stock' => 5,
+            'is_active' => true,
+            'metadata' => ['author' => 'ივანე ჯავახიშვილი'],
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $first = app(SalesAgentService::class)->reply($agent, 'არისტოტელე რა გაქვთ?', $conversation);
+        $second = app(SalesAgentService::class)->reply($agent, 'ივანე ჯავახიშვილის მარტო ეს გაქვთ?', $conversation);
+
+        $this->assertSame([$previous->id], collect($first['products'])->pluck('id')->all());
+        $this->assertSame([$expected->id], collect($second['products'])->pluck('id')->all());
+        $this->assertStringContainsString('ივანე ჯავახიშვილი', $second['text']);
+        $this->assertStringNotContainsString('არისტოტელე', $second['text']);
+        Http::assertNothingSent();
+    }
+
     public function test_technical_tool_handoff_recovers_but_a_real_operator_handoff_stays_owned(): void
     {
         [$agent, $conversation] = $this->context();

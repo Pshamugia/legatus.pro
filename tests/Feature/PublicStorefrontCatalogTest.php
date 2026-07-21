@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\Conversation;
 use App\Services\KnowledgeIngestionService;
 use App\Services\SalesAgentService;
+use App\Services\SalesToolbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -62,6 +63,13 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertStringContainsString('30% ფასდაკლება', $reply['text']);
         $this->assertStringContainsString('ხელმისაწვდომია', $reply['text']);
         $this->assertStringNotContainsString('მარაგში 1 ც.', $reply['text']);
+        $product = $agent->products()->firstOrFail();
+        $check = app(SalesToolbox::class)->execute('check_stock', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], $agent, $conversation);
+        $this->assertSame('availability_only', $check['stock_precision']);
+        $this->assertArrayNotHasKey('stock', $check);
         $this->assertDatabaseHas('products', [
             'agent_id' => $agent->id,
             'name' => 'საიუბილეო საარქივო გამოცემა',

@@ -255,6 +255,53 @@ class SalesToolboxHardeningTest extends TestCase
         }
     }
 
+    public function test_product_search_restores_e_stem_georgian_surnames_without_a_typo_prompt(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 5);
+        $product->update([
+            'name' => 'ქართული წიგნის ისტორია',
+            'description' => 'გურამ ინასარიძე',
+            'search_text' => 'ქართული წიგნის ისტორია გურამ ინასარიძე ბიბლიოგრაფია',
+        ]);
+
+        foreach (['ინასარიძის რა გაქვთ?', 'ინასარიძეს რა აქვს გამოცემული?', 'ინასარიძემ რა დაწერა?'] as $query) {
+            $result = app(SalesToolbox::class)->execute('search_products', [
+                'query' => $query,
+                'category' => null,
+                'max_price' => null,
+            ], $agent, $conversation);
+
+            $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all(), $query);
+            $this->assertNull($result['did_you_mean'], $query);
+        }
+    }
+
+    public function test_availability_only_catalog_never_exposes_its_internal_sentinel_as_exact_stock(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 1);
+        $product->update(['metadata' => ['stock_precision' => 'availability_only']]);
+
+        $search = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Verified Product',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+        $check = app(SalesToolbox::class)->execute('check_stock', [
+            'product_id' => $product->id,
+            'quantity' => 1,
+        ], $agent, $conversation);
+
+        $this->assertTrue(data_get($search, 'products.0.available'));
+        $this->assertSame('availability_only', data_get($search, 'products.0.stock_precision'));
+        $this->assertArrayNotHasKey('stock', $search['products'][0]);
+        $this->assertArrayNotHasKey('available_stock', $search['products'][0]);
+        $this->assertTrue($check['available']);
+        $this->assertSame('availability_only', $check['stock_precision']);
+        $this->assertArrayNotHasKey('stock', $check);
+        $this->assertArrayNotHasKey('available_stock', $check);
+        $this->assertArrayNotHasKey('catalog_stock', $check);
+    }
+
     public function test_product_search_relaxes_conversational_words_and_ranks_the_strongest_identity_match(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
