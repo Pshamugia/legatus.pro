@@ -214,6 +214,10 @@ class KnowledgeIngestionService
                 $this->assertCatalogItemLimit(count($products));
             }
         }
+        $catalogParts = parse_url((string) $source->url);
+        $origin = ($catalogParts['scheme'] ?? 'https').'://'.($catalogParts['host'] ?? '');
+        $products = array_merge($products, $this->storefrontProductsFromHtml($body, $origin));
+        $this->assertCatalogItemLimit(count($products));
         $result = $this->importUrlProducts($source, $products);
         foreach ($xpath->query('//script|//style|//nav|//footer') as $node) {
             $node->parentNode?->removeChild($node);
@@ -392,6 +396,99 @@ class KnowledgeIngestionService
         return compact('found', 'created', 'updated');
     }
 
+    /**
+     * Import product records discovered through a public storefront search.
+     * The same strict price, currency, stock and text sanitization used by URL
+     * ingestion applies here; public HTML never becomes trusted instructions.
+     *
+     * @param  list<array>  $products
+     * @return array{found: int, created: int, updated: int}
+     */
+    public function importDiscoveredUrlProducts(KnowledgeSource $source, array $products): array
+    {
+        return DB::transaction(fn (): array => $this->importUrlProducts($source, $products));
+    }
+
+    /** @return list<array> */
+    public function structuredProductsFromHtml(string $body): array
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$body);
+        $xpath = new \DOMXPath($dom);
+        $products = [];
+
+        foreach ($xpath->query('//script[@type="application/ld+json"]') as $node) {
+            $json = json_decode($node->textContent, true);
+            if (is_array($json)) {
+                $products = array_merge($products, $this->findProducts($json));
+                $this->assertCatalogItemLimit(count($products));
+            }
+        }
+
+        return array_values($products);
+    }
+
+    /**
+     * Read common server-rendered product cards from a public catalogue or
+     * search results page. This is a conservative fallback: name, URL, price,
+     * and an explicit purchasable control are required before a row is trusted.
+     *
+     * @return list<array>
+     */
+    public function storefrontProductsFromHtml(string $html, string $origin): array
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        $cards = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " book-card ")]');
+        $products = [];
+
+        foreach ($cards as $card) {
+            $titleNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-title-strong ")]', $card)->item(0)
+                ?? $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-hover-title ")]', $card)->item(0);
+            $linkNode = $xpath->query('.//a[contains(concat(" ", normalize-space(@class), " "), " card-link ")]', $card)->item(0);
+            $authorNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-author-link ") or contains(concat(" ", normalize-space(@class), " "), " book-author-text ")]', $card)->item(0);
+            $imageNode = $xpath->query('.//img[@src]', $card)->item(0);
+            $cartNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " toggle-cart-btn ")]', $card)->item(0);
+            $name = trim((string) ($titleNode?->getAttribute('title') ?: $titleNode?->textContent));
+            $url = $this->absoluteCatalogUrl($origin, (string) $linkNode?->getAttribute('href'));
+            $text = preg_replace('/\s+/u', ' ', trim((string) $card->textContent)) ?? '';
+            preg_match('/₾\s*([0-9]+(?:[.,][0-9]{1,2})?)/u', $text, $priceMatch);
+            if ($name === '' || $url === null || empty($priceMatch[1])) {
+                continue;
+            }
+
+            preg_match('#/(\d+)(?:\?.*)?$#', $url, $idMatch);
+            $products[] = [
+                'name' => $name,
+                'sku' => $idMatch[1] ?? null,
+                'author' => trim((string) $authorNode?->textContent) ?: null,
+                'category' => 'Books',
+                'price' => str_replace(',', '.', $priceMatch[1]),
+                'priceCurrency' => 'GEL',
+                'stock' => $cartNode ? 1 : 0,
+                'stock_precision' => 'availability_only',
+                'image' => $this->absoluteCatalogUrl($origin, (string) $imageNode?->getAttribute('src')),
+                'url' => $url,
+            ];
+        }
+
+        return array_slice($products, 0, 100);
+    }
+
+    private function absoluteCatalogUrl(string $origin, string $url): ?string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return null;
+        }
+        if (str_starts_with($url, '/')) {
+            $url = $origin.$url;
+        }
+
+        return filter_var($url, FILTER_VALIDATE_URL) !== false ? $url : null;
+    }
+
     private function normalizeUrlProduct(KnowledgeSource $source, array $product, ?string $payloadCurrency): ?array
     {
         $offer = is_array($product['offers'] ?? null) ? $product['offers'] : [];
@@ -469,6 +566,9 @@ class KnowledgeIngestionService
                 'genres' => $this->searchableValues($genres, 120),
                 'isbn' => $isbn,
                 'currency' => $currency,
+                'stock_precision' => ($product['stock_precision'] ?? null) === 'availability_only'
+                    ? 'availability_only'
+                    : 'exact',
                 'text_trust' => 'untrusted_catalog_data',
             ],
         ];
@@ -644,7 +744,7 @@ class KnowledgeIngestionService
         return ['host' => $parts['host'], 'port' => $port, 'ip' => $ips[0]];
     }
 
-    private function fetchPublicUrl(string $url)
+    public function fetchPublicUrl(string $url, array $headers = [])
     {
         $maximumBytes = 5_000_000;
         for ($redirect = 0; $redirect <= 3; $redirect++) {
@@ -668,7 +768,9 @@ class KnowledgeIngestionService
                         throw new \RuntimeException('Page exceeds the 5 MB safety limit.');
                     }
                 },
-            ])->timeout(20)->retry(2, 300)->withoutRedirecting()->withHeaders(['User-Agent' => 'LegatusKnowledgeBot/1.0'])->get($url);
+            ])->timeout(20)->retry(2, 300)->withoutRedirecting()->withHeaders(array_merge([
+                'User-Agent' => 'LegatusKnowledgeBot/1.0',
+            ], $headers))->get($url);
             if ($response->redirect()) {
                 $location = $response->header('Location');
                 if (! $location) {

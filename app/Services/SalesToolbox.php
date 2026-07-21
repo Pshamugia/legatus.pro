@@ -19,6 +19,7 @@ class SalesToolbox
     public function __construct(
         private EmbeddingService $embeddings,
         private CommerceConnectorClient $commerce,
+        private PublicStorefrontCatalog $storefront,
     ) {}
 
     public function definitions(): array
@@ -56,9 +57,10 @@ class SalesToolbox
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
         $termGroups = $this->searchTermGroups((string) $a['query']);
-        $products = collect();
-
-        if ($termGroups !== []) {
+        $localSearch = function () use ($agent, $conversation, $a, $termGroups) {
+            if ($termGroups === []) {
+                return collect();
+            }
             $q = $agent->products()->where('is_active', true);
             foreach ($termGroups as $variants) {
                 $patterns = collect($variants)
@@ -76,7 +78,7 @@ class SalesToolbox
             }
             $this->applyProductSearchFilters($q, $a);
 
-            $products = $this->presentSearchProducts(
+            return $this->presentSearchProducts(
                 $q->limit(100)->get([
                     'id', 'name', 'sku', 'category', 'description', 'search_text', 'metadata',
                     'price', 'stock', 'updated_at',
@@ -84,21 +86,39 @@ class SalesToolbox
                 $conversation,
                 $termGroups,
             );
-        }
+        };
+        $products = $localSearch();
 
+        $publicSearch = null;
+        if ($products->isEmpty()) {
+            $storefrontQuery = collect($termGroups)
+                ->map(fn (array $variants): string => (string) end($variants))
+                ->filter()
+                ->implode(' ');
+            $publicSearch = $this->storefront->discover(
+                $agent,
+                $storefrontQuery !== '' ? $storefrontQuery : trim((string) $a['query']),
+            );
+            if (($publicSearch['imported'] ?? 0) > 0) {
+                $products = $localSearch();
+            }
+        }
         $remoteSearch = null;
         if ($products->isEmpty()) {
             $remoteSearch = $this->commerceSearchResponse($agent, $a, $termGroups);
             $products = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
         }
         $didYouMean = $products->isEmpty()
-            ? $this->validatedSearchSuggestion((string) $a['query'], data_get($remoteSearch, 'meta.did_you_mean'))
+            ? $this->validatedSearchSuggestion(
+                (string) $a['query'],
+                $publicSearch['did_you_mean'] ?? data_get($remoteSearch, 'meta.did_you_mean'),
+            )
             : null;
 
         return [
             'ok' => true,
             'data_boundary' => $this->catalogDataBoundary(),
-            'source' => $this->catalogSource($agent),
+            'source' => $publicSearch['source'] ?? $this->catalogSource($agent),
             'products' => $products->all(),
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,

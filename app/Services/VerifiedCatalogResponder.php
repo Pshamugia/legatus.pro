@@ -105,10 +105,14 @@ class VerifiedCatalogResponder
             $identity = $author !== '' ? "{$product->name} — {$author}" : $product->name;
             $price = $this->money((float) ($check['price'] ?? $product->price));
             $stock = (int) ($check['available_stock'] ?? $check['stock'] ?? 0);
+            $availabilityOnly = data_get($product->metadata, 'stock_precision') === 'availability_only';
 
-            return $georgian
-                ? "• {$identity} — {$price} ₾ · მარაგში {$stock} ც."
-                : "• {$identity} — {$price} GEL · {$stock} in stock";
+            return match (true) {
+                $georgian && $availabilityOnly => "• {$identity} — {$price} ₾ · ხელმისაწვდომია",
+                $georgian => "• {$identity} — {$price} ₾ · მარაგში {$stock} ც.",
+                $availabilityOnly => "• {$identity} — {$price} GEL · available",
+                default => "• {$identity} — {$price} GEL · {$stock} in stock",
+            };
         });
         $sources = collect($source)
             ->merge($verified->pluck('source')->filter(fn ($item): bool => is_array($item)))
