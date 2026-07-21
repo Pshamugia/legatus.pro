@@ -62,10 +62,10 @@ class SalesToolbox
                 return collect();
             }
             $q = $agent->products()->where('is_active', true);
-            foreach ($termGroups as $variants) {
-                $patterns = collect($variants)
-                    ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
-                $q->where(function ($termQuery) use ($patterns): void {
+            $q->where(function ($termQuery) use ($termGroups): void {
+                foreach ($termGroups as $variants) {
+                    $patterns = collect($variants)
+                        ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
                     foreach ($patterns as $pattern) {
                         $termQuery->orWhere(fn ($candidate) => $candidate
                             ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
@@ -74,12 +74,12 @@ class SalesToolbox
                             ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
                             ->orWhereRaw("LOWER(products.search_text) LIKE ? ESCAPE '!'", [$pattern]));
                     }
-                });
-            }
+                }
+            });
             $this->applyProductSearchFilters($q, $a);
 
             return $this->presentSearchProducts(
-                $q->limit(100)->get([
+                $q->limit(300)->get([
                     'id', 'name', 'sku', 'category', 'description', 'search_text', 'metadata',
                     'price', 'stock', 'updated_at',
                 ]),
@@ -139,7 +139,7 @@ class SalesToolbox
 
     private function presentSearchProducts($candidates, Conversation $conversation, array $termGroups = [])
     {
-        return $candidates
+        $presented = $candidates
             ->map(function ($product) use ($conversation, $termGroups): array {
                 $available = $this->availableStock($product, $conversation);
 
@@ -156,13 +156,21 @@ class SalesToolbox
                     'available_stock' => $available,
                     'updated_at' => $product->updated_at,
                     '_search_score' => $this->productSearchScore($product, $termGroups),
+                    '_matched_groups' => $this->productMatchedGroupCount($product, $termGroups),
                 ];
             })
-            ->filter(fn (array $product) => $product['available_stock'] > 0)
+            ->filter(fn (array $product) => $product['available_stock'] > 0);
+        if ($termGroups !== []) {
+            $maximumMatches = (int) $presented->max('_matched_groups');
+            $presented = $presented->filter(fn (array $product): bool => $product['_search_score'] > 0
+                && $product['_matched_groups'] === $maximumMatches);
+        }
+
+        return $presented
             ->sortByDesc('_search_score')
             ->take(6)
             ->map(function (array $product): array {
-                unset($product['_search_score']);
+                unset($product['_search_score'], $product['_matched_groups']);
 
                 return $product;
             })
@@ -821,6 +829,26 @@ class SalesToolbox
         }
 
         return $score;
+    }
+
+    private function productMatchedGroupCount($product, array $termGroups): int
+    {
+        if ($termGroups === []) {
+            return 0;
+        }
+
+        $haystack = Str::lower(implode(' ', [
+            $product->sku,
+            $product->name,
+            data_get($product->metadata, 'author', ''),
+            $product->category,
+            implode(' ', array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar')),
+            $product->description,
+            $product->search_text,
+        ]));
+
+        return collect($termGroups)->filter(fn (array $variants): bool => collect($variants)
+            ->contains(fn (string $variant): bool => str_contains($haystack, $variant)))->count();
     }
 
     private function utf8Distance(string $left, string $right): int

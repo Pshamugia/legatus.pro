@@ -94,6 +94,31 @@ class PublicStorefrontCatalogTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_public_search_relaxes_a_natural_question_to_its_strongest_product_phrase(): void
+    {
+        [$agent, $conversation] = $this->context();
+        Http::fake(function ($request) {
+            $url = rawurldecode($request->url());
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+            if (($parameters['title'] ?? null) === 'ივანე ჯავახიშვილი') {
+                return Http::response(str_replace('პაოლო იაშვილი', 'ივანე ჯავახიშვილი', $this->searchCardsHtml()), 200, ['Content-Type' => 'text/html']);
+            }
+            if (str_contains($url, '/books/paolo-iashvili/42')) {
+                return Http::response('<div class="product-price"><strong>14 ₾</strong></div>', 200, ['Content-Type' => 'text/html']);
+            }
+
+            return Http::response('<html></html>', 200, ['Content-Type' => 'text/html']);
+        });
+        config(['services.openai.key' => 'must-not-be-called']);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'ივანე ჯავახიშვილის მარტო ეს გაქვთ?', $conversation);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertCount(1, $reply['products']);
+        $this->assertStringContainsString('საიუბილეო საარქივო გამოცემა', $reply['text']);
+        $this->assertGreaterThanOrEqual(2, Http::recorded()->count());
+    }
+
     /** @return array{Agent, Conversation} */
     private function context(): array
     {

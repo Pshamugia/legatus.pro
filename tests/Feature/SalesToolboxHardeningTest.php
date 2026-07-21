@@ -255,6 +255,33 @@ class SalesToolboxHardeningTest extends TestCase
         }
     }
 
+    public function test_product_search_relaxes_conversational_words_and_ranks_the_strongest_identity_match(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'ქართველი ერის ისტორია',
+            'description' => 'ივანე ჯავახიშვილი',
+            'search_text' => 'ქართველი ერის ისტორია ივანე ჯავახიშვილი',
+        ]);
+        $agent->products()->create([
+            'name' => 'მარტოობის ასი წელიწადი',
+            'description' => 'სხვა ავტორი',
+            'search_text' => 'მარტოობის ასი წელიწადი სხვა ავტორი',
+            'price' => 18,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ივანე ჯავახიშვილის მარტო ეს გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame($product->id, data_get($result, 'products.0.id'));
+        $this->assertSame('ქართველი ერის ისტორია', data_get($result, 'products.0.name'));
+    }
+
     public function test_product_search_treats_wildcards_as_literal_text(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

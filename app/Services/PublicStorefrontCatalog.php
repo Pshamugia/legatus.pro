@@ -23,26 +23,30 @@ class PublicStorefrontCatalog
             return ['imported' => 0, 'did_you_mean' => null, 'source' => null];
         }
 
-        // Prefer the public search results page: it commonly contains more
-        // matches than autocomplete and already exposes price/availability.
-        try {
-            $searchPage = $this->ingestion->fetchPublicUrl(
-                $origin.'/search?title='.rawurlencode($query),
-                ['Accept' => 'text/html'],
-            );
-            $products = $this->ingestion->storefrontProductsFromHtml($searchPage->body(), $origin);
-            if ($products !== []) {
-                $products = $this->enrichOriginalPrices($products, $parts);
-                $result = $this->ingestion->importDiscoveredUrlProducts($source, $products);
+        // Natural questions often wrap the actual product identity in extra
+        // conversational words. Try the full query first, then a bounded set
+        // of strongest contiguous phrases. This is generic query relaxation,
+        // not a list of hard-coded customer sentences.
+        foreach ($this->queryCandidates($query) as $candidate) {
+            try {
+                $searchPage = $this->ingestion->fetchPublicUrl(
+                    $origin.'/search?title='.rawurlencode($candidate),
+                    ['Accept' => 'text/html'],
+                );
+                $products = $this->ingestion->storefrontProductsFromHtml($searchPage->body(), $origin);
+                if ($products !== []) {
+                    $products = $this->enrichOriginalPrices($products, $parts);
+                    $result = $this->ingestion->importDiscoveredUrlProducts($source, $products);
 
-                return [
-                    'imported' => (int) $result['found'],
-                    'did_you_mean' => null,
-                    'source' => $this->sourceEvidence((string) $source->url),
-                ];
+                    return [
+                        'imported' => (int) $result['found'],
+                        'did_you_mean' => null,
+                        'source' => $this->sourceEvidence((string) $source->url),
+                    ];
+                }
+            } catch (\Throwable $exception) {
+                report($exception);
             }
-        } catch (\Throwable $exception) {
-            report($exception);
         }
 
         try {
@@ -129,6 +133,37 @@ class PublicStorefrontCatalog
         return mb_strlen($query) >= 2
             && mb_strlen($query) <= 150
             && ! preg_match('/[\x00-\x1F\x7F]/', $query);
+    }
+
+    /** @return list<string> */
+    private function queryCandidates(string $query): array
+    {
+        $query = preg_replace('/\s+/u', ' ', trim($query)) ?? '';
+        $tokens = preg_split('/[^\pL\pN%_+\-.]+/u', Str::lower($query), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (count($tokens) <= 2) {
+            return [$query];
+        }
+
+        $phrases = [];
+        foreach ([3, 2] as $size) {
+            for ($offset = 0; $offset + $size <= count($tokens); $offset++) {
+                $slice = array_slice($tokens, $offset, $size);
+                $phrases[] = [
+                    'text' => implode(' ', $slice),
+                    'weight' => array_sum(array_map('mb_strlen', $slice)),
+                ];
+            }
+        }
+        usort($phrases, fn (array $left, array $right): int => $right['weight'] <=> $left['weight']);
+
+        return collect([$query])
+            ->merge(collect($phrases)->pluck('text'))
+            ->merge(collect($tokens)->sortByDesc(fn (string $token): int => mb_strlen($token)))
+            ->filter(fn (string $candidate): bool => mb_strlen($candidate) >= 3)
+            ->unique()
+            ->take(5)
+            ->values()
+            ->all();
     }
 
     private function sameOriginProductUrl(string $url, array $catalogParts): bool
