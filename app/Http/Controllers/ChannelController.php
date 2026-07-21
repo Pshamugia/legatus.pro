@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Services\TenantContext;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 
 class ChannelController extends Controller
@@ -45,6 +47,7 @@ class ChannelController extends Controller
             ? $agent->products()->where('commerce_connection_id', $commerceConnection->id)->where('is_active', true)->count()
             : 0;
         $canManageChannels = in_array($tenant->role(), ['owner', 'admin'], true);
+        $widgetEnabled = $agent->websiteWidgetEnabled();
         $widgetDomains = collect(data_get($agent->settings, 'widget_allowed_origins', []))
             ->filter(fn (mixed $origin): bool => is_string($origin))
             ->map(fn (string $origin): string => (string) (parse_url($origin, PHP_URL_HOST) ?: $origin))
@@ -62,7 +65,39 @@ class ChannelController extends Controller
             'commerceConnection',
             'commerceProductCount',
             'canManageChannels',
+            'widgetEnabled',
         ));
+    }
+
+    public function updateWidget(Request $request, TenantContext $tenant)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+        ]);
+
+        $enabled = (bool) $data['enabled'];
+        $agentId = $tenant->agent()->getKey();
+
+        DB::transaction(function () use ($agentId, $enabled): void {
+            $agent = Agent::query()->lockForUpdate()->findOrFail($agentId);
+            $channels = collect($agent->channels ?? ['web'])
+                ->filter(fn (mixed $channel): bool => is_string($channel) && $channel !== '')
+                ->reject(fn (string $channel): bool => $channel === 'web');
+
+            if ($enabled) {
+                $channels->prepend('web');
+            }
+
+            $agent->update(['channels' => $channels->unique()->values()->all()]);
+        });
+
+        return redirect()->route('channels.index')->with(
+            'channel_success',
+            $enabled
+                ? 'Website chat is ON. The existing script will show the widget again.'
+                : 'Website chat is OFF. The existing script can stay installed, but customers cannot open or use the chat.',
+        );
     }
 
     private function connectionState(Agent $agent, string $provider, mixed $connection): array

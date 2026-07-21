@@ -214,6 +214,6 @@ class ChatController extends Controller
 
     private function ensureActive(Agent $agent): void
     {
-        abort_unless($agent->is_active, 404);
+        abort_unless($agent->is_active && $agent->websiteWidgetEnabled(), 404);
     }
 }

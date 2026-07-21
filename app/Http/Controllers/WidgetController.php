@@ -9,6 +9,11 @@ class WidgetController extends Controller
     public function script(Agent $agent)
     {
         abort_unless($agent->is_active, 404);
+
+        if (! $agent->websiteWidgetEnabled()) {
+            return $this->javascript("(function(){var root=document.getElementById('legatus-widget-root');if(root)root.remove();window.LegatusWidgetLoaded=false;})();\n");
+        }
+
         $frame = route('widget.frame', $agent);
         $frameJson = json_encode($frame, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
         $businessName = trim($agent->business_name);
@@ -38,15 +43,22 @@ class WidgetController extends Controller
 })();
 JS;
 
-        return response($js)
-            ->header('Content-Type', 'application/javascript; charset=UTF-8')
-            ->header('Cache-Control', 'public, max-age=0, must-revalidate');
+        return $this->javascript($js);
     }
 
     public function frame(Agent $agent)
     {
-        abort_unless($agent->is_active, 404);
+        abort_unless($agent->is_active && $agent->websiteWidgetEnabled(), 404);
 
         return view('widget', compact('agent'));
+    }
+
+    private function javascript(string $content)
+    {
+        return response($content)
+            ->header('Content-Type', 'application/javascript; charset=UTF-8')
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            ->header('Pragma', 'no-cache')
+            ->header('Expires', '0');
     }
 }

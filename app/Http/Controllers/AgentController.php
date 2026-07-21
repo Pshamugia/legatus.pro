@@ -138,13 +138,15 @@ class AgentController extends Controller
                 'name' => trim($data['agent_name']),
                 'business_name' => $data['business_name'],
                 'description' => $data['description'] ?? null,
-                'channels' => ['web'],
                 'settings' => $settings,
             ]);
         });
 
         $learned = [];
         $warnings = [];
+        $activeCommerceConnection = $agent->commerceConnection()
+            ->where('status', 'active')
+            ->first();
         $urlSources = collect([
             [
                 'url' => $data['catalog_url'] ?? null,
@@ -156,7 +158,12 @@ class AgentController extends Controller
                 'name' => ! empty($data['website']) ? parse_url($data['website'], PHP_URL_HOST) : null,
                 'purpose' => 'website',
             ],
-        ])->filter(fn (array $source): bool => filled($source['url']))->unique('url');
+        ])->filter(fn (array $source): bool => filled($source['url']))
+            // A verified live connector owns product, price and stock facts. Keep
+            // the human-entered URL in settings for reference or later fallback,
+            // but do not repeatedly import it as a competing catalog source.
+            ->reject(fn (array $source): bool => $activeCommerceConnection !== null && $source['purpose'] === 'catalog')
+            ->unique('url');
 
         foreach ($urlSources as $urlSource) {
             $source = $agent->knowledgeSources()->firstOrNew(['type' => 'url', 'url' => $urlSource['url']]);
@@ -169,6 +176,7 @@ class AgentController extends Controller
                 $ingestion->ingest($source);
                 $learned[] = $source->name;
                 if ($urlSource['purpose'] === 'catalog'
+                    && $activeCommerceConnection === null
                     && ! $agent->products()->where('metadata->source_id', $source->id)->where('is_active', true)->exists()) {
                     $warnings[] = 'The catalog URL was readable, but it did not expose structured products with verified prices. Use a supported JSON feed, structured product data, CSV, or the live store connector.';
                 }
@@ -194,6 +202,7 @@ class AgentController extends Controller
             $warnings !== [] && $learned !== [] => 'Setup saved. Some sources were learned; the items below still need attention.',
             $warnings !== [] => 'Setup saved, but one or more sources still need attention.',
             $learned !== [] => 'Setup saved and learned '.implode(', ', $learned).'.',
+            $activeCommerceConnection !== null => 'Setup saved. Your live store connection remains the authoritative product catalog.',
             default => 'Setup saved.',
         };
 

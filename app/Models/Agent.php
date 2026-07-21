@@ -29,6 +29,13 @@ class Agent extends Model
         return $this->hasCustomAssistantName() ? trim((string) $this->name) : 'AI Assistant';
     }
 
+    public function websiteWidgetEnabled(): bool
+    {
+        // Null predates per-channel controls, so keep existing installations on
+        // until an owner or admin explicitly disables the website channel.
+        return ! is_array($this->channels) || in_array('web', $this->channels, true);
+    }
+
     /**
      * @return array{preset: string, primary: string, accent: string, primary_foreground: string, accent_foreground: string}
      */

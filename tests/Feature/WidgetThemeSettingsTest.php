@@ -173,12 +173,12 @@ class WidgetThemeSettingsTest extends TestCase
 
         $script = $this->get(route('widget.script', $agent))
             ->assertOk()
-            ->assertHeader('Cache-Control', 'max-age=0, must-revalidate, public')
             ->assertSee('primary="#123456"', false)
             ->assertSee('accent="#ABCDEF"', false)
             ->assertSee("root.style.setProperty('--legatus-widget-primary',primary)", false)
             ->assertSee('background:var(--legatus-widget-primary)', false)
             ->assertDontSee('#7C2D12');
+        $this->assertStringContainsString('no-store', (string) $script->headers->get('Cache-Control'));
         $this->assertFalse($script->headers->has('Set-Cookie'));
 
         $this->get(route('widget.frame', $agent))

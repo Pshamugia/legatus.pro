@@ -91,6 +91,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/app/inbox/{conversation}/close', [InboxController::class, 'close'])->name('inbox.close');
     Route::get('/app/inbox/{conversation}/poll', [InboxController::class, 'poll'])->name('inbox.poll');
     Route::get('/app/channels', [ChannelController::class, 'index'])->name('channels.index');
+    Route::patch('/app/channels/widget', [ChannelController::class, 'updateWidget'])
+        ->middleware('throttle:30,1')
+        ->name('channels.widget.update');
     Route::post('/app/channels/commerce', [CommerceConnectionController::class, 'connect'])
         ->middleware('throttle:10,1')
         ->name('channels.commerce.connect');
