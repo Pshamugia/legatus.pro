@@ -9,7 +9,7 @@ use Illuminate\Console\Command;
 
 class SyncKnowledge extends Command
 {
-    protected $signature = 'legatus:sync-knowledge {--source=}';
+    protected $signature = 'legatus:sync-knowledge {--source=} {--url=}';
 
     protected $description = 'Synchronize refreshable Legatus knowledge sources';
 
@@ -19,6 +19,9 @@ class SyncKnowledge extends Command
 
         if ($this->option('source')) {
             $query->whereKey($this->option('source'));
+        }
+        if ($this->option('url')) {
+            $query->where('url', $this->option('url'));
         }
 
         $failed = 0;

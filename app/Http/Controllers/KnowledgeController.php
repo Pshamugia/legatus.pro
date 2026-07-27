@@ -66,13 +66,14 @@ class KnowledgeController extends Controller
         if (! $source->isRefreshable()) {
             return back()->with('success', 'Static fixture snapshot has no source payload to synchronize. Add a real URL or file source for refreshable knowledge.');
         }
+        if ($source->type === 'url') {
+            $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+            CrawlPublicWebsite::dispatch($source->id);
+
+            return back()->with('success', 'The complete public website is now being re-indexed in the background.');
+        }
         try {
             $ingestion->ingest($source);
-            if ($source->type === 'url') {
-                CrawlPublicWebsite::dispatch($source->id);
-
-                return back()->with('success', 'Initial refresh completed. The complete public website is being re-indexed in the background.');
-            }
 
             return back()->with('success', 'Source synchronized.');
         } catch (\Throwable) {

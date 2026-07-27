@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Models\Agent;
 use App\Models\User;
 use App\Services\EmbeddingService;
@@ -9,6 +10,7 @@ use App\Services\KnowledgeIngestionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -554,6 +556,31 @@ HTML;
         $this->seed();
         $this->actingAs(User::first());
         $this->get('/app/knowledge')->assertOk()->assertSee('Knowledge sources');
+    }
+
+    public function test_manual_url_sync_always_queues_a_fresh_complete_crawl(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $user = User::firstOrFail();
+        $source = Agent::firstOrFail()->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Complete catalog',
+            'url' => 'https://bukinistebi.ge/books',
+            'status' => 'ready',
+            'progress' => 100,
+            'items_found' => 20,
+        ]);
+
+        $this->actingAs($user)
+            ->post(route('knowledge.sync', $source))
+            ->assertRedirect()
+            ->assertSessionHas('success', 'The complete public website is now being re-indexed in the background.');
+
+        $source->refresh();
+        $this->assertSame('processing', $source->status);
+        $this->assertSame(1, $source->progress);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
     public function test_deleting_uploaded_source_removes_only_its_managed_file(): void
