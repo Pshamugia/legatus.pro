@@ -23,9 +23,10 @@ class WorkspaceManagementTest extends TestCase
         $this->get(route('workspaces.index'))->assertRedirect(route('login'));
         $this->post(route('workspaces.store'), ['business_name' => 'New'])->assertRedirect(route('login'));
         $this->post(route('workspaces.switch', $workspace))->assertRedirect(route('login'));
+        $this->delete(route('workspaces.destroy', $workspace), ['confirmation' => 'Private'])->assertRedirect(route('login'));
 
         $router = app('router');
-        foreach (['workspaces.index', 'workspaces.store', 'workspaces.switch'] as $routeName) {
+        foreach (['workspaces.index', 'workspaces.store', 'workspaces.switch', 'workspaces.destroy'] as $routeName) {
             $middleware = $router->gatherRouteMiddleware($router->getRoutes()->getByName($routeName));
             $this->assertContains(EncryptCookies::class, $middleware);
             $this->assertContains(StartSession::class, $middleware);
@@ -183,6 +184,46 @@ class WorkspaceManagementTest extends TestCase
 
         $this->assertSame($organizationCount, Organization::count());
         $this->assertSame($agentCount, Agent::count());
+    }
+
+    public function test_owner_can_delete_a_confirmed_workspace_and_active_context_moves_safely(): void
+    {
+        $user = User::factory()->create();
+        $remaining = $this->workspace($user, 'Keep Business', 'owner');
+        $deleted = $this->workspace($user, 'Delete Business', 'owner');
+        $deletedAgent = $deleted->agents()->firstOrFail();
+        $deletedAgent->products()->create(['name' => 'Deleted Product', 'price' => 10, 'stock' => 1]);
+
+        $this->actingAs($user)->withSession([TenantContext::SESSION_KEY => $deleted->id])
+            ->delete(route('workspaces.destroy', $deleted), ['confirmation' => 'Delete Business'])
+            ->assertRedirect(route('workspaces.index'))
+            ->assertSessionHas(TenantContext::SESSION_KEY, $remaining->id);
+
+        $this->assertDatabaseMissing('organizations', ['id' => $deleted->id]);
+        $this->assertDatabaseMissing('agents', ['id' => $deletedAgent->id]);
+        $this->assertDatabaseHas('organizations', ['id' => $remaining->id]);
+    }
+
+    public function test_workspace_deletion_requires_owner_exact_name_and_a_remaining_business(): void
+    {
+        $owner = User::factory()->create();
+        $only = $this->workspace($owner, 'Only Business', 'owner');
+
+        $this->actingAs($owner)
+            ->delete(route('workspaces.destroy', $only), ['confirmation' => 'Only Business'])
+            ->assertSessionHasErrors('workspace');
+        $this->assertDatabaseHas('organizations', ['id' => $only->id]);
+
+        $second = $this->workspace($owner, 'Second Business', 'owner');
+        $this->delete(route('workspaces.destroy', $second), ['confirmation' => 'Wrong name'])
+            ->assertSessionHasErrors('workspace');
+        $this->assertDatabaseHas('organizations', ['id' => $second->id]);
+
+        $viewer = User::factory()->create();
+        $second->users()->attach($viewer, ['role' => 'viewer']);
+        $this->actingAs($viewer)
+            ->delete(route('workspaces.destroy', $second), ['confirmation' => 'Second Business'])
+            ->assertForbidden();
     }
 
     private function workspace(User $user, string $name, string $role, string $agentName = 'AI Assistant'): Organization

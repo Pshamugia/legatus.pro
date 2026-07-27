@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Models\Organization;
+use App\Services\KnowledgeIngestionService;
 use App\Services\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -76,6 +77,49 @@ class WorkspaceController extends Controller
         $request->session()->regenerate();
 
         return to_route('dashboard')->with('status', "Switched to {$organization->name}.");
+    }
+
+    public function destroy(
+        Request $request,
+        int $workspace,
+        TenantContext $tenant,
+        KnowledgeIngestionService $ingestion,
+    ): RedirectResponse {
+        $user = $request->user();
+        $organization = $user->organizations()->whereKey($workspace)->firstOrFail();
+        abort_unless($organization->pivot->role === 'owner', 403);
+
+        if ($user->organizations()->count() < 2) {
+            return back()->withErrors(['workspace' => 'Your only business cannot be deleted. Create another business first.']);
+        }
+        if ($organization->users()->whereKeyNot($user->id)->exists()) {
+            return back()->withErrors(['workspace' => 'Remove the other team members before deleting this business.']);
+        }
+
+        $data = $request->validate([
+            'confirmation' => ['required', 'string'],
+        ]);
+        if (! hash_equals($organization->name, $data['confirmation'])) {
+            return back()->withErrors(['workspace' => 'Business name confirmation did not match.']);
+        }
+
+        $storedSources = $organization->agents()
+            ->with('knowledgeSources')
+            ->get()
+            ->flatMap->knowledgeSources
+            ->filter(fn ($source) => filled($source->file_path));
+        $wasActive = (int) $organization->id === (int) $request->session()->get(TenantContext::SESSION_KEY);
+
+        DB::transaction(fn () => $organization->delete());
+        $storedSources->each(fn ($source) => $ingestion->deleteStoredFile($source));
+
+        if ($wasActive) {
+            $next = $user->organizations()->orderBy('organizations.id')->firstOrFail();
+            $tenant->activate((int) $next->id, $user);
+        }
+        $request->session()->regenerate();
+
+        return to_route('workspaces.index')->with('status', 'Business workspace permanently deleted.');
     }
 
     private function uniqueOrganizationSlug(string $name): string

@@ -1,7 +1,8 @@
 @extends('layouts.app')
 @section('title','Choose a Meta account · Legatus')
 @section('body')
-<main style="min-height:100vh;display:grid;place-items:center;padding:32px;background:var(--cream)">
+<div class="wrap">@include('partials.workspace-navigation', ['active' => 'channels', 'variant' => 'topbar'])</div>
+<main style="min-height:calc(100vh - 79px);display:grid;place-items:center;padding:32px;background:var(--cream)">
     <section class="panel" style="width:min(680px,100%);padding:30px">
         <span class="eyebrow">One final step</span>
         <h1 style="margin:8px 0 10px">Choose your {{ $provider === 'facebook' ? 'Facebook Page' : 'Instagram account' }}</h1>

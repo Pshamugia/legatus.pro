@@ -22,6 +22,7 @@
                         <b>{{ $workspace->name }}</b>
                         <p>{{ $agent?->assistantDisplayName() ?? 'AI Assistant' }} · {{ ucfirst($workspace->pivot->role) }}</p>
                     </div>
+                    <div style="display:flex;align-items:center;gap:8px">
                     @if($workspace->is($activeWorkspace))
                         <span class="pill">Active</span>
                     @else
@@ -30,6 +31,22 @@
                             <button class="btn ghost" type="submit" style="padding:9px 12px">Switch</button>
                         </form>
                     @endif
+                    @if($workspace->pivot->role === 'owner' && $workspaces->count() > 1)
+                        <details style="position:relative">
+                            <summary class="btn ghost" style="padding:9px 12px;color:#a33;cursor:pointer;list-style:none">Delete</summary>
+                            <form class="panel" method="post" action="{{ route('workspaces.destroy', $workspace) }}" style="position:absolute;z-index:20;right:0;top:44px;width:min(330px,80vw);padding:16px;box-shadow:0 18px 50px #10291f30">
+                                @csrf
+                                @method('delete')
+                                <strong>Permanently delete {{ $workspace->name }}?</strong>
+                                <p style="margin:8px 0 12px;color:var(--muted);font-size:12px;line-height:1.45">Conversations, products, knowledge and channel connections will be removed. This cannot be undone. Type the exact business name to confirm.</p>
+                                <input name="confirmation" required autocomplete="off" placeholder="{{ $workspace->name }}" aria-label="Type the exact business name">
+                                <button class="btn" type="submit" style="margin-top:10px;width:100%;background:#a33;color:white">Delete permanently</button>
+                            </form>
+                        </details>
+                    @elseif($workspace->pivot->role === 'owner')
+                        <span title="Create another business before deleting this one" style="color:var(--muted);font-size:11px">Only business</span>
+                    @endif
+                    </div>
                 </div>
             @endforeach
         </section>

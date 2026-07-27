@@ -34,5 +34,11 @@
         @empty
             <span class="workspace-empty">No business workspace is connected yet.</span>
         @endforelse
+        @if(Illuminate\Support\Facades\Route::has('workspaces.index'))
+            <a class="workspace-manage-link" href="{{ route('workspaces.index') }}" role="menuitem">
+                <span aria-hidden="true">&#9881;</span>
+                <span><strong>Manage businesses</strong><small>Add, switch or delete a business</small></span>
+            </a>
+        @endif
     </div>
 </details>

@@ -76,6 +76,10 @@ Route::middleware('auth')->group(function () {
         ->whereNumber('workspace')
         ->middleware('throttle:30,1')
         ->name('workspaces.switch');
+    Route::delete('/app/workspaces/{workspace}', [WorkspaceController::class, 'destroy'])
+        ->whereNumber('workspace')
+        ->middleware('throttle:10,1')
+        ->name('workspaces.destroy');
     Route::get('/app', [AgentController::class, 'dashboard'])->name('dashboard');
     Route::get('/onboarding', [AgentController::class, 'onboarding'])->name('onboarding');
     Route::post('/onboarding', [AgentController::class, 'store'])->name('onboarding.store');

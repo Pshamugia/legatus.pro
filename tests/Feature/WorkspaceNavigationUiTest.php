@@ -41,9 +41,28 @@ class WorkspaceNavigationUiTest extends TestCase
                 ->assertSee('Workspace on Legatus')
                 ->assertSee('Business setup')
                 ->assertSee('+ Add business')
+                ->assertSee('Manage businesses')
+                ->assertSee(route('workspaces.index'), false)
                 ->assertSee('method="post" action="'.route('logout').'"', false)
                 ->assertSee(route('workspaces.switch', $other), false);
         }
+    }
+
+    public function test_guest_authentication_screens_keep_the_public_navigation_visible(): void
+    {
+        $this->get(route('login'))
+            ->assertOk()
+            ->assertSee('aria-label="Public navigation"', false)
+            ->assertSee('Product')
+            ->assertSee('How it works');
+
+        config(['legatus.registration_enabled' => true]);
+
+        $this->get(route('register'))
+            ->assertOk()
+            ->assertSee('aria-label="Public navigation"', false)
+            ->assertSee('Product')
+            ->assertSee('How it works');
     }
 
     public function test_navigation_uses_the_active_workspace_name_instead_of_a_stale_agent_brand(): void

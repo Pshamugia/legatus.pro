@@ -3,7 +3,8 @@
 @section('title', 'Sign in · Legatus')
 
 @section('body')
-<div class="chatpage">
+@include('partials.auth-navigation')
+<div class="chatpage" style="min-height:calc(100vh - 78px)">
     <div class="form-card" style="width:min(440px,100%)">
         <a class="brand" href="/"><span class="mark">L</span> Legatus</a>
         <h1 style="margin-top:32px">Welcome back.</h1>
