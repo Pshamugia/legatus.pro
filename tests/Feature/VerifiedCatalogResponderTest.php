@@ -16,6 +16,18 @@ class VerifiedCatalogResponderTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_confusion_about_the_previous_reply_is_treated_as_conversation_repair_not_product_search(): void
+    {
+        [$agent, $conversation] = $this->context();
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'რას მწერ ვერ გავიგე', $conversation);
+
+        $this->assertSame('clarification', $reply['intent']);
+        $this->assertSame(['conversation_repair'], $reply['tools_used']);
+        $this->assertSame([], $reply['products']);
+        $this->assertStringContainsString('თავიდან, მარტივად დავიწყოთ', $reply['text']);
+    }
+
     public function test_plain_georgian_author_lookup_is_answered_from_verified_catalog_without_openai(): void
     {
         [$agent, $conversation] = $this->context();

@@ -27,6 +27,32 @@ class EmbeddingService
         });
     }
 
+    public function embedPendingBatch(KnowledgeSource $source, int $size = 10): int
+    {
+        if (! config('services.openai.key')) {
+            return 0;
+        }
+
+        $chunks = $source->chunks()
+            ->whereNull('embedding')
+            ->orderBy('id')
+            ->limit(max(1, min(20, $size)))
+            ->get(['id', 'content']);
+        if ($chunks->isEmpty()) {
+            return 0;
+        }
+
+        $vectors = $this->embed($chunks->pluck('content')->all());
+        if (count($vectors) !== $chunks->count()) {
+            throw new \RuntimeException('The embedding provider returned an incomplete batch.');
+        }
+        foreach ($chunks->values() as $index => $chunk) {
+            $chunk->update(['embedding' => $vectors[$index]]);
+        }
+
+        return $chunks->count();
+    }
+
     public function semanticSearch(Agent $agent, string $query, int $limit = 5): array
     {
         if (! config('services.openai.key')) {

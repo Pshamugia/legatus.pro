@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\EmbedKnowledgeSource;
 use App\Models\KnowledgeSource;
 use Illuminate\Support\Str;
 
@@ -9,7 +10,6 @@ class PublicWebsiteCrawler
 {
     public function __construct(
         private KnowledgeIngestionService $ingestion,
-        private EmbeddingService $embeddings,
     ) {}
 
     public function crawl(KnowledgeSource $source): void
@@ -96,16 +96,18 @@ class PublicWebsiteCrawler
                 }
 
                 $this->progress($source, count($visited), count($queue), $maximumPages);
+                if (count($visited) % 25 === 0) {
+                    gc_collect_cycles();
+                }
             }
 
             if ($source->chunks()->count() === 0) {
                 throw new \RuntimeException('The public website did not expose readable content.');
             }
 
-            $this->embeddings->embedSource($source);
             $source->update([
-                'status' => 'ready',
-                'progress' => 100,
+                'status' => config('services.openai.key') ? 'processing' : 'ready',
+                'progress' => config('services.openai.key') ? 96 : 100,
                 'items_found' => $productCount,
                 'items_created' => $created,
                 'items_updated' => $updated,
@@ -115,6 +117,9 @@ class PublicWebsiteCrawler
                     ? null
                     : "Crawl reached the configured {$maximumPages}-page safety limit.",
             ]);
+            if (config('services.openai.key')) {
+                EmbedKnowledgeSource::dispatch($source->id);
+            }
         } catch (\Throwable $exception) {
             $source->update([
                 'status' => $source->chunks()->exists() ? 'ready' : 'failed',

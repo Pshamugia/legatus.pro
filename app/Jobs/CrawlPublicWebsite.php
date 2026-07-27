@@ -21,7 +21,7 @@ class CrawlPublicWebsite implements ShouldQueue
     {
         $source = KnowledgeSource::find($this->sourceId);
 
-        if ($source?->type === 'url' && $source->isRefreshable()) {
+        if ($source?->type === 'url' && $source->isRefreshable() && (int) $source->progress <= 1) {
             $crawler->crawl($source);
         }
     }

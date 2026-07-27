@@ -20,6 +20,23 @@ class VerifiedCatalogResponder
 
     public function respond(Agent $agent, Conversation $conversation, string $message): ?array
     {
+        if ($this->isConversationRepair($message)) {
+            $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+
+            return [
+                'text' => $georgian
+                    ? 'ბოდიში — ჩემი წინა პასუხი გაუგებარი იყო. თავიდან, მარტივად დავიწყოთ: კონკრეტულ წიგნს ეძებთ თუ გინდათ, რომ თქვენი ინტერესების მიხედვით რამდენიმე წიგნი გირჩიოთ?'
+                    : 'Sorry — my previous reply was unclear. Let us start again simply: are you looking for a specific book, or would you like recommendations based on your interests?',
+                'intent' => 'clarification',
+                'confidence' => 1,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'products' => [],
+                'sources' => [],
+                'tools_used' => ['conversation_repair'],
+            ];
+        }
+
         // Service and policy questions must never inherit the last viewed
         // product. They belong to tenant knowledge and delivery tools, even
         // when the wording also contains a generic word such as "price".
@@ -500,6 +517,30 @@ class VerifiedCatalogResponder
         }
 
         return Str::contains($text, $lookupSignals) || $tokens->count() <= 5;
+    }
+
+    private function isConversationRepair(string $message): bool
+    {
+        $text = Str::lower(trim($message));
+
+        return Str::contains($text, [
+            'ვერ გავიგე',
+            'ვერ მივხვდი',
+            'რას მწერ',
+            'რას მპასუხობ',
+            'რას ნიშნავს',
+            'გაუგებარია',
+            'არასწორი ლინკ',
+            'ლინკი არასწორია',
+            'ბმული არასწორია',
+            'თავიდან ამიხსენი',
+            'უფრო მარტივად',
+            'i do not understand',
+            "i don't understand",
+            'what do you mean',
+            'that was unclear',
+            'wrong link',
+        ]);
     }
 
     private function isServiceOrPolicyIntent(string $message): bool

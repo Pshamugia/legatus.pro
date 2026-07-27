@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\CrawlPublicWebsite;
+use App\Jobs\EmbedKnowledgeSource;
 use App\Models\Agent;
 use App\Models\User;
 use App\Services\EmbeddingService;
@@ -581,6 +582,72 @@ HTML;
         $this->assertSame('processing', $source->status);
         $this->assertSame(1, $source->progress);
         Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
+    }
+
+    public function test_semantic_indexing_uses_small_restartable_queue_batches(): void
+    {
+        Queue::fake();
+        $this->seed();
+        config(['services.openai.key' => 'test-key']);
+        $source = Agent::firstOrFail()->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Large public website',
+            'url' => 'https://example.com',
+            'status' => 'processing',
+            'progress' => 96,
+        ]);
+        foreach (range(1, 12) as $index) {
+            $source->chunks()->create([
+                'agent_id' => $source->agent_id,
+                'kind' => 'webpage',
+                'title' => "Page {$index}",
+                'content' => "Public page content {$index}",
+                'content_hash' => hash('sha256', "public-page-{$index}"),
+            ]);
+        }
+        Http::fake([
+            'https://api.openai.com/v1/embeddings' => Http::response([
+                'data' => collect(range(0, 9))->map(fn ($index): array => [
+                    'index' => $index,
+                    'embedding' => [0.1, 0.2],
+                ])->all(),
+            ]),
+        ]);
+
+        (new EmbedKnowledgeSource($source->id))->handle(app(EmbeddingService::class));
+
+        $this->assertSame(10, $source->chunks()->whereNotNull('embedding')->count());
+        $this->assertSame('processing', $source->fresh()->status);
+        Queue::assertPushed(EmbedKnowledgeSource::class, fn ($job): bool => $job->sourceId === $source->id);
+    }
+
+    public function test_interrupted_public_crawl_can_resume_without_fetching_every_page_again(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Interrupted catalog',
+            'url' => 'https://bukinistebi.ge/books',
+            'status' => 'processing',
+            'progress' => 70,
+        ]);
+        $agent->products()->create([
+            'name' => 'Recovered book',
+            'price' => 10,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+
+        $this->artisan('legatus:resume-knowledge', ['--host' => 'bukinistebi.ge'])
+            ->expectsOutputToContain('1 products')
+            ->assertSuccessful();
+
+        $this->assertSame(1, $source->fresh()->items_found);
+        $this->assertSame(96, $source->fresh()->progress);
+        Queue::assertPushed(EmbedKnowledgeSource::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
     public function test_deleting_uploaded_source_removes_only_its_managed_file(): void
