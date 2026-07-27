@@ -719,6 +719,15 @@ class SalesToolbox
         }
 
         $variants = [$token];
+        // Colloquial Georgian often attaches -სი to vowel-final surnames
+        // (შამუგია → შამუგიასი). Recover the catalogue lemma without tying
+        // the search to any one author; verified product rows still decide.
+        if (Str::endsWith($token, 'სი') && mb_strlen($token) >= 6) {
+            $vowelStem = mb_substr($token, 0, -2);
+            if (Str::endsWith($vowelStem, ['ა', 'ე', 'ი', 'ო', 'უ'])) {
+                $variants[] = $vowelStem;
+            }
+        }
         if (Str::endsWith($token, 'ური') && mb_strlen($token) > 6) {
             $stem = mb_substr($token, 0, -3);
             $variants[] = $stem;

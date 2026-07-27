@@ -255,6 +255,26 @@ class SalesToolboxHardeningTest extends TestCase
         }
     }
 
+    public function test_product_search_restores_vowel_final_surname_from_colloquial_genitive(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'არასრულწლოვანი',
+            'description' => 'პაატა შამუგიას პოეზია',
+            'search_text' => 'არასრულწლოვანი პაატა შამუგია პოეზია',
+            'metadata' => ['author' => 'პაატა შამუგია'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'შამუგიასი რა გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+        $this->assertNull($result['did_you_mean']);
+    }
+
     public function test_product_search_restores_e_stem_georgian_surnames_without_a_typo_prompt(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 5);

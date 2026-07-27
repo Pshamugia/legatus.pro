@@ -75,6 +75,34 @@ class VerifiedCatalogResponderTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_colloquial_georgian_surname_form_is_answered_on_the_first_attempt(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $book = $agent->products()->create([
+            'name' => 'არასრულწლოვანი',
+            'description' => 'პაატა შამუგიას პოეზია',
+            'search_text' => 'არასრულწლოვანი პაატა შამუგია პოეზია',
+            'price' => 8,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['author' => 'პაატა შამუგია'],
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'შამუგიასი რა გაქვთ?',
+            $conversation,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([$book->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('პაატა შამუგია', $reply['text']);
+        $this->assertSame(['search_products', 'check_stock'], $reply['tools_used']);
+        Http::assertNothingSent();
+    }
+
     public function test_no_match_or_confirmable_typo_never_poison_the_conversation_with_handoff(): void
     {
         [$agent, $conversation] = $this->context();
