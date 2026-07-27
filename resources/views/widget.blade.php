@@ -12,7 +12,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ $assistantName }} · {{ $agent->business_name }}</title>
     <style>
-        :root{--widget-primary:{{ $widgetTheme['primary'] }};--widget-accent:{{ $widgetTheme['accent'] }};--widget-primary-foreground:{{ $widgetTheme['primary_foreground'] }};--widget-accent-foreground:{{ $widgetTheme['accent_foreground'] }}}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#17352c;background:#f6f8f4}.shell{height:100vh;display:flex;flex-direction:column}.head{background:var(--widget-primary);color:var(--widget-primary-foreground);padding:15px;display:flex;align-items:center;gap:10px}.avatar{width:40px;height:40px;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:13px;display:grid;place-items:center;font-weight:800}.head .identity{min-width:0;flex:1}.head b,.head small,.powered{display:block}.head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.head small{color:var(--widget-primary-foreground);opacity:.76;margin-top:2px}.powered{color:var(--widget-primary-foreground);opacity:.55;font-size:9px;margin-top:3px}.head-actions{display:flex;flex:0 0 auto;gap:6px}.head-action{border:0;background:#ffffff18;color:var(--widget-primary-foreground);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:16px}.head-action:hover{background:#ffffff2b}.messages{flex:1;overflow:auto;padding:17px}.bubble{max-width:86%;padding:11px 13px;border-radius:15px;margin:8px 0;font-size:13px;line-height:1.5;background:white;border:1px solid #e4e9e5}.bubble.user{margin-left:auto;background:var(--widget-primary);color:var(--widget-primary-foreground);border:0}.bubble.human{border-left:3px solid var(--widget-primary)}.operator{display:block;color:var(--widget-primary);font-size:10px;font-weight:700;margin-bottom:5px}.products{display:flex;gap:7px;overflow:auto;margin-top:8px}.product{display:block;min-width:135px;padding:9px;background:#eff4ed;border-radius:10px;color:inherit;text-decoration:none}.product[href]:hover{outline:2px solid var(--widget-accent)}.product b,.product small{display:block}.product small{margin-top:4px;color:#557166}.trace{margin-top:10px;padding-top:9px;border-top:1px solid #e5ebe6;color:#557166;font-size:10px}.trace-row{display:flex;align-items:flex-start;gap:5px;margin-top:5px}.trace-label{font-weight:700;white-space:nowrap}.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#eff5ef;border-radius:99px;padding:2px 6px}.suggest{display:flex;gap:6px;padding:8px 14px;overflow:auto}.suggest button{white-space:nowrap;border:1px solid #dce4de;background:white;border-radius:99px;padding:7px 9px;font-size:10px;cursor:pointer}.composer{display:flex;gap:7px;padding:12px;background:white;border-top:1px solid #e2e8e3}.composer input{min-width:0;flex:1;border:1px solid #dce4de;border-radius:12px;padding:11px}.composer button{border:0;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:12px;padding:0 14px;font-weight:700;cursor:pointer}.composer button:disabled{cursor:wait;opacity:.65}
+        :root{--widget-primary:{{ $widgetTheme['primary'] }};--widget-accent:{{ $widgetTheme['accent'] }};--widget-primary-foreground:{{ $widgetTheme['primary_foreground'] }};--widget-accent-foreground:{{ $widgetTheme['accent_foreground'] }}}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#17352c;background:#f6f8f4}.shell{height:100vh;display:flex;flex-direction:column}.head{background:var(--widget-primary);color:var(--widget-primary-foreground);padding:15px;display:flex;align-items:center;gap:10px}.avatar{width:40px;height:40px;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:13px;display:grid;place-items:center;font-weight:800}.head .identity{min-width:0;flex:1}.head b,.head small,.powered{display:block}.head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.head small{color:var(--widget-primary-foreground);opacity:.76;margin-top:2px}.powered{color:var(--widget-primary-foreground);opacity:.55;font-size:9px;margin-top:3px}.head-actions{display:flex;flex:0 0 auto;gap:6px}.head-action{border:0;background:#ffffff18;color:var(--widget-primary-foreground);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:16px}.head-action:hover{background:#ffffff2b}.messages{flex:1;overflow:auto;padding:17px}.bubble{max-width:86%;padding:11px 13px;border-radius:15px;margin:8px 0;font-size:13px;line-height:1.5;background:white;border:1px solid #e4e9e5}.bubble.user{margin-left:auto;background:var(--widget-primary);color:var(--widget-primary-foreground);border:0}.bubble.human{border-left:3px solid var(--widget-primary)}.bubble.thinking{display:flex;align-items:center;gap:9px;width:max-content;color:#557166}.thinking-dots{display:inline-flex;gap:3px}.thinking-dots i{width:5px;height:5px;border-radius:50%;background:var(--widget-primary);animation:thinking-pulse 1.15s infinite ease-in-out}.thinking-dots i:nth-child(2){animation-delay:.16s}.thinking-dots i:nth-child(3){animation-delay:.32s}@keyframes thinking-pulse{0%,70%,100%{opacity:.3;transform:translateY(0)}35%{opacity:1;transform:translateY(-3px)}}.operator{display:block;color:var(--widget-primary);font-size:10px;font-weight:700;margin-bottom:5px}.products{display:flex;gap:7px;overflow:auto;margin-top:8px}.product{display:block;min-width:135px;padding:9px;background:#eff4ed;border-radius:10px;color:inherit;text-decoration:none}.product[href]:hover{outline:2px solid var(--widget-accent)}.product b,.product small{display:block}.product small{margin-top:4px;color:#557166}.trace{margin-top:10px;padding-top:9px;border-top:1px solid #e5ebe6;color:#557166;font-size:10px}.trace-row{display:flex;align-items:flex-start;gap:5px;margin-top:5px}.trace-label{font-weight:700;white-space:nowrap}.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#eff5ef;border-radius:99px;padding:2px 6px}.suggest{display:flex;gap:6px;padding:8px 14px;overflow:auto}.suggest button{white-space:nowrap;border:1px solid #dce4de;background:white;border-radius:99px;padding:7px 9px;font-size:10px;cursor:pointer}.composer{display:flex;gap:7px;padding:12px;background:white;border-top:1px solid #e2e8e3}.composer input{min-width:0;flex:1;border:1px solid #dce4de;border-radius:12px;padding:11px}.composer button{border:0;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:12px;padding:0 14px;font-weight:700;cursor:pointer}.composer button:disabled{cursor:wait;opacity:.65}@media(prefers-reduced-motion:reduce){.thinking-dots i{animation:none;opacity:.65}}
     </style>
 </head>
 <body>
@@ -56,6 +56,7 @@
     const box = document.querySelector('#messages');
     const input = document.querySelector('#input');
     const sendButton = document.querySelector('#send');
+    const assistantName = @json($assistantName);
 
     function readToken() {
         try { return localStorage.getItem(storageKey); } catch { return null; }
@@ -200,6 +201,33 @@
         box.scrollTop = box.scrollHeight;
     }
 
+    function showThinking() {
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble thinking';
+        bubble.setAttribute('role', 'status');
+        bubble.setAttribute('aria-live', 'polite');
+
+        const label = document.createElement('span');
+        label.textContent = `${assistantName} ფიქრობს…`;
+        const dots = document.createElement('span');
+        dots.className = 'thinking-dots';
+        dots.setAttribute('aria-hidden', 'true');
+        dots.innerHTML = '<i></i><i></i><i></i>';
+        bubble.append(label, dots);
+        box.append(bubble);
+        box.scrollTop = box.scrollHeight;
+
+        const updates = [
+            setTimeout(() => { label.textContent = `${assistantName} თქვენს მოთხოვნას ამუშავებს…`; }, 2800),
+            setTimeout(() => { label.textContent = `${assistantName} გადამოწმებულ პასუხს ამზადებს…`; }, 7500),
+        ];
+
+        return () => {
+            updates.forEach(clearTimeout);
+            bubble.remove();
+        };
+    }
+
     function renderMessage(message) {
         if (!message.id || seen.has(message.id)) return;
         seen.add(message.id);
@@ -270,6 +298,7 @@
         input.value = '';
         input.disabled = true;
         sendButton.disabled = true;
+        const hideThinking = showThinking();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestDeadlineMs);
 
@@ -297,6 +326,7 @@
         } catch (error) {
             add(error.name === 'AbortError' ? 'პასუხმა დროის ლიმიტს გადააჭარბა. გთხოვთ ხელახლა სცადოთ.' : 'კავშირი შეფერხდა. გთხოვთ ხელახლა სცადოთ.', 'ai');
         } finally {
+            hideThinking();
             clearTimeout(timer);
             sending = false;
             input.disabled = false;

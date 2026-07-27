@@ -75,7 +75,8 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertSee('<strong>Maya · Bukinistebi.ge</strong>', false)
             ->assertSee('მე ვარ Maya — Bukinistebi.ge-ის AI ასისტენტი')
             ->assertSee('Powered by Legatus')
-            ->assertSee('ვამოწმებ გადამოწმებულ მონაცემებს')
+            ->assertSee('ფიქრობს…')
+            ->assertSee('გადამოწმებულ პასუხს ამზადებს…')
             ->assertDontSee('Legatus is checking verified data');
     }
 
