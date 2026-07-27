@@ -43,6 +43,7 @@ class OpenAiOrchestrationTest extends TestCase
         foreach ($responseRequests as $request) {
             $this->assertStringContainsString('untrusted data', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('Never emit a reservation factual_claim', $request->data()['instructions'] ?? '');
+            $this->assertStringContainsString('limited shortlist, not the total number', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString(
                 'Exclude questions, proposed or conditional next steps, and future actions.',
                 $request->data()['text']['format']['schema']['properties']['factual_claims']['description'] ?? '',
