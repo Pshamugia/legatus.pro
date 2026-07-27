@@ -47,7 +47,7 @@
     const messageUrl = @json(route('chat.message', $agent));
     const historyUrl = @json(route('chat.history', $agent));
     const storageKey = 'legatus_widget_visitor_token_{{ $agent->slug }}';
-    const requestDeadlineMs = 55000;
+    const requestDeadlineMs = 90000;
     let visitorToken = readToken();
     let cursor = 0;
     let sending = false;

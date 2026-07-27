@@ -28,7 +28,7 @@ const form=document.querySelector('#chat-form'),input=document.querySelector('#m
 const messageUrl=@json(route('chat.message',$agent)),historyUrl=@json(route('chat.history',$agent)),feedbackBase=@json(url('/demo/'.$agent->slug.'/messages'));
 const assistantName=@json($assistantName);
 const storageKey='legatus_visitor_token_{{ $agent->slug }}';
-const requestDeadlineMs=55000;
+const requestDeadlineMs=90000;
 if(new URLSearchParams(window.location.search).get('new')==='1'){try{localStorage.removeItem(storageKey)}catch{}window.history.replaceState({},'',window.location.pathname)}
 let visitorToken=readToken(),cursor=0,sending=false,polling=false;
 const seen=new Set();
