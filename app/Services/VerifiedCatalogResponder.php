@@ -98,7 +98,7 @@ class VerifiedCatalogResponder
 
         $ids = $verified->keys()->map(fn ($id): int => (int) $id)->values();
         $rank = $ids->flip();
-        $models = $agent->products()
+        $models = $agent->customerProducts()
             ->whereIn('id', $ids)
             ->get()
             ->sortBy(fn ($product): int => (int) $rank->get($product->id, PHP_INT_MAX))
@@ -240,7 +240,7 @@ class VerifiedCatalogResponder
             ->pluck('id')->map(fn ($id): int => (int) $id)
             ->reject(fn (int $id): bool => $id === (int) $seed->id)
             ->take(3)->values();
-        $models = $agent->products()->whereIn('id', $ids)->get()
+        $models = $agent->customerProducts()->whereIn('id', $ids)->get()
             ->sortBy(fn ($product): int => $ids->search((int) $product->id))->values();
         if (($result['ok'] ?? false) !== true || $models->isEmpty()) {
             return [
@@ -276,7 +276,7 @@ class VerifiedCatalogResponder
                 ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique()->take(3)->values();
         }
 
-        return $agent->products()->where('is_active', true)->whereIn('id', $ids)->get()
+        return $agent->customerProducts()->where('is_active', true)->whereIn('id', $ids)->get()
             ->sortBy(fn ($product): int => $ids->search((int) $product->id))->values();
     }
 

@@ -54,6 +54,43 @@ class Agent extends Model
         return $this->hasMany(Product::class);
     }
 
+    /**
+     * Products that may be exposed to this business's customers.
+     *
+     * Once a real source is connected, static Build Week fixture products
+     * must never be mixed into the live business catalogue.
+     */
+    public function customerProducts(): HasMany
+    {
+        $products = $this->products();
+        $hasRealSource = $this->knowledgeSources()
+            ->where(function ($query): void {
+                $query->whereNotNull('url')->where('url', '!=', '')
+                    ->orWhere(function ($fileQuery): void {
+                        $fileQuery->whereNotNull('file_path')->where('file_path', '!=', '');
+                    });
+            })
+            ->exists();
+
+        if (! $hasRealSource) {
+            return $products;
+        }
+
+        $staticSourceIds = $this->knowledgeSources()
+            ->whereNull('url')
+            ->whereNull('file_path')
+            ->pluck('id');
+
+        if ($staticSourceIds->isNotEmpty()) {
+            $products->where(function ($query) use ($staticSourceIds): void {
+                $query->whereNull('metadata->source_id')
+                    ->orWhereNotIn('metadata->source_id', $staticSourceIds);
+            });
+        }
+
+        return $products;
+    }
+
     public function conversations(): HasMany
     {
         return $this->hasMany(Conversation::class);

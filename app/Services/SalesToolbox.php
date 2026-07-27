@@ -61,7 +61,7 @@ class SalesToolbox
             if ($termGroups === []) {
                 return collect();
             }
-            $q = $agent->products()->where('is_active', true);
+            $q = $agent->customerProducts()->where('is_active', true);
             $q->where(function ($termQuery) use ($termGroups): void {
                 foreach ($termGroups as $variants) {
                     $patterns = collect($variants)
@@ -272,7 +272,7 @@ class SalesToolbox
             );
         }
 
-        $query = $agent->products()->where('is_active', true);
+        $query = $agent->customerProducts()->where('is_active', true);
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }
@@ -311,7 +311,7 @@ class SalesToolbox
 
     private function compare(Agent $agent, Conversation $conversation, array $a): array
     {
-        $products = $agent->products()->where('is_active', true)->whereIn('id', $a['product_ids'])->get()->map(function ($p) use ($conversation): array {
+        $products = $agent->customerProducts()->where('is_active', true)->whereIn('id', $a['product_ids'])->get()->map(function ($p) use ($conversation): array {
             $available = $this->availableStock($p, $conversation);
             $precision = $this->stockPrecision($p);
             $result = ['id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $precision, 'metadata' => $p->metadata];
@@ -327,7 +327,7 @@ class SalesToolbox
 
     private function stock(Agent $agent, Conversation $conversation, array $a): array
     {
-        $p = $agent->products()->where('is_active', true)->find($a['product_id']);
+        $p = $agent->customerProducts()->where('is_active', true)->find($a['product_id']);
         if ($p && $connection = $this->productConnection($agent, $p)) {
             if ($connection->status !== 'active') {
                 return ['ok' => false, 'error' => 'The live commerce connection needs attention. Do not quote cached price or stock.'];
@@ -565,7 +565,7 @@ class SalesToolbox
     private function reserve(Agent $agent, Conversation $c, array $a): array
     {
         return DB::transaction(function () use ($agent, $c, $a): array {
-            $p = $agent->products()->where('is_active', true)->lockForUpdate()->find($a['product_id']);
+            $p = $agent->customerProducts()->where('is_active', true)->lockForUpdate()->find($a['product_id']);
             if (! $p) {
                 return ['ok' => false, 'error' => 'Active product not found'];
             }
@@ -601,7 +601,7 @@ class SalesToolbox
             return ['ok' => false, 'error' => 'At least one offer item is required.'];
         }
         foreach ($requested as $requestedItem) {
-            $product = $agent->products()->where('is_active', true)->find($requestedItem['product_id']);
+            $product = $agent->customerProducts()->where('is_active', true)->find($requestedItem['product_id']);
             if (! $product) {
                 return ['ok' => false, 'error' => 'Product not found in this business catalog.'];
             }
@@ -615,7 +615,7 @@ class SalesToolbox
             }
         }
         $items = $requested->map(function ($i) use ($agent) {
-            $p = $agent->products()->where('is_active', true)->find($i['product_id']);
+            $p = $agent->customerProducts()->where('is_active', true)->find($i['product_id']);
 
             return $p ? ['product_id' => $p->id, 'name' => $p->name, 'quantity' => $i['quantity'], 'unit_price' => (float) $p->price, 'subtotal' => (float) $p->price * $i['quantity']] : null;
         })->filter()->values();
@@ -835,7 +835,7 @@ class SalesToolbox
         }
 
         $rank = $externalIds->flip();
-        $query = $agent->products()
+        $query = $agent->customerProducts()
             ->where('is_active', true)
             ->where('commerce_connection_id', $connection->id)
             ->whereIn('external_product_id', $externalIds->all());
@@ -1039,7 +1039,7 @@ class SalesToolbox
             return ['label' => $connection->name ?: 'Connected commerce catalog', 'type' => 'commerce_catalog', 'updated_at' => $connection->last_sync_at];
         }
 
-        return ['label' => 'Verified product catalog', 'type' => 'catalog', 'updated_at' => $agent->products()->max('updated_at')];
+        return ['label' => 'Verified product catalog', 'type' => 'catalog', 'updated_at' => $agent->customerProducts()->max('updated_at')];
     }
 
     private function productConnection(Agent $agent, $product)

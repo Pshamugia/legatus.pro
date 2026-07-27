@@ -455,6 +455,47 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertNull($result['did_you_mean']);
     }
 
+    public function test_static_demo_products_are_excluded_after_a_real_catalog_is_connected(): void
+    {
+        [$agent, $existing, $conversation] = $this->context(stock: 4);
+        Http::fake(['*' => Http::response('<html><body>No matching products</body></html>')]);
+
+        $fixture = $agent->knowledgeSources()->create([
+            'type' => 'csv',
+            'name' => 'Verified product catalog',
+            'status' => 'ready',
+        ]);
+        $real = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Real business catalog',
+            'url' => 'https://shop.example/products',
+            'status' => 'ready',
+        ]);
+        $existing->update(['metadata' => ['source_id' => $fixture->id]]);
+        $realProduct = $agent->products()->create([
+            'name' => 'Real Catalog Book',
+            'sku' => 'REAL-1',
+            'category' => 'Mystery',
+            'description' => 'A mysterious modern novel',
+            'price' => 19,
+            'stock' => 5,
+            'is_active' => true,
+            'metadata' => ['source_id' => $real->id],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'mysterious modern novel',
+            'budget' => 30,
+            'category' => null,
+            'mood' => 'mysterious',
+            'occasion' => null,
+            'limit' => 5,
+        ], $agent, $conversation);
+
+        $this->assertSame([$realProduct->id], collect($result['recommendations'])->pluck('id')->all());
+        $this->assertFalse($agent->customerProducts()->whereKey($existing->id)->exists());
+    }
+
     private function context(int $stock = 10): array
     {
         $agent = Agent::create([

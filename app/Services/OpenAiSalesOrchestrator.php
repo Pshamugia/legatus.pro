@@ -127,7 +127,7 @@ class OpenAiSalesOrchestrator
             'confidence' => (float) $data['confidence'],
             'handoff' => (bool) $data['handoff'],
             'escalation_reason' => $data['escalation_reason'] ?? null,
-            'products' => $agent->products()->whereIn('id', $ids)->get(),
+            'products' => $agent->customerProducts()->whereIn('id', $ids)->get(),
             'sources' => $this->groundedSources($agent, collect($used)),
             'tools_used' => $toolNames->all(),
         ];
@@ -352,7 +352,7 @@ class OpenAiSalesOrchestrator
                 $sources->push($result['source']);
             }
             if (in_array($call['name'] ?? '', ['search_products', 'recommend_products', 'compare_products', 'check_stock', 'build_offer', 'reserve_product'], true)) {
-                $sources->push(['label' => 'Verified product catalog', 'type' => 'catalog', 'updated_at' => $agent->products()->max('updated_at')]);
+                $sources->push(['label' => 'Verified product catalog', 'type' => 'catalog', 'updated_at' => $agent->customerProducts()->max('updated_at')]);
             }
             if (($call['name'] ?? '') === 'search_knowledge') {
                 foreach (collect($result['results'] ?? [])->take(3) as $item) {
@@ -401,7 +401,7 @@ class OpenAiSalesOrchestrator
 
     private function factualClaimReason(Agent $agent, string $text, Collection $claims, Collection $successful): ?string
     {
-        $mentionedProducts = $agent->products()->where('is_active', true)->get(['id', 'name'])->filter(function ($product) use ($text): bool {
+        $mentionedProducts = $agent->customerProducts()->where('is_active', true)->get(['id', 'name'])->filter(function ($product) use ($text): bool {
             if (mb_strlen(trim($product->name)) < 4) {
                 return false;
             }
