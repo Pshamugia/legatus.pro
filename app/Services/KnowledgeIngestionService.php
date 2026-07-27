@@ -243,6 +243,24 @@ class KnowledgeIngestionService
                 report($exception);
             }
         }
+        foreach ($this->productDetailUrls($products, $origin) as $productUrl) {
+            try {
+                $productBody = $this->fetchPublicUrl($productUrl)->body();
+                if (strlen($productBody) > 1_500_000) {
+                    continue;
+                }
+                $deliveryPolicy = $this->deliveryPolicyTextFromHtml($productBody);
+                if ($deliveryPolicy !== null) {
+                    $this->chunk($source, 'policy', $source->name.' · product delivery', $deliveryPolicy, [
+                        'url' => $productUrl,
+                        'discovered_from' => 'product_detail',
+                    ]);
+                    $webChunks++;
+                }
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
         if ($result['found'] === 0 && $webChunks === 0) {
             throw new \RuntimeException('The website did not contain any accepted products or searchable content.');
         }
@@ -294,6 +312,49 @@ class KnowledgeIngestionService
         }
 
         return preg_replace('/\s+/u', ' ', trim($dom->textContent)) ?? '';
+    }
+
+    /** @param list<array> $products
+     * @return list<string>
+     */
+    private function productDetailUrls(array $products, string $origin): array
+    {
+        $host = parse_url($origin, PHP_URL_HOST);
+
+        return collect($products)
+            ->map(fn (array $product) => $product['url'] ?? data_get($product, 'offers.url'))
+            ->filter(fn ($url): bool => is_string($url) && filter_var($url, FILTER_VALIDATE_URL) !== false)
+            ->filter(fn (string $url): bool => parse_url($url, PHP_URL_HOST) === $host)
+            ->unique()
+            ->take(3)
+            ->values()
+            ->all();
+    }
+
+    private function deliveryPolicyTextFromHtml(string $html): ?string
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        $keywords = '/(?:delivery|shipping|courier|მიწოდ|მიტან|კურიერ)/iu';
+        $facts = '/(?:₾|ლარ|gel|free|უფასო|\d+\s*(?:[-–]\s*\d+)?\s*(?:business\s+days?|სამუშაო\s+დღ|დღ))/iu';
+        $candidates = [];
+
+        foreach ($xpath->query('//section|//article|//aside|//div|//li|//table') as $node) {
+            $text = preg_replace('/\s+/u', ' ', trim((string) $node->textContent)) ?? '';
+            $length = mb_strlen($text);
+            if ($length >= 20 && $length <= 1500 && preg_match($keywords, $text) && preg_match($facts, $text)) {
+                $candidates[] = $text;
+            }
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, fn (string $left, string $right): int => mb_strlen($left) <=> mb_strlen($right));
+
+        return Str::limit($candidates[0], 1500, '');
     }
 
     private function catalogJsonPayload(?string $contentType, string $body): ?array

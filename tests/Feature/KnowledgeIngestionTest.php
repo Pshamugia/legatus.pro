@@ -291,6 +291,44 @@ HTML;
         Http::assertNotSent(fn ($request) => $request->url() === 'https://evil.example/delivery');
     }
 
+    public function test_catalog_ingestion_learns_delivery_rules_from_product_detail_pages(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $catalog = <<<'HTML'
+<html><body>
+<div class="book-card">
+  <a class="card-link" href="/books/42"></a>
+  <strong class="book-title-strong">Test Book</strong>
+  <span>₾ 10.00</span>
+  <button class="toggle-cart-btn">Add to cart</button>
+</div>
+</body></html>
+HTML;
+        $detail = <<<'HTML'
+<html><body>
+<main><h1>Test Book</h1><div><span>10 ლარი</span></div>
+<aside class="shipping-card"><h2>🚚 მიწოდება</h2><p>თბილისი: 5 ლარი / 2 სამუშაო დღე</p><p>რეგიონი: 7 ლარი / 3-5 სამუშაო დღე</p></aside>
+</main></body></html>
+HTML;
+        Http::fake([
+            'https://example.com/books' => Http::response($catalog),
+            'https://example.com/books/42' => Http::response($detail),
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Product catalog',
+            'url' => 'https://example.com/books',
+        ]);
+
+        app(KnowledgeIngestionService::class)->ingest($source);
+
+        $policy = $source->chunks()->where('kind', 'policy')->where('metadata->discovered_from', 'product_detail')->firstOrFail();
+        $this->assertStringContainsString('რეგიონი: 7 ლარი', $policy->content);
+        $this->assertStringContainsString('3-5 სამუშაო დღე', $policy->content);
+        $this->assertStringNotContainsString('Test Book 10 ლარი', $policy->content);
+    }
+
     public function test_json_catalog_url_imports_universal_commerce_envelope_and_safe_fields(): void
     {
         $this->seed();
