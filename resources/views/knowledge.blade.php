@@ -7,7 +7,7 @@
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
     <div style="display:flex;justify-content:space-between;align-items:center">
         <h3>Connected knowledge</h3>
-        <span class="channel">{{ number_format($agent->products()->where('is_active', true)->count()) }} active products · {{ $sources->sum('chunks_count') }} searchable chunks · {{ $sources->sum('embedded_chunks_count') }} embedded</span>
+        <span class="channel">{{ number_format($agent->products()->where('is_active', true)->count()) }} cached active products · live URL search checks beyond the snapshot · {{ $sources->sum('chunks_count') }} searchable chunks · {{ $sources->sum('embedded_chunks_count') }} embedded</span>
     </div>
     @forelse($sources as $source)
         @php($fixture = ! $source->isRefreshable())
@@ -16,7 +16,10 @@
             <div class="copy">
                 <strong>{{ $source->name }}</strong>
                 @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill">{{ $source->status }}</span>@endif
-                <p>{{ $source->items_found }} found · {{ $source->items_created }} created · {{ $source->items_updated }} updated · {{ $source->chunks_count }} chunks</p>
+                <p>{{ $source->items_found }} indexed in last sync · {{ $source->items_created }} created · {{ $source->items_updated }} updated · {{ $source->chunks_count }} chunks</p>
+                @if($source->type === 'url')
+                    <p class="channel" style="margin-top:4px">This is the source response snapshot, not necessarily the store's total catalog. Customer searches query supported live storefronts on demand.</p>
+                @endif
                 <p class="channel" style="margin-top:4px">
                     @if($source->chunks_count > 0 && $source->embedded_chunks_count === $source->chunks_count)
                         Semantic embeddings ready · {{ $source->embedded_chunks_count }}/{{ $source->chunks_count }}

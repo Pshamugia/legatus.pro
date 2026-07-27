@@ -127,6 +127,65 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertGreaterThanOrEqual(2, Http::recorded()->count());
     }
 
+    public function test_public_search_rejects_unrelated_recommendation_cards_on_an_empty_result_page(): void
+    {
+        [$agent, $conversation] = $this->context();
+        Http::fake([
+            'https://bukinistebi.ge/search?title=*' => Http::response($this->searchCardsHtml(), 200, ['Content-Type' => 'text/html']),
+            'https://bukinistebi.ge/search/suggest*' => Http::response(['items' => [], 'didYouMean' => null]),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'პაულო კოელიოს',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertDatabaseMissing('products', [
+            'agent_id' => $agent->id,
+            'name' => 'საიუბილეო საარქივო გამოცემა',
+        ]);
+    }
+
+    public function test_recommendation_searches_the_live_storefront_instead_of_using_only_the_cached_first_page(): void
+    {
+        [$agent, $conversation] = $this->context();
+        Http::fake(function ($request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+            if (str_contains($request->url(), '/search?title=')
+                && in_array($parameters['title'] ?? null, ['ფილოსოფიური', 'ფილოსოფი', 'ფილოსოფია'], true)) {
+                return Http::response(
+                    str_replace(
+                        ['საიუბილეო საარქივო გამოცემა', 'პაოლო იაშვილი'],
+                        ['ფილოსოფიური ეტიუდები', 'შალვა ნუცუბიძე'],
+                        $this->searchCardsHtml(),
+                    ),
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+            if (str_contains($request->url(), '/books/paolo-iashvili/42')) {
+                return Http::response('<div class="product-price"><strong>14 ₾</strong></div>');
+            }
+
+            return Http::response('<html></html>', 200, ['Content-Type' => 'text/html']);
+        });
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'ფილოსოფიური წიგნები მირჩიე',
+            'budget' => null,
+            'category' => null,
+            'mood' => null,
+            'occasion' => null,
+            'limit' => 3,
+        ], $agent, $conversation);
+
+        $this->assertSame('ფილოსოფიური ეტიუდები', data_get($result, 'recommendations.0.name'));
+        $this->assertSame('შალვა ნუცუბიძე', data_get($result, 'recommendations.0.author'));
+        $this->assertGreaterThan(0, data_get($result, 'recommendations.0.score'));
+    }
+
     /** @return array{Agent, Conversation} */
     private function context(): array
     {

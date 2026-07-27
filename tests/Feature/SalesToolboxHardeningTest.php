@@ -302,6 +302,38 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertArrayNotHasKey('catalog_stock', $check);
     }
 
+    public function test_recommendations_require_real_thematic_relevance_and_understand_georgian_adjectives(): void
+    {
+        [$agent, $philosophy, $conversation] = $this->context(stock: 5);
+        $philosophy->update([
+            'name' => 'ფილოსოფიური ეტიუდები',
+            'category' => 'ფილოსოფია',
+            'description' => 'ეთიკისა და აზროვნების ისტორია',
+            'search_text' => 'ფილოსოფიური ეტიუდები ფილოსოფია ეთიკა აზროვნება',
+        ]);
+        $irrelevant = $agent->products()->create([
+            'name' => 'სამზარეულოს რეცეპტები',
+            'category' => 'კულინარია',
+            'description' => 'ტრადიციული კერძები',
+            'price' => 12,
+            'stock' => 4,
+            'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'ფილოსოფიური წიგნები მირჩიე',
+            'budget' => null,
+            'category' => null,
+            'mood' => null,
+            'occasion' => null,
+            'limit' => 5,
+        ], $agent, $conversation);
+
+        $this->assertSame([$philosophy->id], collect($result['recommendations'])->pluck('id')->all());
+        $this->assertNotContains($irrelevant->id, collect($result['recommendations'])->pluck('id')->all());
+        $this->assertContains('ფილოსოფიური', $result['recommendations'][0]['matched_signals']);
+    }
+
     public function test_product_search_relaxes_conversational_words_and_ranks_the_strongest_identity_match(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

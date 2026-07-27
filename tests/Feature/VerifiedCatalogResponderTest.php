@@ -180,6 +180,29 @@ class VerifiedCatalogResponderTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_new_thematic_recommendation_is_not_contaminated_by_previous_product_context(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $previous = $agent->products()->create([
+            'name' => 'დრამები',
+            'search_text' => 'დრამები ჰენრიკ იბსენი',
+            'price' => 8,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['author' => 'ჰენრიკ იბსენი'],
+        ]);
+        $conversation->update(['context' => ['last_catalog_product_ids' => [$previous->id]]]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'ფილოსოფიური წიგნები მირჩიე',
+        );
+
+        $this->assertNull($reply);
+        $this->assertSame([$previous->id], data_get($conversation->fresh()->context, 'last_catalog_product_ids'));
+    }
+
     public function test_technical_tool_handoff_recovers_but_a_real_operator_handoff_stays_owned(): void
     {
         [$agent, $conversation] = $this->context();

@@ -34,6 +34,7 @@ class PublicStorefrontCatalog
                     ['Accept' => 'text/html'],
                 );
                 $products = $this->ingestion->storefrontProductsFromHtml($searchPage->body(), $origin);
+                $products = $this->relevantProducts($products, $candidate);
                 if ($products !== []) {
                     $products = $this->enrichOriginalPrices($products, $parts);
                     $result = $this->ingestion->importDiscoveredUrlProducts($source, $products);
@@ -174,6 +175,57 @@ class PublicStorefrontCatalog
         return ($parts['scheme'] ?? null) === ($catalogParts['scheme'] ?? null)
             && Str::lower((string) ($parts['host'] ?? '')) === Str::lower((string) ($catalogParts['host'] ?? ''))
             && str_starts_with((string) ($parts['path'] ?? ''), '/books/');
+    }
+
+    /** @param list<array> $products
+     * @return list<array>
+     */
+    private function relevantProducts(array $products, string $query): array
+    {
+        $tokens = collect(preg_split('/[^\pL\pN]+/u', Str::lower($query), -1, PREG_SPLIT_NO_EMPTY) ?: [])
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 3)
+            ->reject(fn (string $token): bool => in_array($token, [
+                'what', 'have', 'show', 'find', 'book', 'books',
+                'რა', 'რას', 'გაქვთ', 'გაქვს', 'მაჩვენე', 'მომიძებნე', 'წიგნი', 'წიგნები',
+            ], true))
+            ->flatMap(fn (string $token): array => $this->catalogQueryVariants($token))
+            ->unique()
+            ->values();
+        if ($tokens->isEmpty()) {
+            return [];
+        }
+
+        return collect($products)->filter(function (array $product) use ($tokens): bool {
+            $haystack = Str::lower(implode(' ', array_filter([
+                $product['name'] ?? null,
+                $product['author'] ?? null,
+                $product['category'] ?? null,
+                $product['description'] ?? null,
+            ], 'is_scalar')));
+
+            return $tokens->contains(fn (string $token): bool => str_contains($haystack, $token));
+        })->values()->all();
+    }
+
+    /** @return list<string> */
+    private function catalogQueryVariants(string $token): array
+    {
+        $variants = [$token];
+        if (preg_match('/^[\x{10D0}-\x{10FF}]+$/u', $token)) {
+            if (Str::endsWith($token, 'ური') && mb_strlen($token) > 6) {
+                $stem = mb_substr($token, 0, -3);
+                $variants[] = $stem;
+                $variants[] = $stem.'ა';
+            }
+            foreach (['იდან', 'თან', 'თვის', 'გან', 'ის', 'ით', 'ად', 'ზე', 'ში', 'მა', 'ემ', 'ს'] as $suffix) {
+                if (Str::endsWith($token, $suffix) && mb_strlen($token) > mb_strlen($suffix) + 2) {
+                    $variants[] = mb_substr($token, 0, -mb_strlen($suffix));
+                    break;
+                }
+            }
+        }
+
+        return array_values(array_unique($variants));
     }
 
     /** @param list<array> $products

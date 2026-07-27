@@ -158,6 +158,13 @@ class VerifiedCatalogResponder
             return $this->clarifySelection($products, $georgian);
         }
 
+        if ($recommendation && ! $this->referencesRecentProduct($text, $products)) {
+            // A new shopping request such as "recommend philosophical books"
+            // is not a follow-up merely because the conversation has history.
+            // Let the agent reason over the new constraints and live catalog.
+            return null;
+        }
+
         if ($recommendation) {
             return $this->recommendFromRecentProduct($agent, $conversation, $selected->first() ?? $products->first(), $message, $georgian);
         }
@@ -294,6 +301,24 @@ class VerifiedCatalogResponder
         })->values();
 
         return $named->isNotEmpty() ? $named : $products;
+    }
+
+    private function referencesRecentProduct(string $message, $products): bool
+    {
+        if (Str::contains($message, [
+            'ეს', 'ამის', 'მისი', 'იმის', 'პირველ', 'მეორე', 'მესამე',
+            ' it', 'this', 'that', 'first', 'second', 'third',
+        ])) {
+            return true;
+        }
+
+        return $products->contains(function ($product) use ($message): bool {
+            $name = Str::lower((string) $product->name);
+            $author = Str::lower((string) data_get($product->metadata, 'author', ''));
+
+            return ($name !== '' && Str::contains($message, $name))
+                || ($author !== '' && Str::contains($message, $author));
+        });
     }
 
     private function clarifySelection($products, bool $georgian): array

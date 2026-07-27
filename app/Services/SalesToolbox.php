@@ -259,28 +259,48 @@ class SalesToolbox
 
     private function recommend(Agent $agent, Conversation $c, array $a): array
     {
-        $terms = collect(preg_split('/[^\pL\pN]+/u', Str::lower(implode(' ', array_filter([$a['query'], $a['category'], $a['mood'], $a['occasion']])))))->filter(fn ($x) => mb_strlen($x) > 2)->unique();
+        $criteria = trim(implode(' ', array_filter([$a['query'], $a['category'], $a['mood'], $a['occasion']])));
+        $termGroups = $this->searchTermGroups($criteria);
+        $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
+        if ($storefrontQueries !== []) {
+            // Recommendation intent must search the live catalogue too. The
+            // locally cached HTML snapshot may contain only the first page.
+            $this->storefront->discover(
+                $agent,
+                $storefrontQueries[0],
+                array_slice($storefrontQueries, 1),
+            );
+        }
+
         $query = $agent->products()->where('is_active', true);
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }
-        $ranked = $query->get()->map(function ($p) use ($terms, $a, $c) {
-            $haystack = Str::lower(implode(' ', [$p->name, $p->category, $p->description, json_encode($p->metadata, JSON_UNESCAPED_UNICODE)]));
-            $matched = $terms->filter(fn ($t) => Str::contains($haystack, $t))->values();
+        $ranked = $query->get()->map(function ($p) use ($termGroups, $a, $c) {
+            $matched = collect($termGroups)
+                ->filter(fn (array $variants): bool => $this->productMatchesTermGroup($p, $variants))
+                ->map(fn (array $variants): string => (string) ($variants[0] ?? ''))
+                ->filter()
+                ->values();
             $within = ! $a['budget'] || (float) $p->price <= (float) $a['budget'];
             $available = $this->availableStock($p, $c);
-            $score = $matched->count() * 2 + ($within ? 2 : -5) + ($available > 0 ? 2 : -6);
+            $relevance = $this->productSearchScore($p, $termGroups);
+            $score = $relevance + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
 
-            $result = ['id' => $p->id, 'name' => $p->name, 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available];
+            $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance];
             if ($result['stock_precision'] === 'exact') {
                 $result['stock'] = $available;
                 $result['available_stock'] = $available;
             }
 
             return $result;
-        })->filter(fn (array $product) => $product['_available_stock'] > 0)->sortByDesc('score')->take($a['limit'])->values()
+        })->filter(fn (array $product) => $product['_available_stock'] > 0)
+            ->when($termGroups !== [], fn ($products) => $products->filter(
+                fn (array $product): bool => $product['_relevance'] > 0
+            ))
+            ->sortByDesc('score')->take($a['limit'])->values()
             ->map(function (array $product): array {
-                unset($product['_available_stock']);
+                unset($product['_available_stock'], $product['_relevance']);
 
                 return $product;
             });
@@ -699,6 +719,11 @@ class SalesToolbox
         }
 
         $variants = [$token];
+        if (Str::endsWith($token, 'ური') && mb_strlen($token) > 6) {
+            $stem = mb_substr($token, 0, -3);
+            $variants[] = $stem;
+            $variants[] = $stem.'ა';
+        }
         foreach (['იდან', 'თან', 'თვის', 'გან', 'ის', 'ით', 'ად', 'ზე', 'ში', 'მა', 'ემ', 'ს', 'ო'] as $suffix) {
             if (! Str::endsWith($token, $suffix) || mb_strlen($token) <= mb_strlen($suffix) + 2) {
                 continue;
@@ -889,11 +914,13 @@ class SalesToolbox
             'author' => Str::lower((string) data_get($product->metadata, 'author', '')),
             'category' => Str::lower((string) $product->category),
             'genres' => Str::lower(implode(' ', array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar'))),
+            'themes' => Str::lower(implode(' ', array_filter((array) data_get($product->metadata, 'themes', []), 'is_scalar'))),
+            'mood' => Str::lower(implode(' ', array_filter((array) data_get($product->metadata, 'mood', []), 'is_scalar'))),
             'description' => Str::lower((string) $product->description),
             'search_text' => Str::lower((string) $product->search_text),
         ];
         $tokens = collect($fields)->map(fn (string $field): array => preg_split('/[^\p{L}\p{N}%_+\-.]+/u', $field, -1, PREG_SPLIT_NO_EMPTY) ?: []);
-        $weights = ['sku' => 220, 'name' => 180, 'author' => 200, 'category' => 120, 'genres' => 120, 'description' => 70, 'search_text' => 40];
+        $weights = ['sku' => 220, 'name' => 180, 'author' => 200, 'category' => 120, 'genres' => 120, 'themes' => 120, 'mood' => 110, 'description' => 70, 'search_text' => 40];
         $score = 0;
 
         foreach ($termGroups as $variants) {
@@ -937,6 +964,25 @@ class SalesToolbox
 
         return collect($termGroups)->filter(fn (array $variants): bool => collect($variants)
             ->contains(fn (string $variant): bool => str_contains($haystack, $variant)))->count();
+    }
+
+    private function productMatchesTermGroup($product, array $variants): bool
+    {
+        $haystack = Str::lower(implode(' ', [
+            $product->sku,
+            $product->name,
+            data_get($product->metadata, 'author', ''),
+            $product->category,
+            implode(' ', array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar')),
+            implode(' ', array_filter((array) data_get($product->metadata, 'themes', []), 'is_scalar')),
+            implode(' ', array_filter((array) data_get($product->metadata, 'mood', []), 'is_scalar')),
+            $product->description,
+            $product->search_text,
+        ]));
+
+        return collect($variants)->contains(
+            fn (string $variant): bool => mb_strlen($variant) >= 2 && str_contains($haystack, $variant)
+        );
     }
 
     private function utf8Distance(string $left, string $right): int
