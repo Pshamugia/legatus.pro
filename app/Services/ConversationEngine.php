@@ -85,7 +85,7 @@ class ConversationEngine
             }
         }
 
-        if ($conversation->status === 'human' && $this->isRecoverableTechnicalHandoff($conversation)) {
+        if ($conversation->status === 'human' && $this->canResumeAi($conversation, $text)) {
             $conversation->update([
                 'status' => 'ai',
                 'handoff_reason' => null,
@@ -233,17 +233,50 @@ class ConversationEngine
         })->values()->all();
     }
 
-    private function isRecoverableTechnicalHandoff(Conversation $conversation): bool
+    private function canResumeAi(Conversation $conversation, string $newMessage): bool
     {
         if ($conversation->assigned_to !== null) {
             return false;
         }
 
-        return Str::contains(Str::lower((string) $conversation->handoff_reason), [
-            'required verification tool was not called',
-            'catalog_search_mismatch',
-            'the ai provider or verification workflow failed safely',
-            'the verified ai service is unavailable',
+        if ($this->customerRequestsHuman($newMessage)) {
+            return false;
+        }
+
+        $reason = Str::lower((string) $conversation->handoff_reason);
+
+        // An unassigned safety escalation must not permanently disable the AI
+        // for every later customer question. Only deliberate human ownership
+        // and approval workflows remain sticky.
+        return ! Str::contains($reason, [
+            'customer requested a human',
+            'manual operator takeover',
+            'manager approval',
+            'discount approval',
+            'discount exceeds',
+            'მომხმარებელმა მოითხოვა ოპერატორი',
+            'ოპერატორთან დაკავშირება მოითხოვა',
+            'მენეჯერის დადასტურება',
+            'ფასდაკლებას მენეჯერის',
+        ]);
+    }
+
+    private function customerRequestsHuman(string $message): bool
+    {
+        return Str::contains(Str::lower($message), [
+            'ოპერატორი',
+            'ოპერატორთან',
+            'ადამიანი',
+            'ადამიანთან',
+            'კონსულტანტი',
+            'კონსულტანტთან',
+            'მენეჯერი',
+            'მენეჯერთან',
+            'human agent',
+            'human support',
+            'real person',
+            'operator',
+            'manager',
         ]);
     }
 

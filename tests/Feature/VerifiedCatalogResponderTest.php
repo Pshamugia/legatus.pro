@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\Conversation;
+use App\Models\User;
 use App\Services\ConversationEngine;
 use App\Services\SalesAgentService;
 use App\Services\VerifiedCatalogResponder;
@@ -252,6 +253,73 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertTrue($human['handoff'], json_encode($human, JSON_UNESCAPED_UNICODE));
         $this->assertSame(['human_queue'], $human['tools_used']);
         Http::assertNothingSent();
+    }
+
+    public function test_unassigned_delivery_handoff_does_not_block_a_new_catalog_request(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $politics = $agent->products()->create([
+            'name' => 'პოლიტიკური აზრის ისტორია',
+            'category' => 'პოლიტიკა',
+            'description' => 'პოლიტიკური თეორიისა და სახელმწიფოს ისტორია',
+            'search_text' => 'პოლიტიკური აზრის ისტორია პოლიტიკა სახელმწიფო თეორია',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+        $conversation->update([
+            'status' => 'human',
+            'handoff_reason' => 'მიწოდების ზუსტი საფასური ვერ დადასტურდა გადამოწმებული წყაროებით.',
+            'assigned_to' => null,
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(ConversationEngine::class)->handle(
+            $agent,
+            'პოლიტიკაზე მინდა წიგნები',
+            'widget',
+            $conversation->visitor_id,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertSame([$politics->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertNull($conversation->fresh()->handoff_reason);
+        Http::assertNothingSent();
+    }
+
+    public function test_assigned_operator_and_explicit_human_request_remain_sticky(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $operator = User::factory()->create();
+        $conversation->update([
+            'status' => 'human',
+            'handoff_reason' => 'Technical verification failed.',
+            'assigned_to' => $operator->id,
+        ]);
+
+        $assigned = app(ConversationEngine::class)->handle(
+            $agent,
+            'პოლიტიკაზე მინდა წიგნები',
+            'widget',
+            $conversation->visitor_id,
+        );
+        $this->assertTrue($assigned['handoff']);
+        $this->assertSame(['human_queue'], $assigned['tools_used']);
+
+        $conversation->update([
+            'assigned_to' => null,
+            'handoff_reason' => 'Technical verification failed.',
+        ]);
+        $explicit = app(ConversationEngine::class)->handle(
+            $agent,
+            'ოპერატორთან დამაკავშირეთ',
+            'widget',
+            $conversation->visitor_id,
+        );
+        $this->assertTrue($explicit['handoff']);
+        $this->assertSame(['human_queue'], $explicit['tools_used']);
     }
 
     /** @return array{Agent, Conversation} */
