@@ -216,6 +216,7 @@ class KnowledgeIngestionService
         }
         $catalogParts = parse_url((string) $source->url);
         $origin = ($catalogParts['scheme'] ?? 'https').'://'.($catalogParts['host'] ?? '');
+        $policyUrls = $this->policyPageUrls($xpath, (string) $source->url);
         $products = array_merge($products, $this->storefrontProductsFromHtml($body, $origin));
         $this->assertCatalogItemLimit(count($products));
         $result = $this->importUrlProducts($source, $products);
@@ -227,6 +228,21 @@ class KnowledgeIngestionService
             $this->chunk($source, 'webpage', $source->name.' · '.($i + 1), $content, ['url' => $source->url]);
             $webChunks++;
         }
+        foreach ($policyUrls as $policyUrl) {
+            try {
+                $policyBody = $this->fetchPublicUrl($policyUrl)->body();
+                if (strlen($policyBody) > 1_500_000) {
+                    continue;
+                }
+                $policyText = $this->readableHtmlText($policyBody);
+                foreach ($this->split($policyText) as $i => $content) {
+                    $this->chunk($source, 'policy', $source->name.' · policy '.($i + 1), $content, ['url' => $policyUrl]);
+                    $webChunks++;
+                }
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
         if ($result['found'] === 0 && $webChunks === 0) {
             throw new \RuntimeException('The website did not contain any accepted products or searchable content.');
         }
@@ -237,6 +253,47 @@ class KnowledgeIngestionService
             'items_updated' => $result['updated'],
             'content_hash' => hash('sha256', $body),
         ];
+    }
+
+    /** @return list<string> */
+    private function policyPageUrls(\DOMXPath $xpath, string $pageUrl): array
+    {
+        $page = parse_url($pageUrl);
+        $origin = ($page['scheme'] ?? 'https').'://'.($page['host'] ?? '');
+        $keywords = '/(?:delivery|shipping|courier|returns?|refund|warranty|payment|faq|terms|მიწოდ|მიტან|კურიერ|დაბრუნ|გარანტი|გადახდ|წესებ|პირობ)/iu';
+        $urls = [];
+
+        foreach ($xpath->query('//a[@href]') as $link) {
+            $href = trim((string) $link->getAttribute('href'));
+            $label = trim((string) $link->textContent);
+            if ($href === '' || ! preg_match($keywords, $href.' '.$label)) {
+                continue;
+            }
+            $absolute = str_starts_with($href, '/')
+                ? $origin.$href
+                : (filter_var($href, FILTER_VALIDATE_URL) ? $href : null);
+            if (! $absolute || parse_url($absolute, PHP_URL_HOST) !== ($page['host'] ?? null)) {
+                continue;
+            }
+            $absolute = preg_replace('/#.*$/', '', $absolute);
+            if ($absolute !== $pageUrl) {
+                $urls[] = $absolute;
+            }
+        }
+
+        return array_slice(array_values(array_unique($urls)), 0, 6);
+    }
+
+    private function readableHtmlText(string $html): string
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        foreach ($xpath->query('//script|//style|//nav|//footer') as $node) {
+            $node->parentNode?->removeChild($node);
+        }
+
+        return preg_replace('/\s+/u', ' ', trim($dom->textContent)) ?? '';
     }
 
     private function catalogJsonPayload(?string $contentType, string $body): ?array

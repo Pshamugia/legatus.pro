@@ -263,6 +263,34 @@ HTML;
         $this->assertSame(2, $source->chunks()->count());
     }
 
+    public function test_website_ingestion_discovers_same_origin_delivery_policy_pages(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        Http::fake([
+            'https://example.com/store' => Http::response(
+                '<html><body><h1>Store</h1><p>Browse our catalogue.</p><a href="/delivery">მიწოდების პირობები</a><a href="https://evil.example/delivery">External delivery</a></body></html>'
+            ),
+            'https://example.com/delivery' => Http::response(
+                '<html><body><h1>მიწოდება</h1><p>გორში საკურიერო მიწოდება ღირს 7 ლარი და სრულდება 2 სამუშაო დღეში.</p></body></html>'
+            ),
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Business website',
+            'url' => 'https://example.com/store',
+        ]);
+
+        app(KnowledgeIngestionService::class)->ingest($source);
+
+        $this->assertTrue($source->chunks()
+            ->where('kind', 'policy')
+            ->where('content', 'like', '%7 ლარი%')
+            ->exists());
+        Http::assertSent(fn ($request) => $request->url() === 'https://example.com/delivery');
+        Http::assertNotSent(fn ($request) => $request->url() === 'https://evil.example/delivery');
+    }
+
     public function test_json_catalog_url_imports_universal_commerce_envelope_and_safe_fields(): void
     {
         $this->seed();

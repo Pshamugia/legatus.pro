@@ -20,6 +20,13 @@ class VerifiedCatalogResponder
 
     public function respond(Agent $agent, Conversation $conversation, string $message): ?array
     {
+        // Service and policy questions must never inherit the last viewed
+        // product. They belong to tenant knowledge and delivery tools, even
+        // when the wording also contains a generic word such as "price".
+        if ($this->isServiceOrPolicyIntent($message)) {
+            return null;
+        }
+
         if ($this->isCartFollowUp($message)) {
             return $this->respondFromRecentProducts($agent, $conversation, $message);
         }
@@ -444,6 +451,14 @@ class VerifiedCatalogResponder
         }
 
         return Str::contains($text, $lookupSignals) || $tokens->count() <= 5;
+    }
+
+    private function isServiceOrPolicyIntent(string $message): bool
+    {
+        return (bool) preg_match(
+            '/(?:მიწოდ|ჩამომივ|მიტან|კურიერ|ტრანსპორტირ|delivery|shipping|courier|დაბრუნ|refund|return\s+policy|გარანტი|warranty|გადახდ|payment)/iu',
+            $message,
+        );
     }
 
     private function hasExplicitLookupSignal(string $message): bool

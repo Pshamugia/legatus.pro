@@ -203,6 +203,26 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertSame([$previous->id], data_get($conversation->fresh()->context, 'last_catalog_product_ids'));
     }
 
+    public function test_delivery_fee_question_never_inherits_a_recent_product(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $product = $agent->products()->create([
+            'name' => 'Product that must not leak',
+            'price' => 15,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+        $conversation->update(['context' => ['last_catalog_product_ids' => [$product->id]]]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'გორში მიწოდების ფასი რა არის?',
+        );
+
+        $this->assertNull($reply);
+    }
+
     public function test_technical_tool_handoff_recovers_but_a_real_operator_handoff_stays_owned(): void
     {
         [$agent, $conversation] = $this->context();
