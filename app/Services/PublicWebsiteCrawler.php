@@ -193,6 +193,12 @@ class PublicWebsiteCrawler
         foreach ($xpath->query('//a[@href]') as $node) {
             $links[] = $node->getAttribute('href');
         }
+        foreach ($xpath->query('//*[@data-next-page]') as $node) {
+            $page = trim((string) $node->getAttribute('data-next-page'));
+            if (ctype_digit($page) && (int) $page > 0) {
+                $links[] = $this->pageUrl($pageUrl, (int) $page);
+            }
+        }
 
         return collect($links)
             ->filter(fn ($url) => is_string($url) && trim($url) !== '')
@@ -201,6 +207,19 @@ class PublicWebsiteCrawler
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function pageUrl(string $url, int $page): string
+    {
+        $parts = parse_url($url);
+        $query = [];
+        parse_str((string) ($parts['query'] ?? ''), $query);
+        $query['page'] = $page;
+
+        return ($parts['scheme'].'://'.$parts['host'])
+            .(isset($parts['port']) ? ':'.$parts['port'] : '')
+            .($parts['path'] ?? '/')
+            .'?'.http_build_query($query);
     }
 
     /** @return list<string> */
