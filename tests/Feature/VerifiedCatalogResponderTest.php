@@ -204,6 +204,61 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertSame([$previous->id], data_get($conversation->fresh()->context, 'last_catalog_product_ids'));
     }
 
+    public function test_context_only_book_reference_is_clarified_instead_of_searched_as_a_keyword(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->products()->create([
+            'name' => 'ამაღამ ერთი ქალიშვილია',
+            'search_text' => 'ამაღამ ერთი ქალიშვილია რომანი',
+            'price' => 5,
+            'stock' => 1,
+            'is_active' => true,
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'ამ წიგნზე რას მეტყვი?',
+            $conversation,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('discovery', $reply['intent']);
+        $this->assertSame(['clarify_product_reference'], $reply['tools_used']);
+        $this->assertSame([], $reply['products']);
+        $this->assertStringContainsString('რომელ წიგნს გულისხმობთ', $reply['text']);
+        $this->assertStringContainsString('სათაური ან ავტორი', $reply['text']);
+        Http::assertNothingSent();
+    }
+
+    public function test_context_only_book_reference_uses_a_real_recent_product_when_available(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $book = $agent->products()->create([
+            'name' => 'პოლიტიკური აზრის ისტორია',
+            'search_text' => 'პოლიტიკური აზრის ისტორია',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+        $conversation->update(['context' => ['last_catalog_product_ids' => [$book->id]]]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'ამ წიგნზე რას მეტყვი?',
+            $conversation,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([$book->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('პოლიტიკური აზრის ისტორია', $reply['text']);
+        $this->assertNotSame(['clarify_product_reference'], $reply['tools_used']);
+        Http::assertNothingSent();
+    }
+
     public function test_delivery_fee_question_never_inherits_a_recent_product(): void
     {
         [$agent, $conversation] = $this->context();

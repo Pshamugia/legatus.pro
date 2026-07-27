@@ -27,6 +27,28 @@ class VerifiedCatalogResponder
             return null;
         }
 
+        $contextOnlyReference = $this->isContextOnlyProductReference($message);
+        if ($contextOnlyReference && $this->recentProducts($agent, $conversation)->isEmpty()) {
+            $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+
+            return [
+                'text' => $georgian
+                    ? 'ზუსტად ვერ გავიგე, რომელ წიგნს გულისხმობთ. მომწერეთ სათაური ან ავტორი და სწორ წიგნზე მოგიყვებით.'
+                    : 'I am not sure which book you mean. Please send its title or author and I will tell you about the correct book.',
+                'intent' => 'discovery',
+                'confidence' => .99,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'products' => [],
+                'sources' => [],
+                'tools_used' => ['clarify_product_reference'],
+            ];
+        }
+
+        if ($contextOnlyReference) {
+            return $this->respondFromRecentProducts($agent, $conversation, $message);
+        }
+
         if ($this->isCartFollowUp($message)) {
             return $this->respondFromRecentProducts($agent, $conversation, $message);
         }
@@ -154,7 +176,8 @@ class VerifiedCatalogResponder
         $stock = Str::contains($text, ['მარაგ', 'ხელმისაწვდომ', 'გაქვთ', 'გაქვს', 'stock', 'available']);
         $details = Str::contains($text, ['დეტალ', 'ავტორ', 'ვინ დაწერა', 'რის შესახებ', 'აღწერ', 'ლინკ', 'ბმულ', 'მაჩვენ', 'details', 'author', 'about', 'link', 'show']);
         $recommendation = Str::contains($text, ['მირჩი', 'მსგავს', 'სხვა ვარიანტ', 'recommend', 'similar', 'another option']);
-        $contextual = $cart || $price || $sale || $stock || $details || $recommendation
+        $contextual = $this->isContextOnlyProductReference($message)
+            || $cart || $price || $sale || $stock || $details || $recommendation
             || Str::contains($text, ['ეს', 'ამის', 'მისი', 'იმის', 'პირველი', 'მეორე', 'მესამე', 'it', 'this', 'that', 'first', 'second', 'third']);
         if (! $contextual) {
             return null;
@@ -355,6 +378,32 @@ class VerifiedCatalogResponder
             'დამიმატ', 'კალათ', 'ვიყიდ', 'ყიდვა', 'შეძენა',
             'add it', 'add this', 'add to cart', 'buy it', 'purchase',
         ]);
+    }
+
+    private function isContextOnlyProductReference(string $message): bool
+    {
+        $text = Str::lower(trim($message));
+
+        if (preg_match('/\b(?:this|that)\s+(?:book|product|title)\b/iu', $text)) {
+            return true;
+        }
+        if (! preg_match('/(?:^|\s)(?:ამ|ამავე|ეს|იმ|მაგ|მასზე)(?:\s|$)/u', $text)
+            && ! preg_match('/(?:ამ|ამავე|ეს|იმ|მაგ)\s*(?:წიგნ|ნაწარმოებ|პროდუქტ)/u', $text)) {
+            return false;
+        }
+
+        $remainder = preg_replace(
+            '/(?:ამ|ამავე|ეს|იმ|მაგ|მასზე)\s*(?:წიგნ(?:ზე|ის|ს|ი)?|ნაწარმოებ(?:ზე|ის|ს|ი)?|პროდუქტ(?:ზე|ის|ს|ი)?)?/u',
+            ' ',
+            $text,
+        );
+        $remainder = preg_replace(
+            '/\b(?:რას|რა|მეტყვი|იტყვი|ფიქრობ|მითხარი|მომიყევი|შეგიძლია|შეგიძლიათ|ავტორი|ვინ|არის|იყო|შესახებ|უფრო|დეტალურად|ინფორმაცია)\b/u',
+            ' ',
+            (string) $remainder,
+        );
+
+        return trim((string) preg_replace('/[^\pL\pN]+/u', '', (string) $remainder)) === '';
     }
 
     private function productLine($product, array $check, bool $georgian): string
