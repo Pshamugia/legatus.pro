@@ -76,7 +76,7 @@ class OnboardingCommerceAuthorityTest extends TestCase
         ]);
     }
 
-    public function test_unstructured_catalog_url_still_warns_before_a_live_connector_is_active(): void
+    public function test_public_catalog_url_is_learned_without_requiring_a_live_connector(): void
     {
         [$owner, $agent] = $this->tenant('catalog-without-connector');
         Http::fake([
@@ -86,11 +86,7 @@ class OnboardingCommerceAuthorityTest extends TestCase
         $this->actingAs($owner)->post(route('onboarding.store'), $this->validOnboarding([
             'catalog_url' => 'https://example.com/human-catalog',
         ]))->assertRedirect(route('channels.index'))
-            ->assertSessionHas(
-                'warnings',
-                fn (array $warnings): bool => count($warnings) === 1
-                    && str_contains($warnings[0], 'did not expose structured products'),
-            );
+            ->assertSessionHas('warnings', []);
 
         Http::assertSent(fn ($request): bool => $request->url() === 'https://example.com/human-catalog');
         $this->assertDatabaseHas('knowledge_sources', [

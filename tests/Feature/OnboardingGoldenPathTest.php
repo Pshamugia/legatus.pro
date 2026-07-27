@@ -93,7 +93,7 @@ class OnboardingGoldenPathTest extends TestCase
         $agent = $user->organizations()->firstOrFail()->agents()->firstOrFail();
         $this->assertSame(1, $agent->knowledgeSources()->count());
         $this->assertSame(1, $agent->products()->where('sku', 'ONE-1')->count());
-        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://example.com/products');
     }
 
     public function test_failed_catalog_url_is_saved_but_reported_as_needing_attention(): void
@@ -168,7 +168,7 @@ class OnboardingGoldenPathTest extends TestCase
         $this->assertSame(1, $agent->knowledgeSources()->count());
     }
 
-    public function test_catalog_page_without_structured_products_is_not_presented_as_a_verified_catalog(): void
+    public function test_catalog_page_without_products_starts_full_public_site_learning_without_connector_warning(): void
     {
         $this->post('/register', [
             'name' => 'Owner',
@@ -187,7 +187,8 @@ class OnboardingGoldenPathTest extends TestCase
             'agent_name' => 'Nia',
             'catalog_url' => 'https://example.com/catalog-page',
         ])->assertRedirect('/app/channels')
-            ->assertSessionHas('warnings', fn (array $warnings): bool => count($warnings) === 1 && str_contains($warnings[0], 'did not expose structured products'));
+            ->assertSessionHas('warnings', [])
+            ->assertSessionHas('success', 'Setup saved and learned example.com product catalog.');
 
         $agent = $user->organizations()->firstOrFail()->agents()->firstOrFail();
         $this->assertSame(0, $agent->products()->count());

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Models\Agent;
 use App\Models\Lead;
 use App\Services\KnowledgeIngestionService;
@@ -175,11 +176,7 @@ class AgentController extends Controller
             try {
                 $ingestion->ingest($source);
                 $learned[] = $source->name;
-                if ($urlSource['purpose'] === 'catalog'
-                    && $activeCommerceConnection === null
-                    && ! $agent->products()->where('metadata->source_id', $source->id)->where('is_active', true)->exists()) {
-                    $warnings[] = 'The catalog URL was readable, but it did not expose structured products with verified prices. Use a supported JSON feed, structured product data, CSV, or the live store connector.';
-                }
+                CrawlPublicWebsite::dispatch($source->id);
             } catch (\Throwable $exception) {
                 report($exception);
                 $warnings[] = "URL could not be learned: {$source->fresh()->error}";

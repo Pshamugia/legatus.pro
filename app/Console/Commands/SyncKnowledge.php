@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\KnowledgeSource;
 use App\Services\KnowledgeIngestionService;
+use App\Services\PublicWebsiteCrawler;
 use Illuminate\Console\Command;
 
 class SyncKnowledge extends Command
@@ -12,7 +13,7 @@ class SyncKnowledge extends Command
 
     protected $description = 'Synchronize refreshable Legatus knowledge sources';
 
-    public function handle(KnowledgeIngestionService $service): int
+    public function handle(KnowledgeIngestionService $service, PublicWebsiteCrawler $crawler): int
     {
         $query = KnowledgeSource::whereIn('status', ['ready', 'failed']);
 
@@ -21,7 +22,7 @@ class SyncKnowledge extends Command
         }
 
         $failed = 0;
-        $query->each(function ($source) use ($service, &$failed) {
+        $query->each(function ($source) use ($service, $crawler, &$failed) {
             if (! $source->isRefreshable()) {
                 $this->line("Skipped snapshot #{$source->id} {$source->name}");
 
@@ -29,7 +30,11 @@ class SyncKnowledge extends Command
             }
 
             try {
-                $service->ingest($source);
+                if ($source->type === 'url') {
+                    $crawler->crawl($source);
+                } else {
+                    $service->ingest($source);
+                }
                 $this->info("Synced #{$source->id} {$source->name}");
             } catch (\Throwable $exception) {
                 $failed++;

@@ -17,12 +17,12 @@
                 <strong>{{ $source->name }}</strong>
                 @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill">{{ $source->status }}</span>@endif
                 @if($source->type === 'url')
-                    <p><b>Live search enabled</b> · {{ $source->items_found }} items cached from the latest source response · {{ $source->chunks_count }} searchable chunks</p>
+                    <p><b>{{ $source->status === 'processing' ? 'Learning the complete public website' : 'Complete public-site knowledge' }}</b> · {{ number_format($source->items_found) }} products indexed · {{ number_format($source->chunks_count) }} searchable passages</p>
                 @else
                     <p>{{ $source->items_found }} indexed in last sync · {{ $source->items_created }} created · {{ $source->items_updated }} updated · {{ $source->chunks_count }} chunks</p>
                 @endif
                 @if($source->type === 'url')
-                    <p class="channel" style="margin-top:4px">Cached items are not the store's total catalog. Customer questions search the supported live storefront on demand.</p>
+                    <p class="channel" style="margin-top:4px">{{ $source->status === 'processing' ? 'Legatus is following sitemaps, catalog pages, product details and business-policy pages in the background.' : 'Products, descriptions, prices, sale data and public business policies are refreshed from this website.' }}</p>
                 @endif
                 <p class="channel" style="margin-top:4px">
                     @if($source->chunks_count > 0 && $source->embedded_chunks_count === $source->chunks_count)

@@ -13,5 +13,6 @@ return [
     'commerce_max_catalog_products' => (int) env('LEGATUS_COMMERCE_MAX_CATALOG_PRODUCTS', 10000),
     'commerce_max_response_bytes' => (int) env('LEGATUS_COMMERCE_MAX_RESPONSE_BYTES', 5242880),
     'commerce_sync_lock_seconds' => (int) env('LEGATUS_COMMERCE_SYNC_LOCK_SECONDS', 600),
+    'public_crawl_max_pages' => (int) env('LEGATUS_PUBLIC_CRAWL_MAX_PAGES', 5000),
     'widget_frame_ancestors' => env('LEGATUS_WIDGET_FRAME_ANCESTORS', '*'),
 ];

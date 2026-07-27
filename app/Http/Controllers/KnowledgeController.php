@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Models\KnowledgeSource;
 use App\Services\KnowledgeIngestionService;
 use App\Services\TenantContext;
@@ -46,6 +47,11 @@ class KnowledgeController extends Controller
         $source = $agent->knowledgeSources()->create(['type' => $data['type'], 'name' => $name, 'url' => $data['url'] ?? null, 'file_path' => $file ? $ingestion->storeFile($file, $data['type']) : null]);
         try {
             $ingestion->ingest($source);
+            if ($source->type === 'url') {
+                CrawlPublicWebsite::dispatch($source->id);
+
+                return back()->with('success', "{$source->name} is connected. Legatus is now learning the complete public website in the background.");
+            }
 
             return back()->with('success', "{$source->name} successfully learned.");
         } catch (\Throwable) {
@@ -62,6 +68,11 @@ class KnowledgeController extends Controller
         }
         try {
             $ingestion->ingest($source);
+            if ($source->type === 'url') {
+                CrawlPublicWebsite::dispatch($source->id);
+
+                return back()->with('success', 'Initial refresh completed. The complete public website is being re-indexed in the background.');
+            }
 
             return back()->with('success', 'Source synchronized.');
         } catch (\Throwable) {
