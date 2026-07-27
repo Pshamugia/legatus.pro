@@ -275,6 +275,59 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertNull($result['did_you_mean']);
     }
 
+    public function test_product_search_suggests_the_nearest_tenant_catalog_author_for_a_real_typo(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'არასრულწლოვანი',
+            'description' => 'პაატა შამუგიას პოეზია',
+            'search_text' => 'არასრულწლოვანი პაატა შამუგია პოეზია',
+            'metadata' => ['author' => 'პაატა შამუგია'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'შამუგიასს რა გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame('პაატა შამუგია', $result['did_you_mean']);
+        $this->assertTrue($result['suggestion_requires_confirmation']);
+    }
+
+    public function test_local_typo_suggestions_are_near_match_only_and_tenant_isolated(): void
+    {
+        [$agent, , $conversation] = $this->context(stock: 4);
+        $other = Agent::create([
+            'name' => 'Other assistant',
+            'slug' => 'other-local-suggestion',
+            'business_name' => 'Other Store',
+        ]);
+        $other->products()->create([
+            'name' => 'არასრულწლოვანი',
+            'search_text' => 'პაატა შამუგია',
+            'price' => 8,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['author' => 'პაატა შამუგია'],
+        ]);
+
+        $isolated = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'შამუგიასს რა გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+        $unrelated = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'სრულიადუცნობი',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertNull($isolated['did_you_mean']);
+        $this->assertNull($unrelated['did_you_mean']);
+    }
+
     public function test_product_search_restores_e_stem_georgian_surnames_without_a_typo_prompt(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 5);

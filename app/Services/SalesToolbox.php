@@ -107,12 +107,16 @@ class SalesToolbox
             $remoteSearch = $this->commerceSearchResponse($agent, $a, $termGroups);
             $products = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
         }
-        $didYouMean = $products->isEmpty()
-            ? $this->validatedSearchSuggestion(
+        $didYouMean = null;
+        if ($products->isEmpty()) {
+            $didYouMean = $this->validatedSearchSuggestion(
                 (string) $a['query'],
                 $publicSearch['did_you_mean'] ?? data_get($remoteSearch, 'meta.did_you_mean'),
-            )
-            : null;
+            ) ?? $this->validatedSearchSuggestion(
+                (string) $a['query'],
+                $this->nearestCatalogSuggestion($agent, $termGroups),
+            );
+        }
 
         return [
             'ok' => true,
@@ -719,6 +723,12 @@ class SalesToolbox
         }
 
         $variants = [$token];
+        // A doubled final -ს is not a Georgian case ending. Keep it as a typo
+        // candidate instead of silently stripping one letter and presenting a
+        // different catalogue identity as an exact match.
+        if (Str::endsWith($token, 'სს')) {
+            return $variants;
+        }
         // Colloquial Georgian often attaches -სი to vowel-final surnames
         // (შამუგია → შამუგიასი). Recover the catalogue lemma without tying
         // the search to any one author; verified product rows still decide.
@@ -909,6 +919,62 @@ class SalesToolbox
         }
 
         return null;
+    }
+
+    private function nearestCatalogSuggestion(Agent $agent, array $termGroups): ?string
+    {
+        $queryTokens = collect($termGroups)
+            ->flatten()
+            ->map(fn (string $token): string => Str::lower($token))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+            ->unique()
+            ->values();
+        if ($queryTokens->isEmpty()) {
+            return null;
+        }
+
+        $best = null;
+        $bestDistance = PHP_INT_MAX;
+        $products = $agent->customerProducts()
+            ->where('is_active', true)
+            ->limit(5000)
+            ->get(['name', 'metadata']);
+
+        foreach ($products as $product) {
+            $author = trim((string) data_get($product->metadata, 'author', ''));
+            foreach ([
+                ['label' => $author, 'value' => $author],
+                ['label' => (string) $product->name, 'value' => (string) $product->name],
+            ] as $candidate) {
+                if ($candidate['value'] === '') {
+                    continue;
+                }
+                $candidateTokens = preg_split(
+                    '/[^\p{L}\p{N}]+/u',
+                    Str::lower($candidate['value']),
+                    -1,
+                    PREG_SPLIT_NO_EMPTY,
+                ) ?: [];
+                foreach ($queryTokens as $queryToken) {
+                    foreach ($candidateTokens as $candidateToken) {
+                        if (mb_strlen($candidateToken) < 4) {
+                            continue;
+                        }
+                        $distance = $this->utf8Distance($queryToken, $candidateToken);
+                        $length = max(mb_strlen($queryToken), mb_strlen($candidateToken));
+                        $maximumDistance = min(2, max(1, (int) floor($length * .25)));
+                        if ($distance < 1 || $distance > $maximumDistance || $distance >= $bestDistance) {
+                            continue;
+                        }
+
+                        $bestDistance = $distance;
+                        $best = $candidate['label'];
+                    }
+                }
+            }
+        }
+
+        return is_string($best) && $best !== '' ? $best : null;
     }
 
     private function productSearchScore($product, array $termGroups): int

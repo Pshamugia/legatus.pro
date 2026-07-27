@@ -103,6 +103,34 @@ class VerifiedCatalogResponderTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_real_author_typo_prompts_for_confirmation_from_the_tenant_catalog(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->products()->create([
+            'name' => 'არასრულწლოვანი',
+            'description' => 'პაატა შამუგიას პოეზია',
+            'search_text' => 'არასრულწლოვანი პაატა შამუგია პოეზია',
+            'price' => 8,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['author' => 'პაატა შამუგია'],
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'შამუგიასს რა გაქვთ?',
+            $conversation,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([], $reply['products']);
+        $this->assertStringContainsString('ამას ხომ არ გულისხმობდით', $reply['text']);
+        $this->assertStringContainsString('პაატა შამუგია', $reply['text']);
+        Http::assertNothingSent();
+    }
+
     public function test_no_match_or_confirmable_typo_never_poison_the_conversation_with_handoff(): void
     {
         [$agent, $conversation] = $this->context();
