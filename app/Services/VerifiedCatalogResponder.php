@@ -40,7 +40,7 @@ class VerifiedCatalogResponder
         // Service and policy questions must never inherit the last viewed
         // product. They belong to tenant knowledge and delivery tools, even
         // when the wording also contains a generic word such as "price".
-        if ($this->isServiceOrPolicyIntent($message)) {
+        if ($this->isServiceOrPolicyIntent($message) || $this->isDeliveryTimingIntent($message)) {
             return null;
         }
 
@@ -70,7 +70,7 @@ class VerifiedCatalogResponder
             return $this->respondFromRecentProducts($agent, $conversation, $message);
         }
 
-        if (! $this->isCatalogLookup($message)) {
+        if (! $this->isCatalogLookup($agent, $message)) {
             return $this->respondFromRecentProducts($agent, $conversation, $message);
         }
 
@@ -92,6 +92,20 @@ class VerifiedCatalogResponder
             $suggestion = trim((string) ($search['did_you_mean'] ?? ''));
             if ($suggestion === '' && ! $this->hasExplicitLookupSignal($message)) {
                 return null;
+            }
+            if ($suggestion === '') {
+                return [
+                    'text' => $georgian
+                        ? 'ზუსტი დამთხვევა ვერ ვიპოვე. მომწერეთ პროდუქტის სახელი, ბრენდი, კატეგორია ან თქვენთვის მნიშვნელოვანი მახასიათებელი.'
+                        : 'I could not find an exact match. Send the product name, brand, category, or another feature that matters to you.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'products' => [],
+                    'sources' => $source,
+                    'tools_used' => ['search_products'],
+                ];
             }
 
             return [
@@ -455,7 +469,7 @@ class VerifiedCatalogResponder
         return (int) ($check['available_stock'] ?? $check['stock'] ?? 0) > 0;
     }
 
-    private function isCatalogLookup(string $message): bool
+    private function isCatalogLookup(Agent $agent, string $message): bool
     {
         $text = Str::lower(trim($message));
         if ($text === '' || mb_strlen($text) > 300) {
@@ -516,7 +530,25 @@ class VerifiedCatalogResponder
             return false;
         }
 
-        return Str::contains($text, $lookupSignals) || $tokens->count() <= 5;
+        if (Str::contains($text, $lookupSignals)) {
+            return true;
+        }
+
+        // Short text is not automatically a product search. Without a lookup
+        // verb, require a real identity already present in this tenant catalog.
+        $identity = $identityTokens->sortByDesc(fn (string $token): int => mb_strlen($token))->first();
+        if (! is_string($identity) || mb_strlen($identity) < 3) {
+            return false;
+        }
+        $literal = addcslashes($identity, '\\%_');
+
+        return $agent->customerProducts()
+            ->where(function ($query) use ($literal): void {
+                $query->where('search_text', 'like', "%{$literal}%")
+                    ->orWhere('name', 'like', "%{$literal}%")
+                    ->orWhere('sku', 'like', "%{$literal}%");
+            })
+            ->exists();
     }
 
     private function isConversationRepair(string $message): bool
@@ -541,6 +573,30 @@ class VerifiedCatalogResponder
             'that was unclear',
             'wrong link',
         ]);
+    }
+
+    private function isDeliveryTimingIntent(string $message): bool
+    {
+        $text = Str::lower(trim($message));
+        $timeQuestion = Str::contains($text, [
+            'რამდენ ხანში',
+            'რამდენ დღეში',
+            'როდის',
+            'how long',
+            'when will',
+        ]);
+        $arrival = Str::contains($text, [
+            'ჩამოვა',
+            'ჩამომივა',
+            'მოვა',
+            'მივიღებ',
+            'მომიტან',
+            'arrive',
+            'receive',
+            'deliver',
+        ]);
+
+        return $timeQuestion && $arrival;
     }
 
     private function isServiceOrPolicyIntent(string $message): bool

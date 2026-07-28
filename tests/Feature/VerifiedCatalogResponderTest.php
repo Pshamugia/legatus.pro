@@ -28,6 +28,41 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertStringContainsString('თავიდან, მარტივად დავიწყოთ', $reply['text']);
     }
 
+    public function test_missing_product_guidance_is_industry_neutral(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->update(['business_name' => 'Fashion Store']);
+        $agent->products()->create([
+            'name' => 'შავი კაბა',
+            'category' => 'ტანსაცმელი',
+            'search_text' => 'შავი კაბა ტანსაცმელი ბრენდი ზომა ფერი',
+            'price' => 90,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['brand' => 'Example', 'size' => 'M', 'color' => 'შავი'],
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond($agent, $conversation, 'ლურჯი პიჯაკი გაქვთ?');
+
+        $this->assertNotNull($reply);
+        $this->assertStringContainsString('პროდუქტის სახელი, ბრენდი, კატეგორია', $reply['text']);
+        $this->assertStringNotContainsString('ISBN', $reply['text']);
+        $this->assertStringNotContainsString('ავტორ', $reply['text']);
+    }
+
+    public function test_delivery_timing_question_is_never_routed_to_product_search(): void
+    {
+        [$agent, $conversation] = $this->context();
+
+        $this->assertNull(
+            app(VerifiedCatalogResponder::class)->respond(
+                $agent,
+                $conversation,
+                'ქუთაისში რამდენ ხანში ჩამოვა წიგნი?',
+            ),
+        );
+    }
+
     public function test_plain_georgian_author_lookup_is_answered_from_verified_catalog_without_openai(): void
     {
         [$agent, $conversation] = $this->context();
