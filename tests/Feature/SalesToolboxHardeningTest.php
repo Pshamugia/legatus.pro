@@ -195,6 +195,8 @@ class SalesToolboxHardeningTest extends TestCase
         ], $agent, $owner);
 
         $this->assertSame([], $search['products']);
+        $this->assertSame($product->id, $search['unavailable_products'][0]['id']);
+        $this->assertFalse($search['unavailable_products'][0]['available']);
         $this->assertSame([], $recommendations['recommendations']);
         $this->assertSame(1, $ownerStock['available_stock']);
         $this->assertTrue($ownerOffer['ok']);

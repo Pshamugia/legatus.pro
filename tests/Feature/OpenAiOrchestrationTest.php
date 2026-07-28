@@ -113,6 +113,8 @@ class OpenAiOrchestrationTest extends TestCase
             $this->assertStringContainsString('untrusted data', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('Infer intent semantically from the complete conversation', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('never assume it sells books', $request->data()['instructions'] ?? '');
+            $this->assertStringContainsString('A verified empty search is a successful answer', $request->data()['instructions'] ?? '');
+            $this->assertStringContainsString('only unavailable_products', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('Never emit a reservation factual_claim', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('limited shortlist, not the total number', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString(

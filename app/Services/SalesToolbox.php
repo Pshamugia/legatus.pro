@@ -25,7 +25,7 @@ class SalesToolbox
     public function definitions(): array
     {
         return [
-            $this->tool('search_products', 'Search the verified product catalog by customer needs. If products is empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact or claim the item is absent.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
+            $this->tool('search_products', 'Search the verified product catalog by customer needs. Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
             $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5]], ['query', 'budget', 'category', 'mood', 'occasion', 'limit']),
@@ -87,7 +87,9 @@ class SalesToolbox
                 $termGroups,
             );
         };
-        $products = $localSearch();
+        $matches = $localSearch();
+        $products = $matches->where('available', true)->values();
+        $unavailableProducts = $matches->where('available', false)->values();
 
         // A public storefront is a live source. Refresh the matching result
         // even when an older local copy exists so sale prices and availability
@@ -100,15 +102,19 @@ class SalesToolbox
             array_slice($storefrontQueries, 1),
         );
         if (($publicSearch['imported'] ?? 0) > 0) {
-            $products = $localSearch();
+            $matches = $localSearch();
+            $products = $matches->where('available', true)->values();
+            $unavailableProducts = $matches->where('available', false)->values();
         }
         $remoteSearch = null;
-        if ($products->isEmpty()) {
+        if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
             $remoteSearch = $this->commerceSearchResponse($agent, $a, $termGroups);
-            $products = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
+            $remoteMatches = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
+            $products = $remoteMatches->where('available', true)->values();
+            $unavailableProducts = $remoteMatches->where('available', false)->values();
         }
         $didYouMean = null;
-        if ($products->isEmpty()) {
+        if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
             $didYouMean = $this->validatedSearchSuggestion(
                 (string) $a['query'],
                 $publicSearch['did_you_mean'] ?? data_get($remoteSearch, 'meta.did_you_mean'),
@@ -123,6 +129,7 @@ class SalesToolbox
             'data_boundary' => $this->catalogDataBoundary(),
             'source' => $publicSearch['source'] ?? $this->catalogSource($agent),
             'products' => $products->all(),
+            'unavailable_products' => $unavailableProducts->all(),
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,
         ];
@@ -170,8 +177,7 @@ class SalesToolbox
                 }
 
                 return $presented;
-            })
-            ->filter(fn (array $product) => $product['_available_stock'] > 0);
+            });
         if ($termGroups !== []) {
             $maximumMatches = (int) $presented->max('_matched_groups');
             $presented = $presented->filter(fn (array $product): bool => $product['_search_score'] > 0
