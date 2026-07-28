@@ -54,6 +54,11 @@ class SettingsBusinessIdentityTest extends TestCase
     public function test_owner_can_choose_ai_only_support_without_human_handoff(): void
     {
         [$owner, $agent] = $this->tenant('ai-only-workspace', 'owner', 'AI Only Brand', 'Nia');
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'waiting-customer',
+            'status' => 'human',
+            'handoff_reason' => 'Low confidence',
+        ]);
 
         $this->actingAs($owner)->get(route('settings.index'))
             ->assertOk()
@@ -65,6 +70,8 @@ class SettingsBusinessIdentityTest extends TestCase
         ]))->assertRedirect()->assertSessionHasNoErrors();
 
         $this->assertFalse($agent->fresh()->humanHandoffEnabled());
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertNull($conversation->fresh()->handoff_reason);
     }
 
     public function test_admin_can_update_identity_but_viewer_cannot(): void

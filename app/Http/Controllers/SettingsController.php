@@ -109,6 +109,18 @@ class SettingsController extends Controller
                 'tone' => $data['tone'],
                 'settings' => $settings,
             ]);
+
+            if (! $settings['human_handoff_enabled']) {
+                $agent->conversations()
+                    ->where('status', 'human')
+                    ->whereNull('assigned_to')
+                    ->update([
+                        'status' => 'ai',
+                        'handoff_reason' => null,
+                        'handoff_summary' => null,
+                        'suggested_reply' => null,
+                    ]);
+            }
         });
 
         return back()->with('success', 'Business identity and AI assistant settings updated.');
