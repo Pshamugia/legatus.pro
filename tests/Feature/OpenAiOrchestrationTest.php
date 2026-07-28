@@ -126,6 +126,53 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('resp_tool', $responseRequests[1]->data()['previous_response_id']);
     }
 
+    public function test_a_catalog_answer_blocked_by_the_verifier_is_rewritten_instead_of_repeating_a_fallback(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'search-start', 'output' => [['type' => 'function_call', 'name' => 'search_products', 'call_id' => 'search-call', 'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null])]]])
+            ->push(['id' => 'invalid-draft', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'text' => "Yes, {$product->name} is another option.",
+                'intent' => 'discovery',
+                'confidence' => .99,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [$product->id],
+                'sources' => [],
+                'factual_claims' => [],
+            ])]]]]])
+            ->push(['id' => 'repaired-draft', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'text' => "I found another verified option: {$product->name}.",
+                'intent' => 'discovery',
+                'confidence' => .99,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [$product->id],
+                'sources' => [],
+                'factual_claims' => [[
+                    'type' => 'product',
+                    'product_id' => $product->id,
+                    'amount' => null,
+                    'quantity' => null,
+                    'reference' => null,
+                ]],
+            ])]]]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have another item like this?',
+        ])->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('tools_used.0', 'search_products')
+            ->assertJsonPath('tools_used.1', 'guardrail_repair');
+
+        $this->assertStringContainsString($product->name, $response->json('text'));
+        $this->assertDatabaseHas('conversations', ['status' => 'ai']);
+    }
+
     public function test_flagged_input_is_safely_handed_off(): void
     {
         $this->seed();

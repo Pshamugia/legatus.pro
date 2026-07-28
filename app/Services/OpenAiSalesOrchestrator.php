@@ -87,6 +87,45 @@ class OpenAiSalesOrchestrator
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
 
+        if ($escalationReason && $usedCollection->where('name', 'search_products')->isNotEmpty()) {
+            try {
+                $repair = $this->postJson('/responses', [
+                    'model' => config('services.openai.model'),
+                    'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
+                    'instructions' => $this->instructions($agent).$this->routingInstructions($agent)
+                        .' The previous draft was rejected by the factual verifier for this reason: '
+                        .$escalationReason
+                        .' Rewrite the answer naturally using only the successful tool evidence already present in this response chain. Answer the customer’s actual question directly. If the verified search contains matches, present them; if it contains no matches, say that no additional matching item was found. Do not request human handoff merely because the first draft needed correction.',
+                    'previous_response_id' => $response['id'],
+                    'input' => [[
+                        'role' => 'user',
+                        'content' => [[
+                            'type' => 'input_text',
+                            'text' => 'Correct the previous answer now. Preserve the customer’s language and conversational context.',
+                        ]],
+                    ]],
+                    'max_output_tokens' => config('services.openai.max_output_tokens'),
+                    'text' => ['format' => $this->outputFormat()],
+                ], 'responses.guardrail_repair', $deadline);
+                $this->accumulateUsage($repair, $inputTokens, $outputTokens);
+                $repairData = $this->structuredOutput($repair);
+                $repairReason = $this->guardrailReason($agent, $conversation, $repairData, $usedCollection);
+                if ($repairReason === null) {
+                    $response = $repair;
+                    $data = $repairData;
+                    $escalationReason = null;
+                    $used[] = ['name' => 'guardrail_repair', 'arguments' => [], 'result' => ['ok' => true]];
+                    $toolNames = collect($used)->pluck('name')->unique()->values();
+                }
+            } catch (\Throwable $exception) {
+                Log::warning('Guardrail answer repair could not complete.', [
+                    'conversation_id' => $conversation->id,
+                    'exception' => $exception::class,
+                    'message' => $exception->getMessage(),
+                ]);
+            }
+        }
+
         if ($escalationReason) {
             $handoffEnabled = $agent->humanHandoffEnabled();
             if ($handoffEnabled) {
@@ -150,6 +189,19 @@ class OpenAiSalesOrchestrator
             ->connectTimeout(min($timeout, max(1, (int) config('services.openai.connect_timeout'))))
             ->timeout($timeout)
             ->retry(max(1, (int) config('services.openai.retries')), fn ($attempt) => $attempt * 250, throw: false);
+    }
+
+    private function structuredOutput(array $response): array
+    {
+        $raw = collect($response['output'] ?? [])
+            ->flatMap(fn ($item) => $item['content'] ?? [])
+            ->firstWhere('type', 'output_text')['text'] ?? null;
+
+        if (! is_string($raw) || trim($raw) === '') {
+            throw new \RuntimeException('The model did not return a structured final answer.');
+        }
+
+        return json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
     }
 
     private function postJson(string $path, array $payload, string $stage, float $deadline, ?int $stageTimeout = null): array
