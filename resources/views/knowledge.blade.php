@@ -7,7 +7,7 @@
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
     <div style="display:flex;justify-content:space-between;align-items:center">
         <h3>Connected knowledge</h3>
-        <span class="channel">Live catalog search enabled · {{ number_format($agent->products()->where('is_active', true)->count()) }} products currently cached · {{ $sources->sum('chunks_count') }} searchable chunks · {{ $sources->sum('embedded_chunks_count') }} embedded</span>
+        <span class="channel">Live catalog search enabled · {{ number_format($agent->products()->where('is_active', true)->count()) }} products currently cached · {{ number_format($sources->sum('chunks_count')) }} searchable passages</span>
     </div>
     @forelse($sources as $source)
         @php($fixture = ! $source->isRefreshable())
@@ -25,12 +25,14 @@
                     <p class="channel" style="margin-top:4px">{{ $source->status === 'processing' ? 'Legatus is following sitemaps, catalog pages, product details and business-policy pages in the background.' : 'Products, descriptions, prices, sale data and public business policies are refreshed from this website.' }}</p>
                 @endif
                 <p class="channel" style="margin-top:4px">
-                    @if($source->chunks_count > 0 && $source->embedded_chunks_count === $source->chunks_count)
-                        Semantic embeddings ready · {{ $source->embedded_chunks_count }}/{{ $source->chunks_count }}
-                    @elseif($source->embedded_chunks_count > 0)
-                        Partial embeddings · {{ $source->embedded_chunks_count }}/{{ $source->chunks_count }} · lexical fallback active
+                    @if($fixture)
+                        Lexical search available · static fixture has no semantic index
+                    @elseif($source->status === 'ready')
+                        Semantic and lexical search active
+                    @elseif($source->status === 'processing')
+                        Search is available now · semantic enrichment continues in the background
                     @else
-                        Lexical search only · no embeddings stored
+                        Lexical search available
                     @endif
                 </p>
                 <div class="progress" style="background:#edf1ed;width:260px"><i style="width:{{ $source->progress }}%"></i></div>

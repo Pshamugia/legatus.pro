@@ -15,10 +15,9 @@ class KnowledgeController extends Controller
     {
         $agent = $tenant->agent();
         $sources = $agent->knowledgeSources()
-            ->withCount([
-                'chunks',
-                'chunks as embedded_chunks_count' => fn ($query) => $query->whereNotNull('embedding'),
-            ])
+            // Never scan the large embedding JSON column on a page request.
+            // Semantic indexing progress is maintained by the background job.
+            ->withCount('chunks')
             ->latest()
             ->get();
 

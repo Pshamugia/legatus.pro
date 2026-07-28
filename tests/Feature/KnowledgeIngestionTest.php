@@ -712,8 +712,7 @@ HTML;
             ->assertOk()
             ->assertSee('Demo fixture snapshot')
             ->assertSee('Static fixture · no source payload')
-            ->assertSee('Lexical search only · no embeddings stored')
-            ->assertSee('0 embedded')
+            ->assertSee('Lexical search available · static fixture has no semantic index')
             ->assertDontSee('↻ Sync')
             ->assertDontSee('<span class="pill">ready</span>', false);
 

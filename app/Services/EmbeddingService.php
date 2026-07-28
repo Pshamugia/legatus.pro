@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\KnowledgeChunk;
 use App\Models\KnowledgeSource;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class EmbeddingService
@@ -79,9 +80,31 @@ class EmbeddingService
 
     private function embed(array $inputs): array
     {
-        $response = Http::withToken(config('services.openai.key'))->timeout(45)->retry(3, 400)->post('https://api.openai.com/v1/embeddings', ['model' => config('services.openai.embedding_model'), 'input' => array_values($inputs), 'encoding_format' => 'float'])->throw()->json();
+        $started = microtime(true);
+        Log::info('Embedding request started.', [
+            'model' => config('services.openai.embedding_model'),
+            'input_count' => count($inputs),
+        ]);
 
-        return collect($response['data'] ?? [])->sortBy('index')->pluck('embedding')->all();
+        $response = Http::withToken(config('services.openai.key'))
+            ->connectTimeout(max(1, (int) config('services.openai.connect_timeout', 5)))
+            ->timeout(25)
+            ->retry(2, 400)
+            ->post('https://api.openai.com/v1/embeddings', [
+                'model' => config('services.openai.embedding_model'),
+                'input' => array_values($inputs),
+                'encoding_format' => 'float',
+            ])
+            ->throw();
+
+        Log::info('Embedding request finished.', [
+            'status' => $response->status(),
+            'request_id' => $response->header('x-request-id'),
+            'input_count' => count($inputs),
+            'elapsed_ms' => (int) round((microtime(true) - $started) * 1000),
+        ]);
+
+        return collect($response->json('data', []))->sortBy('index')->pluck('embedding')->all();
     }
 
     private function cosine(array $a, array $b): float
