@@ -87,8 +87,18 @@ class OpenAiSalesOrchestrator
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
 
-        if ($escalationReason && $usedCollection->where('name', 'search_products')->isNotEmpty()) {
+        $hasSuccessfulEvidence = $usedCollection->contains(
+            fn (array $call) => (bool) data_get($call, 'result.ok', false),
+        );
+
+        if ($escalationReason && $hasSuccessfulEvidence) {
             try {
+                // Tool rounds may consume the normal workflow budget. Reserve one bounded
+                // request for correcting a grounded draft instead of showing a generic fallback.
+                $repairDeadline = min(
+                    $started + 120,
+                    max($deadline, microtime(true) + 30),
+                );
                 $repair = $this->postJson('/responses', [
                     'model' => config('services.openai.model'),
                     'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
@@ -106,7 +116,7 @@ class OpenAiSalesOrchestrator
                     ]],
                     'max_output_tokens' => config('services.openai.max_output_tokens'),
                     'text' => ['format' => $this->outputFormat()],
-                ], 'responses.guardrail_repair', $deadline);
+                ], 'responses.guardrail_repair', $repairDeadline, 30);
                 $this->accumulateUsage($repair, $inputTokens, $outputTokens);
                 $repairData = $this->structuredOutput($repair);
                 $repairReason = $this->guardrailReason($agent, $conversation, $repairData, $usedCollection);
