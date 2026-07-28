@@ -15,6 +15,12 @@ class PublicStorefrontCatalogTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['legatus.semantic_orchestration_enabled' => false]);
+    }
+
     public function test_catalog_url_ingestion_accepts_public_product_cards_with_prices(): void
     {
         [$agent] = $this->context();

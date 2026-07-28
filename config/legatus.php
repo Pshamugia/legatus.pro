@@ -10,6 +10,7 @@ return [
     'daily_ai_token_limit' => (int) env('LEGATUS_DAILY_AI_TOKEN_LIMIT', 250000),
     'semantic_similarity_threshold' => (float) env('LEGATUS_SEMANTIC_SIMILARITY_THRESHOLD', 0.35),
     'semantic_candidate_limit' => (int) env('LEGATUS_SEMANTIC_CANDIDATE_LIMIT', 2000),
+    'semantic_orchestration_enabled' => (bool) env('LEGATUS_SEMANTIC_ORCHESTRATION_ENABLED', true),
     'commerce_max_catalog_products' => (int) env('LEGATUS_COMMERCE_MAX_CATALOG_PRODUCTS', 10000),
     'commerce_max_response_bytes' => (int) env('LEGATUS_COMMERCE_MAX_RESPONSE_BYTES', 5242880),
     'commerce_sync_lock_seconds' => (int) env('LEGATUS_COMMERCE_SYNC_LOCK_SECONDS', 600),

@@ -5,14 +5,83 @@ namespace Tests\Feature;
 use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\Reservation;
+use App\Services\SalesAgentService;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class OpenAiOrchestrationTest extends TestCase
 {
     use RefreshDatabase;
+
+    #[DataProvider('crossIndustryMessages')]
+    public function test_production_messages_use_semantic_orchestration_regardless_of_industry(string $message): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'semantic-routing-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+        ]);
+        config([
+            'services.openai.key' => 'test-key',
+            'legatus.semantic_orchestration_enabled' => true,
+        ]);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push([
+                'id' => 'semantic_route',
+                'output' => [[
+                    'type' => 'message',
+                    'content' => [[
+                        'type' => 'output_text',
+                        'text' => json_encode([
+                            'text' => 'გთხოვთ, დამიზუსტოთ რომელი მახასიათებელია თქვენთვის მნიშვნელოვანი.',
+                            'intent' => 'clarification',
+                            'confidence' => .99,
+                            'handoff' => false,
+                            'escalation_reason' => null,
+                            'product_ids' => [],
+                            'sources' => [],
+                            'factual_claims' => [],
+                        ]),
+                    ]],
+                ]],
+                'usage' => [],
+            ]);
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            $message,
+            $conversation,
+        );
+
+        $this->assertSame('clarification', $reply['intent']);
+        $this->assertDatabaseHas('agent_runs', [
+            'conversation_id' => $conversation->id,
+            'provider' => 'openai',
+            'response_id' => 'semantic_route',
+        ]);
+        $this->assertDatabaseMissing('agent_runs', [
+            'conversation_id' => $conversation->id,
+            'model' => 'verified-catalog-responder',
+        ]);
+    }
+
+    public static function crossIndustryMessages(): array
+    {
+        return [
+            'retail product question' => ['Do you have this in another size and color?'],
+            'restaurant dietary question' => ['Which option is suitable for someone avoiding dairy?'],
+            'beauty appointment question' => ['Can I book the earliest available appointment tomorrow?'],
+            'professional service question' => ['Which package fits a small company with five employees?'],
+            'travel follow-up question' => ['Does that option include airport transfer too?'],
+            'ambiguous contextual follow-up' => ['What can you tell me about this one?'],
+        ];
+    }
 
     public function test_agent_executes_a_catalog_tool_and_returns_structured_output(): void
     {
@@ -42,6 +111,8 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertCount(2, $responseRequests);
         foreach ($responseRequests as $request) {
             $this->assertStringContainsString('untrusted data', $request->data()['instructions'] ?? '');
+            $this->assertStringContainsString('Infer intent semantically from the complete conversation', $request->data()['instructions'] ?? '');
+            $this->assertStringContainsString('never assume it sells books', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('Never emit a reservation factual_claim', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString('limited shortlist, not the total number', $request->data()['instructions'] ?? '');
             $this->assertStringContainsString(

@@ -230,7 +230,7 @@ class OpenAiSalesOrchestrator
 
     private function routingInstructions(): string
     {
-        return ' A question about delivery, shipping, a courier, arrival time, or a delivery fee is always a delivery-policy request, never a product-price request. Call calculate_delivery for the destination and search_knowledge for the business delivery rules; never return product cards for it. If no verified delivery fee is present in either tool result, clearly say that the exact fee could not be verified instead of guessing.';
+        return ' Infer intent semantically from the complete conversation, never from isolated keywords. Resolve follow-ups against prior turns and ask one concise clarification when the reference is genuinely ambiguous. Adapt vocabulary to the connected business and its actual catalog attributes; never assume it sells books or mention book-specific fields unless verified tenant data makes them relevant. A question about delivery, shipping, a courier, arrival time, or a delivery fee is always a delivery-policy request, never a product-price request. Call calculate_delivery for the destination and search_knowledge for the business delivery rules; never return product cards for it. If no verified delivery fee is present in either tool result, clearly say that the exact fee could not be verified instead of guessing.';
     }
 
     private function outputFormat(): array

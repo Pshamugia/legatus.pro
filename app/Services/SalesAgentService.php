@@ -18,7 +18,11 @@ class SalesAgentService
 
     public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
     {
-        if ($conversation && $reply = $this->catalog->respond($agent, $conversation, $message)) {
+        $semanticOrchestration = $conversation
+            && config('services.openai.key')
+            && config('legatus.semantic_orchestration_enabled', true);
+
+        if (! $semanticOrchestration && $conversation && $reply = $this->catalog->respond($agent, $conversation, $message)) {
             AgentRun::create([
                 'agent_id' => $agent->id,
                 'conversation_id' => $conversation->id,

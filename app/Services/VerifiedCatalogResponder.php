@@ -7,12 +7,11 @@ use App\Models\Conversation;
 use Illuminate\Support\Str;
 
 /**
- * Handles factual catalogue lookups before generative orchestration.
+ * Provides a narrow deterministic fallback when semantic orchestration is
+ * explicitly unavailable.
  *
- * A customer asking for an author, title, SKU, category, or other indexed
- * product term should never get a false "not found" merely because a model
- * chose the wrong tool arguments. Complex shopping advice still goes through
- * the OpenAI orchestrator; this path is deliberately narrow and deterministic.
+ * Production conversations use the OpenAI orchestrator with full conversation
+ * history. This class must remain industry-neutral and is not an intent router.
  */
 class VerifiedCatalogResponder
 {
@@ -25,8 +24,8 @@ class VerifiedCatalogResponder
 
             return [
                 'text' => $georgian
-                    ? 'ბოდიში — ჩემი წინა პასუხი გაუგებარი იყო. თავიდან, მარტივად დავიწყოთ: კონკრეტულ წიგნს ეძებთ თუ გინდათ, რომ თქვენი ინტერესების მიხედვით რამდენიმე წიგნი გირჩიოთ?'
-                    : 'Sorry — my previous reply was unclear. Let us start again simply: are you looking for a specific book, or would you like recommendations based on your interests?',
+                    ? 'ბოდიში — ჩემი წინა პასუხი გაუგებარი იყო. თავიდან, მარტივად დავიწყოთ: კონკრეტულ პროდუქტს ან მომსახურებას ეძებთ, თუ გსურთ თქვენი საჭიროებების მიხედვით რამდენიმე ვარიანტი გირჩიოთ?'
+                    : 'Sorry — my previous reply was unclear. Let us start again simply: are you looking for a specific product or service, or would you like recommendations based on your needs?',
                 'intent' => 'clarification',
                 'confidence' => 1,
                 'handoff' => false,
@@ -40,7 +39,7 @@ class VerifiedCatalogResponder
         // Service and policy questions must never inherit the last viewed
         // product. They belong to tenant knowledge and delivery tools, even
         // when the wording also contains a generic word such as "price".
-        if ($this->isServiceOrPolicyIntent($message) || $this->isDeliveryTimingIntent($message)) {
+        if ($this->isServiceOrPolicyIntent($message)) {
             return null;
         }
 
@@ -50,8 +49,8 @@ class VerifiedCatalogResponder
 
             return [
                 'text' => $georgian
-                    ? 'ზუსტად ვერ გავიგე, რომელ წიგნს გულისხმობთ. მომწერეთ სათაური ან ავტორი და სწორ წიგნზე მოგიყვებით.'
-                    : 'I am not sure which book you mean. Please send its title or author and I will tell you about the correct book.',
+                    ? 'ზუსტად ვერ გავიგე, რომელ პროდუქტს ან მომსახურებას გულისხმობთ. მომწერეთ სახელი ან ერთი განმასხვავებელი მახასიათებელი და სწორ ვარიანტზე მოგიყვებით.'
+                    : 'I am not sure which product or service you mean. Send its name or one distinguishing detail and I will tell you about the correct option.',
                 'intent' => 'discovery',
                 'confidence' => .99,
                 'handoff' => false,
@@ -573,30 +572,6 @@ class VerifiedCatalogResponder
             'that was unclear',
             'wrong link',
         ]);
-    }
-
-    private function isDeliveryTimingIntent(string $message): bool
-    {
-        $text = Str::lower(trim($message));
-        $timeQuestion = Str::contains($text, [
-            'რამდენ ხანში',
-            'რამდენ დღეში',
-            'როდის',
-            'how long',
-            'when will',
-        ]);
-        $arrival = Str::contains($text, [
-            'ჩამოვა',
-            'ჩამომივა',
-            'მოვა',
-            'მივიღებ',
-            'მომიტან',
-            'arrive',
-            'receive',
-            'deliver',
-        ]);
-
-        return $timeQuestion && $arrival;
     }
 
     private function isServiceOrPolicyIntent(string $message): bool

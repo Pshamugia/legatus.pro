@@ -16,6 +16,12 @@ class VerifiedCatalogResponderTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['legatus.semantic_orchestration_enabled' => false]);
+    }
+
     public function test_confusion_about_the_previous_reply_is_treated_as_conversation_repair_not_product_search(): void
     {
         [$agent, $conversation] = $this->context();
@@ -48,19 +54,6 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertStringContainsString('პროდუქტის სახელი, ბრენდი, კატეგორია', $reply['text']);
         $this->assertStringNotContainsString('ISBN', $reply['text']);
         $this->assertStringNotContainsString('ავტორ', $reply['text']);
-    }
-
-    public function test_delivery_timing_question_is_never_routed_to_product_search(): void
-    {
-        [$agent, $conversation] = $this->context();
-
-        $this->assertNull(
-            app(VerifiedCatalogResponder::class)->respond(
-                $agent,
-                $conversation,
-                'ქუთაისში რამდენ ხანში ჩამოვა წიგნი?',
-            ),
-        );
     }
 
     public function test_plain_georgian_author_lookup_is_answered_from_verified_catalog_without_openai(): void
@@ -330,8 +323,8 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertSame('discovery', $reply['intent']);
         $this->assertSame(['clarify_product_reference'], $reply['tools_used']);
         $this->assertSame([], $reply['products']);
-        $this->assertStringContainsString('რომელ წიგნს გულისხმობთ', $reply['text']);
-        $this->assertStringContainsString('სათაური ან ავტორი', $reply['text']);
+        $this->assertStringContainsString('რომელ პროდუქტს ან მომსახურებას გულისხმობთ', $reply['text']);
+        $this->assertStringContainsString('განმასხვავებელი მახასიათებელი', $reply['text']);
         Http::assertNothingSent();
     }
 
