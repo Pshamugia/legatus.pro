@@ -9,18 +9,18 @@ class PublicStorefrontCatalog
 {
     public function __construct(private KnowledgeIngestionService $ingestion) {}
 
-    /** @return array{imported: int, did_you_mean: ?string, source: ?array} */
+    /** @return array{imported: int, product_ids: list<int>, did_you_mean: ?string, source: ?array} */
     public function discover(Agent $agent, string $query, array $alternatives = []): array
     {
         $source = $this->catalogSource($agent);
         if (! $source || ! $this->validQuery($query)) {
-            return ['imported' => 0, 'did_you_mean' => null, 'source' => null];
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
         }
 
         $parts = parse_url((string) $source->url);
         $origin = ($parts['scheme'] ?? 'https').'://'.($parts['host'] ?? '');
         if ($origin === 'https://' && empty($parts['host'])) {
-            return ['imported' => 0, 'did_you_mean' => null, 'source' => null];
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
         }
 
         // Natural questions often wrap the actual product identity in extra
@@ -33,14 +33,22 @@ class PublicStorefrontCatalog
                     $origin.'/search?title='.rawurlencode($candidate),
                     ['Accept' => 'text/html'],
                 );
-                $products = $this->ingestion->storefrontProductsFromHtml($searchPage->body(), $origin);
-                $products = $this->relevantProducts($products, $candidate);
+                $dedicatedResults = $this->ingestion->hasDedicatedStorefrontSearchResults($searchPage->body());
+                $products = $this->ingestion->storefrontProductsFromHtml(
+                    $searchPage->body(),
+                    $origin,
+                    $dedicatedResults,
+                );
+                if (! $dedicatedResults) {
+                    $products = $this->relevantProducts($products, $candidate);
+                }
                 if ($products !== []) {
                     $products = $this->enrichOriginalPrices($products, $parts);
                     $result = $this->ingestion->importDiscoveredUrlProducts($source, $products);
 
                     return [
                         'imported' => (int) $result['found'],
+                        'product_ids' => $this->importedProductIds($agent, $products),
                         'did_you_mean' => null,
                         'source' => $this->sourceEvidence((string) $source->url),
                     ];
@@ -59,11 +67,11 @@ class PublicStorefrontCatalog
         } catch (\Throwable $exception) {
             report($exception);
 
-            return ['imported' => 0, 'did_you_mean' => null, 'source' => null];
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
         }
 
         if (! is_array($payload) || ! is_array($payload['items'] ?? null)) {
-            return ['imported' => 0, 'did_you_mean' => null, 'source' => null];
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
         }
 
         $products = [];
@@ -100,9 +108,33 @@ class PublicStorefrontCatalog
 
         return [
             'imported' => (int) ($result['found'] ?? 0),
+            'product_ids' => $this->importedProductIds($agent, $products),
             'did_you_mean' => $suggestion !== '' ? $suggestion : null,
             'source' => $this->sourceEvidence((string) $source->url),
         ];
+    }
+
+    /** @param list<array> $products
+     * @return list<int>
+     */
+    private function importedProductIds(Agent $agent, array $products): array
+    {
+        $urls = collect($products)
+            ->pluck('url')
+            ->filter(fn ($url): bool => is_string($url) && $url !== '')
+            ->unique()
+            ->values();
+
+        if ($urls->isEmpty()) {
+            return [];
+        }
+
+        return $agent->products()
+            ->whereIn('metadata->product_url', $urls->all())
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->values()
+            ->all();
     }
 
     private function sourceEvidence(string $url): array

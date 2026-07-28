@@ -110,7 +110,13 @@ class SalesToolbox
             array_slice($storefrontQueries, 1),
         );
         if (($publicSearch['imported'] ?? 0) > 0) {
-            $matches = $localSearch();
+            $liveIds = collect($publicSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id)->filter();
+            $matches = $liveIds->isNotEmpty()
+                ? $this->presentSearchProducts(
+                    $agent->customerProducts()->whereIn('id', $liveIds)->get(),
+                    $conversation,
+                )
+                : $localSearch();
             $products = $matches->where('available', true)->values();
             $unavailableProducts = $matches->where('available', false)->values();
         }
@@ -280,21 +286,23 @@ class SalesToolbox
         $criteria = trim(implode(' ', array_filter([$a['query'], $a['category'], $a['mood'], $a['occasion']])));
         $termGroups = $this->searchTermGroups($criteria);
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
+        $liveProductIds = collect();
         if ($storefrontQueries !== []) {
             // Recommendation intent must search the live catalogue too. The
             // locally cached HTML snapshot may contain only the first page.
-            $this->storefront->discover(
+            $liveSearch = $this->storefront->discover(
                 $agent,
                 $storefrontQueries[0],
                 array_slice($storefrontQueries, 1),
             );
+            $liveProductIds = collect($liveSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id);
         }
 
         $query = $agent->customerProducts()->where('is_active', true);
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }
-        $ranked = $query->get()->map(function ($p) use ($termGroups, $a, $c) {
+        $ranked = $query->get()->map(function ($p) use ($termGroups, $a, $c, $liveProductIds) {
             $matched = collect($termGroups)
                 ->filter(fn (array $variants): bool => $this->productMatchesTermGroup($p, $variants))
                 ->map(fn (array $variants): string => (string) ($variants[0] ?? ''))
@@ -302,7 +310,10 @@ class SalesToolbox
                 ->values();
             $within = ! $a['budget'] || (float) $p->price <= (float) $a['budget'];
             $available = $this->availableStock($p, $c);
-            $relevance = $this->productSearchScore($p, $termGroups);
+            $relevance = max(
+                $this->productSearchScore($p, $termGroups),
+                $liveProductIds->contains((int) $p->id) ? 80 : 0,
+            );
             $score = $relevance + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
 
             $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance];

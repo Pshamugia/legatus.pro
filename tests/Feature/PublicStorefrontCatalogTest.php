@@ -154,6 +154,40 @@ class PublicStorefrontCatalogTest extends TestCase
         ]);
     }
 
+    public function test_public_search_trusts_the_dedicated_results_grid_even_when_the_match_is_in_hidden_store_data(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $actualResult = str_replace(
+            ['საიუბილეო საარქივო გამოცემა', 'პაოლო იაშვილი'],
+            ['ნომერი პირველი', 'ოლივერ კანი'],
+            $this->searchCardsHtml(),
+        );
+        $unrelatedRecommendation = str_replace(
+            ['საიუბილეო საარქივო გამოცემა', 'პაოლო იაშვილი'],
+            ['დათა თუთაშხია', 'ჭაბუა ამირეჯიბი'],
+            $this->searchCardsHtml(),
+        );
+        Http::fake([
+            'https://bukinistebi.ge/search?title=*' => Http::response(
+                '<div id="search-results">'.$actualResult.'</div>'
+                .'<section class="recommendations">'.$unrelatedRecommendation.'</section>',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+            'https://bukinistebi.ge/books/paolo-iashvili/42' => Http::response('<div class="product-price"><strong>14 ₾</strong></div>'),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'სპორტი',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame('ნომერი პირველი', data_get($result, 'products.0.name'));
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'name' => 'ნომერი პირველი']);
+        $this->assertDatabaseMissing('products', ['agent_id' => $agent->id, 'name' => 'დათა თუთაშხია']);
+    }
+
     public function test_recommendation_searches_the_live_storefront_instead_of_using_only_the_cached_first_page(): void
     {
         [$agent, $conversation] = $this->context();

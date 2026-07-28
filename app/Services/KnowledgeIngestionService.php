@@ -553,12 +553,17 @@ class KnowledgeIngestionService
      *
      * @return list<array>
      */
-    public function storefrontProductsFromHtml(string $html, string $origin): array
+    public function storefrontProductsFromHtml(string $html, string $origin, bool $searchResultsOnly = false): array
     {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
         $xpath = new \DOMXPath($dom);
-        $cards = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " book-card ")]');
+        $searchRoot = $this->storefrontSearchResultsRoot($xpath);
+        if ($searchResultsOnly && $searchRoot) {
+            $cards = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-card ")]', $searchRoot);
+        } else {
+            $cards = $xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " book-card ")]');
+        }
         $products = [];
 
         foreach ($cards as $card) {
@@ -594,6 +599,23 @@ class KnowledgeIngestionService
         }
 
         return array_slice($products, 0, 100);
+    }
+
+    public function hasDedicatedStorefrontSearchResults(string $html): bool
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+
+        return $this->storefrontSearchResultsRoot(new \DOMXPath($dom)) !== null;
+    }
+
+    private function storefrontSearchResultsRoot(\DOMXPath $xpath): ?\DOMNode
+    {
+        return $xpath->query(
+            '//*[@id="search-results" or @data-search-results'
+            .' or contains(concat(" ", normalize-space(@class), " "), " search-results ")'
+            .' or contains(concat(" ", normalize-space(@class), " "), " search-results-grid ")]',
+        )->item(0);
     }
 
     public function storefrontOriginalPriceFromHtml(string $html): ?float
