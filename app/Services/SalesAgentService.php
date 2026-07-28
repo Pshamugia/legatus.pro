@@ -94,30 +94,38 @@ class SalesAgentService
 
     private function failClosed(Agent $agent, ?Conversation $conversation, string $customerMessage, string $reason, ?\Throwable $error = null): array
     {
+        $handoffEnabled = $agent->humanHandoffEnabled();
         if ($conversation) {
-            $conversation->update([
-                'status' => 'human',
-                'handoff_reason' => $reason,
-                'handoff_summary' => 'Legatus stopped before returning an unverified answer. The customer request and safe failure reason are available to the operator.',
-                'suggested_reply' => 'I am reviewing your request now and will reply with verified information shortly.',
-                'outcome' => 'human_handoff',
-                'last_message_at' => now(),
-            ]);
+            if ($handoffEnabled) {
+                $conversation->update([
+                    'status' => 'human',
+                    'handoff_reason' => $reason,
+                    'handoff_summary' => 'Legatus stopped before returning an unverified answer. The customer request and safe failure reason are available to the operator.',
+                    'suggested_reply' => 'I am reviewing your request now and will reply with verified information shortly.',
+                    'outcome' => 'human_handoff',
+                    'last_message_at' => now(),
+                ]);
+            }
             AgentRun::create([
                 'agent_id' => $agent->id,
                 'conversation_id' => $conversation->id,
                 'model' => config('services.openai.model'),
                 'status' => 'failed',
-                'tools_used' => [['name' => 'fail_closed_handoff']],
+                'tools_used' => [['name' => $handoffEnabled ? 'fail_closed_handoff' : 'fail_closed']],
                 'error' => PrivacyRedactor::text(Str::limit($error?->getMessage() ?? $reason, 1000)),
             ]);
         }
 
-        $text = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage)
-            ? 'გადამოწმებული პასუხის დაბრუნება ამჯამად ვერ მოხერხდა. საუბარს ოპერატორს გადავცემ, რათა ვარაუდით არ გიპასუხოთ.'
-            : 'I could not return a verified answer right now, so I handed the conversation to a human instead of guessing.';
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
+        $text = $handoffEnabled
+            ? ($georgian
+                ? 'გადამოწმებული პასუხის დაბრუნება ამჯამად ვერ მოხერხდა. საუბარს ოპერატორს გადავცემ, რათა ვარაუდით არ გიპასუხოთ.'
+                : 'I could not return a verified answer right now, so I handed the conversation to a human instead of guessing.')
+            : ($georgian
+                ? 'გადამოწმებული პასუხის დაბრუნება ამჟამად ვერ მოხერხდა. გთხოვთ, კითხვა დააზუსტოთ ან ცოტა ხანში ხელახლა სცადოთ.'
+                : 'I could not return a verified answer right now. Please clarify the request or try again shortly.');
 
-        return ['text' => $text, 'intent' => 'handoff', 'confidence' => 1.0, 'handoff' => true, 'escalation_reason' => $reason, 'products' => [], 'sources' => [], 'tools_used' => ['fail_closed_handoff']];
+        return ['text' => $text, 'intent' => $handoffEnabled ? 'handoff' : 'discovery', 'confidence' => 1.0, 'handoff' => $handoffEnabled, 'escalation_reason' => $handoffEnabled ? $reason : null, 'products' => [], 'sources' => [], 'tools_used' => [$handoffEnabled ? 'fail_closed_handoff' : 'fail_closed']];
     }
 
     private function fallback(Agent $agent, string $message, ?Conversation $conversation = null): array

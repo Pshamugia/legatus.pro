@@ -51,6 +51,22 @@ class SettingsBusinessIdentityTest extends TestCase
         $this->assertSame('Other Brand', $otherAgent->fresh()->organization->name);
     }
 
+    public function test_owner_can_choose_ai_only_support_without_human_handoff(): void
+    {
+        [$owner, $agent] = $this->tenant('ai-only-workspace', 'owner', 'AI Only Brand', 'Nia');
+
+        $this->actingAs($owner)->get(route('settings.index'))
+            ->assertOk()
+            ->assertSee('Enable human handoff')
+            ->assertSee('name="human_handoff_enabled"', false);
+
+        $this->actingAs($owner)->put(route('settings.update'), $this->validSettings([
+            'human_handoff_enabled' => 0,
+        ]))->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertFalse($agent->fresh()->humanHandoffEnabled());
+    }
+
     public function test_admin_can_update_identity_but_viewer_cannot(): void
     {
         [$admin, $adminAgent] = $this->tenant('admin-workspace', 'admin', 'Admin Brand', 'Admin Assistant');
@@ -166,6 +182,7 @@ class SettingsBusinessIdentityTest extends TestCase
             'business_name' => 'Updated Brand',
             'agent_name' => 'Updated Assistant',
             'tone' => 'Warm and concise',
+            'human_handoff_enabled' => 1,
             'handoff_threshold' => 0.65,
             'discount_limit' => 10,
             'business_hours' => 'Monday-Friday, 09:00-18:00',

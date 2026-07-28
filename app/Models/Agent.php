@@ -36,6 +36,11 @@ class Agent extends Model
         return ! is_array($this->channels) || in_array('web', $this->channels, true);
     }
 
+    public function humanHandoffEnabled(): bool
+    {
+        return (bool) data_get($this->settings, 'human_handoff_enabled', true);
+    }
+
     /**
      * @return array{preset: string, primary: string, accent: string, primary_foreground: string, accent_foreground: string}
      */

@@ -91,6 +91,11 @@
 
                 <h3 style="margin-top:28px">AI employee behavior</h3>
                 <label>Brand tone</label><input name="tone" value="{{ old('tone', $agent->tone) }}" required>
+                <input type="hidden" name="human_handoff_enabled" value="0">
+                <label class="tag" style="display:flex;align-items:flex-start;gap:10px;margin-top:18px;padding:14px">
+                    <input type="checkbox" name="human_handoff_enabled" value="1" style="width:auto;margin-top:3px" @checked((bool) old('human_handoff_enabled', $agent->humanHandoffEnabled())) @disabled(! $canManageSettings)>
+                    <span><b>Enable human handoff</b><small style="display:block;color:var(--muted);margin-top:4px">Allow customers to request a person and let Legatus transfer conversations that genuinely require human judgment. Turn this off for AI-only support.</small></span>
+                </label>
                 <label>Human handoff threshold</label><input name="handoff_threshold" type="number" step="0.01" min="0" max="1" value="{{ old('handoff_threshold', $agent->settings['handoff_threshold'] ?? .72) }}">
                 <label>Maximum autonomous discount (%)</label><input name="discount_limit" type="number" min="0" max="100" value="{{ old('discount_limit', $agent->settings['discount_limit'] ?? 0) }}">
                 <label>Business hours</label><textarea name="business_hours" rows="2">{{ old('business_hours', $agent->settings['business_hours'] ?? '') }}</textarea>

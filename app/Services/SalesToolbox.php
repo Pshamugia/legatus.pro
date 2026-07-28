@@ -22,9 +22,9 @@ class SalesToolbox
         private PublicStorefrontCatalog $storefront,
     ) {}
 
-    public function definitions(): array
+    public function definitions(?Agent $agent = null): array
     {
-        return [
+        $definitions = [
             $this->tool('search_products', 'Search the verified product catalog by customer needs. Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
@@ -37,6 +37,10 @@ class SalesToolbox
             $this->tool('reserve_product', 'Create a short pending reservation; never claim payment or final order.', ['product_id' => ['type' => 'integer'], 'quantity' => ['type' => 'integer', 'minimum' => 1]], ['product_id', 'quantity']),
             $this->tool('build_offer', 'Calculate a non-binding offer. Discounts above the configured limit are blocked and escalated.', ['items' => ['type' => 'array', 'minItems' => 1, 'items' => ['type' => 'object', 'properties' => ['product_id' => ['type' => 'integer'], 'quantity' => ['type' => 'integer', 'minimum' => 1]], 'required' => ['product_id', 'quantity'], 'additionalProperties' => false]], 'discount_percent' => ['type' => ['number', 'null'], 'minimum' => 0, 'maximum' => 100]], ['items', 'discount_percent']),
         ];
+
+        return $agent && ! $agent->humanHandoffEnabled()
+            ? array_values(array_filter($definitions, fn (array $tool): bool => $tool['name'] !== 'request_human'))
+            : $definitions;
     }
 
     private function tool(string $name, string $description, array $properties, array $required): array
@@ -46,6 +50,10 @@ class SalesToolbox
 
     public function execute(string $name, array $args, Agent $agent, Conversation $conversation): array
     {
+        if ($name === 'request_human' && ! $agent->humanHandoffEnabled()) {
+            return ['ok' => false, 'error' => 'Human handoff is disabled for this business. Continue with AI assistance without promising a transfer.'];
+        }
+
         return match ($name) {
             'search_products' => $this->search($agent, $conversation, $args), 'search_knowledge' => $this->knowledge($agent, $args), 'save_shopping_preferences' => $this->preferences($conversation, $args), 'recommend_products' => $this->recommend($agent, $conversation, $args), 'compare_products' => $this->compare($agent, $conversation, $args), 'check_stock' => $this->stock($agent, $conversation, $args), 'calculate_delivery' => $this->delivery($agent, $args),
             'create_lead' => $this->lead($agent, $conversation, $args), 'request_human' => $this->handoff($conversation, $args),

@@ -49,6 +49,7 @@ class SettingsController extends Controller
                 },
             ],
             'tone' => ['required', 'string', 'max:100'],
+            'human_handoff_enabled' => ['sometimes', 'boolean'],
             'handoff_threshold' => 'required|numeric|min:0|max:1',
             'discount_limit' => 'required|numeric|min:0|max:100',
             'business_hours' => 'nullable|max:300',
@@ -83,6 +84,7 @@ class SettingsController extends Controller
             // preserving stable slugs, URLs, memberships and all prior settings.
             $agent->organization()->update(['name' => $data['business_name']]);
             $settings = array_merge($agent->settings ?? [], [
+                'human_handoff_enabled' => (bool) ($data['human_handoff_enabled'] ?? $agent->humanHandoffEnabled()),
                 'handoff_threshold' => (float) $data['handoff_threshold'],
                 'discount_limit' => (float) $data['discount_limit'],
                 'business_hours' => $data['business_hours'],

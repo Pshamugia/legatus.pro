@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\Reservation;
 use App\Services\SalesAgentService;
+use App\Services\SalesToolbox;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -133,6 +134,23 @@ class OpenAiOrchestrationTest extends TestCase
         Http::fakeSequence()->push(['results' => [['flagged' => true]]]);
         $this->postJson("/demo/{$agent->slug}/message", ['message' => 'unsafe request'])->assertOk()->assertJsonPath('handoff', true);
         $this->assertDatabaseHas('agent_runs', ['status' => 'moderated']);
+    }
+
+    public function test_ai_only_business_never_exposes_or_enters_human_handoff(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], ['human_handoff_enabled' => false])]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()->push(['results' => [['flagged' => true]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'unsafe request'])
+            ->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('intent', 'discovery');
+
+        $this->assertSame('ai', $agent->conversations()->where('visitor_id', app(SignedVisitorToken::class)->resolve($agent, $response->json('visitor_token')))->firstOrFail()->status);
+        $this->assertNotContains('request_human', collect(app(SalesToolbox::class)->definitions($agent))->pluck('name')->all());
     }
 
     public function test_moderation_outage_fails_closed_to_human_review(): void
