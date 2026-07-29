@@ -224,6 +224,57 @@ class OpenAiOrchestrationTest extends TestCase
         Http::assertSentCount(4);
     }
 
+    public function test_a_verified_available_product_is_never_hidden_by_a_generic_model_answer(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->where('stock', '>', 0)->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'available-search', 'output' => [[
+                'type' => 'function_call',
+                'name' => 'search_products',
+                'call_id' => 'available-search-call',
+                'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null]),
+            ]]])
+            ->push(['id' => 'available-stock', 'output' => [[
+                'type' => 'function_call',
+                'name' => 'check_stock',
+                'call_id' => 'available-stock-call',
+                'arguments' => json_encode(['product_id' => $product->id, 'quantity' => 1]),
+            ]]])
+            ->push(['id' => 'generic-available-draft', 'output' => [[
+                'type' => 'message',
+                'content' => [[
+                    'type' => 'output_text',
+                    'text' => json_encode([
+                        'text' => 'Please clarify what you mean.',
+                        'intent' => 'stock',
+                        'confidence' => .99,
+                        'handoff' => false,
+                        'escalation_reason' => null,
+                        'product_ids' => [],
+                        'sources' => [],
+                        'factual_claims' => [],
+                    ]),
+                ]],
+            ]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => "Do you have {$product->name}?",
+        ])->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('intent', 'stock');
+
+        $this->assertStringContainsString($product->name, $response->json('text'));
+        $this->assertStringContainsString('available', $response->json('text'));
+        $this->assertStringContainsString(number_format((float) $product->price, 2, '.', ''), $response->json('text'));
+        $this->assertNotContains('server_guardrail', $response->json('tools_used'));
+        Http::assertSentCount(4);
+    }
+
     public function test_flagged_input_is_safely_handed_off(): void
     {
         $this->seed();

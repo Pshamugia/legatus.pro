@@ -86,9 +86,9 @@ class OpenAiSalesOrchestrator
         $usedCollection = collect($used);
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
-        $verifiedUnavailable = $this->verifiedUnavailableReply($message, $usedCollection);
-        if ($verifiedUnavailable !== null) {
-            $data = $verifiedUnavailable;
+        $verifiedAvailability = $this->verifiedAvailabilityReply($message, $usedCollection);
+        if ($verifiedAvailability !== null) {
+            $data = $verifiedAvailability;
             $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
         }
 
@@ -219,12 +219,15 @@ class OpenAiSalesOrchestrator
         return json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
     }
 
-    private function verifiedUnavailableReply(string $customerMessage, Collection $used): ?array
+    private function verifiedAvailabilityReply(string $customerMessage, Collection $used): ?array
     {
-        $unavailable = $used
+        $searchResults = $used
             ->where('name', 'search_products')
             ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
-            ->flatMap(fn (array $call) => data_get($call, 'result.unavailable_products', []))
+            ->flatMap(fn (array $call) => array_merge(
+                data_get($call, 'result.products', []),
+                data_get($call, 'result.unavailable_products', []),
+            ))
             ->filter(fn ($product): bool => is_array($product) && (int) ($product['id'] ?? 0) > 0)
             ->keyBy(fn (array $product): int => (int) $product['id']);
 
@@ -232,24 +235,52 @@ class OpenAiSalesOrchestrator
             ->where('name', 'check_stock')
             ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
             ->map(fn (array $call): array => $call['result'])
-            ->first(fn (array $result): bool => ($result['available'] ?? null) === false
-                && $unavailable->has((int) ($result['product_id'] ?? 0)));
+            ->first(fn (array $result): bool => is_bool($result['available'] ?? null)
+                && $searchResults->has((int) ($result['product_id'] ?? 0)));
 
         if (! $confirmed) {
             return null;
         }
 
         $productId = (int) $confirmed['product_id'];
-        $product = $unavailable->get($productId);
+        $product = $searchResults->get($productId);
         $name = trim((string) ($product['name'] ?? $confirmed['name'] ?? ''));
         if ($name === '') {
             return null;
         }
 
         $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
-        $text = $georgian
-            ? "„{$name}“ საიტზე იძებნება, თუმცა ამჟამად მარაგი ამოწურულია. თუ გსურთ, მსგავს ხელმისაწვდომ პროდუქტებსაც შემოგთავაზებთ."
-            : "{$name} is listed on the website, but it is currently out of stock. If you like, I can suggest similar available alternatives.";
+        $available = (bool) $confirmed['available'];
+        $price = is_numeric($confirmed['price'] ?? null) ? (float) $confirmed['price'] : null;
+        if ($available) {
+            $priceText = $price !== null
+                ? ($georgian ? ' ფასი: '.number_format($price, 2, '.', '').' ₾.' : ' Price: '.number_format($price, 2, '.', '').' GEL.')
+                : '';
+            $text = $georgian
+                ? "დიახ, „{$name}“ საიტზე ხელმისაწვდომია.{$priceText}"
+                : "Yes, {$name} is currently available on the website.{$priceText}";
+        } else {
+            $text = $georgian
+                ? "„{$name}“ საიტზე იძებნება, თუმცა ამჟამად მარაგი ამოწურულია. თუ გსურთ, მსგავს ხელმისაწვდომ პროდუქტებსაც შემოგთავაზებთ."
+                : "{$name} is listed on the website, but it is currently out of stock. If you like, I can suggest similar available alternatives.";
+        }
+
+        $claims = [[
+            'type' => 'product',
+            'product_id' => $productId,
+            'amount' => null,
+            'quantity' => null,
+            'reference' => null,
+        ]];
+        if ($available && $price !== null) {
+            $claims[] = [
+                'type' => 'price',
+                'product_id' => $productId,
+                'amount' => $price,
+                'quantity' => null,
+                'reference' => null,
+            ];
+        }
 
         return [
             'text' => $text,
@@ -259,13 +290,7 @@ class OpenAiSalesOrchestrator
             'escalation_reason' => null,
             'product_ids' => [$productId],
             'sources' => [],
-            'factual_claims' => [[
-                'type' => 'product',
-                'product_id' => $productId,
-                'amount' => null,
-                'quantity' => null,
-                'reference' => null,
-            ]],
+            'factual_claims' => $claims,
         ];
     }
 
