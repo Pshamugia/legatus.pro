@@ -36,6 +36,13 @@ class LegatusCommandsTest extends TestCase
         $this->assertArrayNotHasKey('nia:verify-openai', $commands);
     }
 
+    public function test_platform_scheduler_processes_tenant_jobs_without_business_terminal_access(): void
+    {
+        $this->artisan('schedule:list')
+            ->expectsOutputToContain('queue:work database')
+            ->assertSuccessful();
+    }
+
     public function test_demo_bootstrap_migrates_the_legacy_demo_login(): void
     {
         User::factory()->create(['email' => 'demo@nia.ai']);

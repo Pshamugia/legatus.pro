@@ -15,3 +15,12 @@ Schedule::command('legatus:expire-reservations')->everyMinute()->withoutOverlapp
 // live per customer question, so an hourly refresh avoids hammering shared stores.
 Schedule::command('legatus:sync-commerce')->hourly()->withoutOverlapping();
 Schedule::command('legatus:dispatch-channel-outbox')->everyMinute()->withoutOverlapping();
+
+// Shared-hosting production does not necessarily provide Supervisor. Run a
+// short-lived worker from the platform scheduler so every tenant's one-click
+// sync continues after the browser request ends. The scheduler is configured
+// once by the Legatus operator; individual businesses never use a terminal.
+Schedule::command('queue:work database --stop-when-empty --max-time=50 --timeout=3600 --tries=3 --memory=128')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->runInBackground();
