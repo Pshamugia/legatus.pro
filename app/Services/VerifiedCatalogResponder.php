@@ -83,7 +83,11 @@ class VerifiedCatalogResponder
             return null;
         }
 
-        $products = collect($search['products'] ?? [])->take(3)->values();
+        $products = collect($search['products'] ?? [])
+            ->merge($search['unavailable_products'] ?? [])
+            ->unique('id')
+            ->take(6)
+            ->values();
         $source = is_array($search['source'] ?? null) ? [$search['source']] : [];
         $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
 
@@ -137,8 +141,7 @@ class VerifiedCatalogResponder
             ], $agent, $conversation)];
         });
         $verified = $checks
-            ->filter(fn (array $check): bool => ($check['ok'] ?? false) === true)
-            ->filter(fn (array $check): bool => $this->checkIsAvailable($check));
+            ->filter(fn (array $check): bool => ($check['ok'] ?? false) === true);
 
         if ($verified->isEmpty()) {
             return [
@@ -450,8 +453,11 @@ class VerifiedCatalogResponder
             : ($georgian ? "{$price} ₾" : "{$price} GEL");
         $stock = (int) ($check['available_stock'] ?? $check['stock'] ?? 0);
         $availabilityOnly = ($check['stock_precision'] ?? data_get($product->metadata, 'stock_precision')) === 'availability_only';
+        $available = $this->checkIsAvailable($check);
 
         return match (true) {
+            $georgian && ! $available => "• {$identity} — {$sale} · ამჟამად მარაგში არ არის",
+            ! $available => "• {$identity} — {$sale} · currently out of stock",
             $georgian && $availabilityOnly => "• {$identity} — {$sale} · ხელმისაწვდომია",
             $georgian => "• {$identity} — {$sale} · მარაგში {$stock} ც.",
             $availabilityOnly => "• {$identity} — {$sale} · available",

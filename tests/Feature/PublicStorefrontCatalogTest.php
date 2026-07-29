@@ -226,6 +226,79 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertGreaterThan(0, data_get($result, 'recommendations.0.score'));
     }
 
+    public function test_natural_lookup_uses_store_suggestions_and_preserves_available_and_sold_out_duplicates(): void
+    {
+        [$agent, $conversation] = $this->context();
+        Http::fake(function ($request) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+
+            if ($path === '/search') {
+                return Http::response('<html><body><div id="search-results"></div></body></html>');
+            }
+            if ($path === '/search/suggest') {
+                return Http::response([
+                    'items' => str_contains((string) ($parameters['q'] ?? ''), 'დუბლინელ') ? [
+                        [
+                            'title' => 'დუბლინელები',
+                            'author' => 'ჯეიმზ ჯოისი',
+                            'url' => 'https://bukinistebi.ge/books/dublinelebi/2387',
+                            'sold' => false,
+                        ],
+                        [
+                            'title' => 'დუბლინელები',
+                            'author' => 'ჯეიმზ ჯოისი',
+                            'url' => 'https://bukinistebi.ge/books/dublinelebi/1621',
+                            'sold' => true,
+                        ],
+                    ] : [],
+                    'didYouMean' => null,
+                ]);
+            }
+            if (in_array($path, ['/books/dublinelebi/2387', '/books/dublinelebi/1621'], true)) {
+                $price = $path === '/books/dublinelebi/2387' ? '9.00' : '7.00';
+
+                return Http::response(
+                    '<script type="application/ld+json">'.json_encode([
+                        '@context' => 'https://schema.org',
+                        '@type' => 'Product',
+                        'name' => 'დუბლინელები',
+                        'offers' => [
+                            '@type' => 'Offer',
+                            'price' => $price,
+                            // Deliberately stale: the suggestion's sold flag
+                            // must override this for the second listing.
+                            'availability' => 'https://schema.org/InStock',
+                        ],
+                    ], JSON_UNESCAPED_UNICODE).'</script>',
+                );
+            }
+
+            return Http::response([], 404);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ჯოისის დუბლინელები გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame(
+            'დუბლინელები',
+            data_get($result, 'products.0.name'),
+            json_encode([
+                'result' => $result,
+                'database' => $agent->products()->get()->toArray(),
+                'requests' => collect(Http::recorded())->map(fn (array $record): string => $record[0]->url())->all(),
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
+        );
+        $this->assertSame(9.0, data_get($result, 'products.0.price'));
+        $this->assertTrue(data_get($result, 'products.0.available'));
+        $this->assertSame('დუბლინელები', data_get($result, 'unavailable_products.0.name'));
+        $this->assertFalse(data_get($result, 'unavailable_products.0.available'));
+        $this->assertDatabaseCount('products', 2);
+    }
+
     /** @return array{Agent, Conversation} */
     private function context(): array
     {

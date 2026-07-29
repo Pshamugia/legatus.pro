@@ -58,16 +58,28 @@ class PublicStorefrontCatalog
             }
         }
 
-        try {
-            $response = $this->ingestion->fetchPublicUrl(
-                $origin.'/search/suggest?q='.rawurlencode($query),
-                ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'],
-            );
-            $payload = $response->json();
-        } catch (\Throwable $exception) {
-            report($exception);
+        $payload = null;
+        foreach ($this->queryCandidates($query, $alternatives) as $candidate) {
+            try {
+                $response = $this->ingestion->fetchPublicUrl(
+                    $origin.'/search/suggest?q='.rawurlencode($candidate),
+                    ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'],
+                );
+                $candidatePayload = $response->json();
+            } catch (\Throwable $exception) {
+                report($exception);
+                continue;
+            }
 
-            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
+            if (! is_array($candidatePayload) || ! is_array($candidatePayload['items'] ?? null)) {
+                continue;
+            }
+
+            $payload ??= $candidatePayload;
+            if ($candidatePayload['items'] !== []) {
+                $payload = $candidatePayload;
+                break;
+            }
         }
 
         if (! is_array($payload) || ! is_array($payload['items'] ?? null)) {
@@ -76,9 +88,6 @@ class PublicStorefrontCatalog
 
         $products = [];
         foreach (collect($payload['items'])->filter(fn ($item): bool => is_array($item))->take(12) as $item) {
-            if (($item['sold'] ?? false) === true) {
-                continue;
-            }
             $url = is_string($item['url'] ?? null) ? trim($item['url']) : '';
             if (! $this->sameOriginProductUrl($url, $parts)) {
                 continue;
@@ -88,9 +97,18 @@ class PublicStorefrontCatalog
                 $detail = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html']);
                 foreach ($this->ingestion->structuredProductsFromHtml($detail->body()) as $product) {
                     $product['url'] ??= $url;
+                    if (empty($product['sku']) && preg_match('#/(\d+)(?:\?.*)?$#', $url, $idMatch)) {
+                        $product['sku'] = $idMatch[1];
+                    }
                     $product['author'] ??= $item['author'] ?? null;
                     $product['image'] ??= $item['image'] ?? null;
-                    $product['availability'] ??= 'InStock';
+                    // Storefront suggestions often carry fresher availability
+                    // than stale or incorrect JSON-LD on the detail page.
+                    if (is_bool($item['sold'] ?? null)) {
+                        $product['availability'] = $item['sold'] ? 'OutOfStock' : 'InStock';
+                    } else {
+                        $product['availability'] ??= 'InStock';
+                    }
                     $product['stock_precision'] = 'availability_only';
                     $products[] = $product;
                 }
