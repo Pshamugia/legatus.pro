@@ -229,6 +229,10 @@ class OpenAiOrchestrationTest extends TestCase
         $this->seed();
         $agent = Agent::firstOrFail();
         $product = $agent->products()->where('stock', '>', 0)->firstOrFail();
+        $searchedProduct = $agent->products()
+            ->where('stock', '>', 0)
+            ->whereKeyNot($product->id)
+            ->firstOrFail();
         config(['services.openai.key' => 'test-key']);
 
         Http::fakeSequence()
@@ -237,7 +241,7 @@ class OpenAiOrchestrationTest extends TestCase
                 'type' => 'function_call',
                 'name' => 'search_products',
                 'call_id' => 'available-search-call',
-                'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null]),
+                'arguments' => json_encode(['query' => $searchedProduct->name, 'category' => null, 'max_price' => null]),
             ]]])
             ->push(['id' => 'available-stock', 'output' => [[
                 'type' => 'function_call',

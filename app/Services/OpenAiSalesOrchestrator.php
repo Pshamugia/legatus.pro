@@ -236,14 +236,15 @@ class OpenAiSalesOrchestrator
             ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
             ->map(fn (array $call): array => $call['result'])
             ->first(fn (array $result): bool => is_bool($result['available'] ?? null)
-                && $searchResults->has((int) ($result['product_id'] ?? 0)));
+                && (int) ($result['product_id'] ?? 0) > 0
+                && trim((string) ($result['name'] ?? '')) !== '');
 
         if (! $confirmed) {
             return null;
         }
 
         $productId = (int) $confirmed['product_id'];
-        $product = $searchResults->get($productId);
+        $product = $searchResults->get($productId, []);
         $name = trim((string) ($product['name'] ?? $confirmed['name'] ?? ''));
         if ($name === '') {
             return null;

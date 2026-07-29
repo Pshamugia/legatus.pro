@@ -275,7 +275,7 @@ class GuardrailsAndOutcomesTest extends TestCase
         $response->assertJsonMissing(['text' => 'Our return policy allows refunds for 30 days.']);
     }
 
-    public function test_price_that_disagrees_with_the_tool_result_is_blocked(): void
+    public function test_price_that_disagrees_with_the_tool_result_is_replaced_with_verified_data(): void
     {
         [$agent, $product] = $this->salesContext();
         config(['services.openai.key' => 'test-key']);
@@ -285,11 +285,12 @@ class GuardrailsAndOutcomesTest extends TestCase
             ->push(['id' => 'wrong-price', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode(['text' => 'It costs 75 GEL.', 'intent' => 'price', 'confidence' => .99, 'handoff' => false, 'escalation_reason' => null, 'product_ids' => [$product->id], 'sources' => []])]]]], 'usage' => []]);
 
         $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'What is the price?'])
-            ->assertOk()->assertJsonPath('handoff', true)->assertJsonPath('tools_used.1', 'server_guardrail')
+            ->assertOk()->assertJsonPath('handoff', false)
             ->assertJsonMissing(['text' => 'It costs 75 GEL.']);
 
+        $this->assertStringContainsString(number_format((float) $product->price, 2, '.', ''), $response->json('text'));
         $visitorId = app(SignedVisitorToken::class)->resolve($agent, $response->json('visitor_token'));
-        $this->assertDatabaseHas('conversations', ['visitor_id' => $visitorId, 'status' => 'human']);
+        $this->assertDatabaseHas('conversations', ['visitor_id' => $visitorId, 'status' => 'ai']);
     }
 
     public function test_generic_intent_cannot_bypass_stock_tool_requirement(): void
@@ -316,7 +317,7 @@ class GuardrailsAndOutcomesTest extends TestCase
             ->assertJsonMissing(['text' => "{$product->name} stock is 99 units."]);
     }
 
-    public function test_availability_only_check_cannot_be_represented_as_one_item_in_stock(): void
+    public function test_availability_only_check_replaces_an_invented_quantity_with_verified_availability(): void
     {
         [$agent, $product] = $this->salesContext();
         $product->update(['metadata' => ['stock_precision' => 'availability_only']]);
@@ -338,11 +339,12 @@ class GuardrailsAndOutcomesTest extends TestCase
                 ],
             ])]]]], 'usage' => []]);
 
-        $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Tell me about the current situation.'])
+        $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Tell me about the current situation.'])
             ->assertOk()
-            ->assertJsonPath('handoff', true)
-            ->assertJsonPath('escalation_reason', 'A product stock claim was not bound to that product’s live stock result.')
+            ->assertJsonPath('handoff', false)
             ->assertJsonMissing(['text' => "{$product->name} has 1 item in stock."]);
+
+        $this->assertStringContainsString('available', $response->json('text'));
     }
 
     public function test_prefix_currency_claim_must_match_the_bound_product_fact(): void
@@ -366,10 +368,12 @@ class GuardrailsAndOutcomesTest extends TestCase
                 ],
             ])]]]], 'usage' => []]);
 
-        $this->postJson("/demo/{$agent->slug}/message", ['message' => 'What is the price?'])
+        $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'What is the price?'])
             ->assertOk()
-            ->assertJsonPath('handoff', true)
+            ->assertJsonPath('handoff', false)
             ->assertJsonMissing(['text' => "{$product->name} costs ₾75."]);
+
+        $this->assertStringContainsString(number_format((float) $product->price, 2, '.', ''), $response->json('text'));
     }
 
     public function test_failed_tool_does_not_authorize_a_stock_claim(): void
