@@ -108,16 +108,16 @@ Route::middleware('auth')->group(function () {
         ->middleware('throttle:10,1')
         ->name('channels.commerce.disconnect');
     Route::get('/app/channels/meta/{provider}/connect', [MetaConnectionController::class, 'connect'])
-        ->whereIn('provider', ['facebook', 'instagram'])
+        ->whereIn('provider', ['meta', 'facebook', 'instagram'])
         ->name('channels.meta.connect');
     Route::get('/auth/meta/{provider}/callback', [MetaConnectionController::class, 'callback'])
-        ->whereIn('provider', ['facebook', 'instagram'])
+        ->whereIn('provider', ['meta', 'facebook', 'instagram'])
         ->name('channels.meta.callback');
     Route::get('/app/channels/meta/{provider}/select/{selection}', [MetaConnectionController::class, 'selection'])
-        ->whereIn('provider', ['facebook', 'instagram'])
+        ->whereIn('provider', ['meta', 'facebook', 'instagram'])
         ->name('channels.meta.selection');
     Route::post('/app/channels/meta/{provider}/select/{selection}', [MetaConnectionController::class, 'select'])
-        ->whereIn('provider', ['facebook', 'instagram'])
+        ->whereIn('provider', ['meta', 'facebook', 'instagram'])
         ->middleware('throttle:20,1')
         ->name('channels.meta.select');
     Route::delete('/app/channels/meta/{connection}', [MetaConnectionController::class, 'disconnect'])

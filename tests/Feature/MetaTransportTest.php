@@ -442,6 +442,87 @@ class MetaTransportTest extends TestCase
         $this->assertStringNotContainsString('meta-app-secret', $response->headers->get('Location'));
     }
 
+    public function test_one_meta_oauth_connects_managed_facebook_page_and_linked_instagram_account(): void
+    {
+        [$user, $agent] = $this->tenant();
+
+        $response = $this->actingAs($user)->get('/app/channels/meta/meta/connect');
+        $response->assertRedirectContains('https://www.facebook.test/v25.0/dialog/oauth?');
+        $response->assertSessionHas('meta_oauth.provider', 'meta');
+        $state = session('meta_oauth.state');
+
+        Http::fakeSequence()
+            ->push(['access_token' => 'short-user-token', 'expires_in' => 3600])
+            ->push(['access_token' => 'long-user-token', 'expires_in' => 5184000])
+            ->push(['data' => [[
+                'id' => 'managed-page',
+                'name' => 'Bukinistebi',
+                'access_token' => 'managed-page-token',
+                'instagram_business_account' => [
+                    'id' => 'linked-instagram',
+                    'username' => 'bukinistebi.ge',
+                ],
+            ]]])
+            ->push(['success' => true]);
+
+        $this->get('/auth/meta/meta/callback?state='.urlencode($state).'&code=valid-code')
+            ->assertRedirect(route('channels.index'))
+            ->assertSessionHas('success', fn (string $message): bool => str_contains($message, 'Facebook Messenger')
+                && str_contains($message, 'Instagram Direct'));
+
+        $facebook = $agent->channelConnections()->where('provider', 'facebook')->firstOrFail();
+        $instagram = $agent->channelConnections()->where('provider', 'instagram')->firstOrFail();
+        $this->assertSame('managed-page', $facebook->external_account_id);
+        $this->assertSame('linked-instagram', $instagram->external_account_id);
+        $this->assertSame('managed-page', data_get($instagram->metadata, 'facebook_page_id'));
+        $this->assertSame('managed-page-token', $facebook->access_token);
+        $this->assertSame('managed-page-token', $instagram->access_token);
+        Http::assertSentCount(4);
+    }
+
+    public function test_unified_meta_selection_never_offers_a_page_owned_by_another_workspace(): void
+    {
+        [$user, $agent] = $this->tenant();
+        $otherUser = User::factory()->create();
+        $otherOrganization = Organization::query()->create(['name' => 'Other business', 'slug' => 'other-business']);
+        $otherOrganization->users()->attach($otherUser, ['role' => 'owner']);
+        $otherAgent = $otherOrganization->agents()->create([
+            'name' => 'Other assistant',
+            'slug' => 'other-business-agent',
+            'business_name' => 'Other business',
+            'channels' => ['web', 'facebook', 'instagram'],
+            'settings' => [],
+            'is_active' => true,
+        ]);
+        $otherAgent->channelConnections()->create([
+            'provider' => 'facebook',
+            'status' => 'active',
+            'external_account_id' => 'already-owned-page',
+            'external_account_name' => 'Other page',
+            'access_token' => 'other-page-token',
+        ]);
+
+        $this->actingAs($user)->get('/app/channels/meta/meta/connect')->assertRedirect();
+        $state = session('meta_oauth.state');
+        Http::fakeSequence()
+            ->push(['access_token' => 'short-token'])
+            ->push(['access_token' => 'long-token'])
+            ->push(['data' => [[
+                'id' => 'already-owned-page',
+                'name' => 'Other page',
+                'access_token' => 'returned-page-token',
+            ]]]);
+
+        $this->get('/auth/meta/meta/callback?state='.urlencode($state).'&code=valid-code')
+            ->assertRedirect(route('channels.index'))
+            ->assertSessionHas('error');
+
+        $this->assertDatabaseMissing('channel_connections', [
+            'agent_id' => $agent->id,
+            'external_account_id' => 'already-owned-page',
+        ]);
+    }
+
     public function test_oauth_callback_discovers_subscribes_and_encrypts_a_page_connection(): void
     {
         [$user, $agent] = $this->tenant();

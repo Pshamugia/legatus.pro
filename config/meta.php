@@ -15,6 +15,10 @@ return [
     'outbox_stale_seconds' => (int) env('META_OUTBOX_STALE_SECONDS', 60),
     'outbox_batch_size' => (int) env('META_OUTBOX_BATCH_SIZE', 100),
     'scopes' => [
+        'meta' => array_values(array_filter(explode(',', (string) env(
+            'META_SCOPES',
+            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,instagram_basic,instagram_manage_messages'
+        )))),
         'facebook' => array_values(array_filter(explode(',', (string) env(
             'META_FACEBOOK_SCOPES',
             'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement'

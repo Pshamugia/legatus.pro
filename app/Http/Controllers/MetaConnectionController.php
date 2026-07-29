@@ -9,6 +9,7 @@ use App\Services\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
@@ -84,19 +85,14 @@ class MetaConnectionController extends Controller
 
         if ($candidates->count() === 1) {
             try {
-                $connection = DB::transaction(fn () => $this->persistCandidate($provider, $candidates->first(), $agent->id));
+                $connections = DB::transaction(fn () => $this->persistCandidateSet($provider, $candidates->first(), $agent->id));
             } catch (\Throwable) {
                 return to_route('channels.index')->with('error', 'That Meta account is already connected elsewhere or is no longer eligible.');
             }
 
-            $this->subscribe($connection, $meta);
+            $this->subscribeAll($connections, $meta);
 
-            return to_route('channels.index')->with(
-                $connection->status === 'active' ? 'success' : 'error',
-                $connection->status === 'active'
-                    ? ucfirst($provider).' connected to '.$connection->external_account_name.'.'
-                    : 'The account was selected, but Meta webhook subscription needs attention.'
-            );
+            return $this->connectionResult($provider, $connections);
         }
 
         $selectionToken = Str::random(64);
@@ -127,9 +123,13 @@ class MetaConnectionController extends Controller
         $accounts = collect($pending->candidates)->map(fn (array $candidate): array => [
             'candidate_id' => $candidate['candidate_id'],
             'name' => $candidate['name'],
-            'description' => $provider === 'instagram'
-                ? 'Instagram Professional account'.(! empty($candidate['page_name']) ? ' · linked to '.$candidate['page_name'] : '')
-                : 'Facebook Page',
+            'description' => match ($provider) {
+                'instagram' => 'Instagram Professional account'.(! empty($candidate['page_name']) ? ' · linked to '.$candidate['page_name'] : ''),
+                'meta' => ! empty($candidate['instagram'])
+                    ? 'Facebook Page · includes Instagram @'.($candidate['instagram']['name'] ?? 'account')
+                    : 'Facebook Page · no linked Instagram Professional account found',
+                default => 'Facebook Page',
+            },
         ])->values();
 
         return view('meta-account-selection', [
@@ -148,7 +148,7 @@ class MetaConnectionController extends Controller
         $agent = $tenant->agent();
 
         try {
-            $connection = DB::transaction(function () use ($provider, $selection, $request, $agent, $data): ChannelConnection {
+            $connections = DB::transaction(function () use ($provider, $selection, $request, $agent, $data): Collection {
                 $pending = MetaOAuthSelection::query()
                     ->where('selector_hash', hash('sha256', $selection))
                     ->where('provider', $provider)
@@ -160,10 +160,10 @@ class MetaConnectionController extends Controller
                 $candidate = collect($pending->candidates)->firstWhere('candidate_id', $data['candidate_id']);
                 abort_unless(is_array($candidate), 422, 'Choose an eligible Meta account.');
 
-                $connection = $this->persistCandidate($provider, $candidate, $agent->id);
+                $connections = $this->persistCandidateSet($provider, $candidate, $agent->id);
                 $pending->delete();
 
-                return $connection;
+                return $connections;
             });
         } catch (HttpException $exception) {
             throw $exception;
@@ -171,14 +171,9 @@ class MetaConnectionController extends Controller
             return to_route('channels.index')->with('error', 'That Meta account could not be connected. Please connect again.');
         }
 
-        $this->subscribe($connection, $meta);
+        $this->subscribeAll($connections, $meta);
 
-        return to_route('channels.index')->with(
-            $connection->status === 'active' ? 'success' : 'error',
-            $connection->status === 'active'
-                ? ucfirst($provider).' connected to '.$connection->external_account_name.'.'
-                : 'The account was selected, but Meta webhook subscription needs attention.'
-        );
+        return $this->connectionResult($provider, $connections);
     }
 
     public function disconnect(ChannelConnection $connection, TenantContext $tenant, MetaGraphClient $meta): RedirectResponse
@@ -207,6 +202,10 @@ class MetaConnectionController extends Controller
 
     private function eligibleCandidates(string $provider, array $accounts, int $agentId)
     {
+        if ($provider === 'meta') {
+            return $this->eligibleMetaCandidates($accounts, $agentId);
+        }
+
         $current = ChannelConnection::query()->where('agent_id', $agentId)->where('provider', $provider)->first();
 
         return collect($accounts)->map(function (array $account) use ($provider): ?array {
@@ -251,6 +250,68 @@ class MetaConnectionController extends Controller
                 ->where('external_account_id', $candidate['external_account_id'])
                 ->where('agent_id', '!=', $agentId)
                 ->exists();
+        })->unique('external_account_id')->values();
+    }
+
+    private function eligibleMetaCandidates(array $accounts, int $agentId): Collection
+    {
+        $current = ChannelConnection::query()
+            ->where('agent_id', $agentId)
+            ->whereIn('provider', ['facebook', 'instagram'])
+            ->get()
+            ->keyBy('provider');
+
+        return collect($accounts)->map(function (array $account): ?array {
+            $pageId = (string) ($account['id'] ?? '');
+            $accessToken = (string) ($account['access_token'] ?? '');
+            if ($pageId === '' || $accessToken === '') {
+                return null;
+            }
+
+            $tokenExpiresAt = $this->pageTokenExpiresAt($account);
+            if ($tokenExpiresAt === false) {
+                return null;
+            }
+
+            $instagram = $account['instagram_business_account'] ?? null;
+            $instagramId = is_array($instagram) ? (string) ($instagram['id'] ?? '') : '';
+            $instagramName = is_array($instagram)
+                ? trim((string) ($instagram['username'] ?? $instagram['name'] ?? ''))
+                : '';
+
+            return [
+                'candidate_id' => Str::random(40),
+                'external_account_id' => $pageId,
+                'name' => trim((string) ($account['name'] ?? '')) ?: 'Facebook Page',
+                'access_token' => $accessToken,
+                'token_expires_at' => $tokenExpiresAt,
+                'instagram' => $instagramId !== '' ? [
+                    'external_account_id' => $instagramId,
+                    'name' => $instagramName !== '' ? $instagramName : 'Instagram account',
+                ] : null,
+            ];
+        })->filter(function (?array $candidate) use ($agentId, $current): bool {
+            if (! $candidate) {
+                return false;
+            }
+
+            $facebook = $current->get('facebook');
+            if ($facebook && $facebook->external_account_id !== $candidate['external_account_id']) {
+                return false;
+            }
+            if ($this->ownedElsewhere('facebook', $candidate['external_account_id'], $agentId)) {
+                return false;
+            }
+
+            $instagram = $candidate['instagram'];
+            if (! is_array($instagram)) {
+                return true;
+            }
+
+            $currentInstagram = $current->get('instagram');
+
+            return ! ($currentInstagram && $currentInstagram->external_account_id !== $instagram['external_account_id'])
+                && ! $this->ownedElsewhere('instagram', $instagram['external_account_id'], $agentId);
         })->unique('external_account_id')->values();
     }
 
@@ -333,6 +394,39 @@ class MetaConnectionController extends Controller
         return ChannelConnection::query()->create($values);
     }
 
+    private function persistCandidateSet(string $provider, array $candidate, int $agentId): Collection
+    {
+        if ($provider !== 'meta') {
+            return collect([$this->persistCandidate($provider, $candidate, $agentId)]);
+        }
+
+        $connections = collect([
+            $this->persistCandidate('facebook', $candidate, $agentId),
+        ]);
+
+        if (is_array($candidate['instagram'] ?? null)) {
+            $connections->push($this->persistCandidate('instagram', [
+                'external_account_id' => $candidate['instagram']['external_account_id'],
+                'name' => $candidate['instagram']['name'],
+                'access_token' => $candidate['access_token'],
+                'token_expires_at' => $candidate['token_expires_at'],
+                'page_id' => $candidate['external_account_id'],
+                'page_name' => $candidate['name'],
+            ], $agentId));
+        }
+
+        return $connections;
+    }
+
+    private function ownedElsewhere(string $provider, string $externalAccountId, int $agentId): bool
+    {
+        return ChannelConnection::query()
+            ->where('provider', $provider)
+            ->where('external_account_id', $externalAccountId)
+            ->where('agent_id', '!=', $agentId)
+            ->exists();
+    }
+
     private function pendingSelection(string $provider, string $selection, Request $request, TenantContext $tenant): ?MetaOAuthSelection
     {
         return MetaOAuthSelection::query()
@@ -356,6 +450,55 @@ class MetaConnectionController extends Controller
         }
     }
 
+    private function subscribeAll(Collection $connections, MetaGraphClient $meta): void
+    {
+        $connections
+            ->unique(fn (ChannelConnection $connection): string => $connection->graphAccountId())
+            ->each(fn (ChannelConnection $connection) => $this->subscribe($connection, $meta));
+
+        foreach ($connections as $connection) {
+            $samePage = $connections->first(
+                fn (ChannelConnection $candidate): bool => $candidate->graphAccountId() === $connection->graphAccountId()
+            );
+            if ($samePage && $samePage->status !== 'active' && $connection->status === 'active') {
+                $connection->update([
+                    'status' => 'needs_attention',
+                    'last_error' => $samePage->last_error,
+                ]);
+            }
+        }
+    }
+
+    private function connectionResult(string $provider, Collection $connections): RedirectResponse
+    {
+        $connections->each->refresh();
+        $active = $connections->every(fn (ChannelConnection $connection): bool => $connection->status === 'active');
+        if (! $active) {
+            return to_route('channels.index')->with(
+                'error',
+                'The account was selected, but Meta webhook subscription needs attention.'
+            );
+        }
+
+        if ($provider !== 'meta') {
+            $connection = $connections->first();
+
+            return to_route('channels.index')->with(
+                'success',
+                ucfirst($provider).' connected to '.$connection->external_account_name.'.'
+            );
+        }
+
+        $facebook = $connections->firstWhere('provider', 'facebook');
+        $instagram = $connections->firstWhere('provider', 'instagram');
+        $message = 'Facebook Messenger connected to '.$facebook->external_account_name.'.';
+        $message .= $instagram
+            ? ' Instagram Direct connected to @'.$instagram->external_account_name.'.'
+            : ' No linked Instagram Professional account was found; you can link one in Meta and reconnect later.';
+
+        return to_route('channels.index')->with('success', $message);
+    }
+
     private function redirectUri(string $provider): string
     {
         $configured = (string) config('meta.redirect_uri');
@@ -367,6 +510,6 @@ class MetaConnectionController extends Controller
 
     private function provider(string $provider): void
     {
-        abort_unless(in_array($provider, ['facebook', 'instagram'], true), 404);
+        abort_unless(in_array($provider, ['meta', 'facebook', 'instagram'], true), 404);
     }
 }

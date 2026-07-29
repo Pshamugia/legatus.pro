@@ -39,6 +39,9 @@ class ChannelController extends Controller
 
             return array_merge($channel, $this->connectionState($agent, $provider, $connection));
         });
+        $metaConnectUrl = Route::has('channels.meta.connect')
+            ? route('channels.meta.connect', ['provider' => 'meta'])
+            : null;
 
         $productCount = $agent->products()->where('is_active', true)->count();
         $knowledgeSourceCount = $agent->knowledgeSources()->count();
@@ -62,6 +65,7 @@ class ChannelController extends Controller
             'agent',
             'snippet',
             'metaChannels',
+            'metaConnectUrl',
             'productCount',
             'knowledgeSourceCount',
             'failedKnowledgeSources',

@@ -5,7 +5,7 @@
 <main style="min-height:calc(100vh - 79px);display:grid;place-items:center;padding:32px;background:var(--cream)">
     <section class="panel" style="width:min(680px,100%);padding:30px">
         <span class="eyebrow">One final step</span>
-        <h1 style="margin:8px 0 10px">Choose your {{ $provider === 'facebook' ? 'Facebook Page' : 'Instagram account' }}</h1>
+        <h1 style="margin:8px 0 10px">Choose your {{ $provider === 'instagram' ? 'Instagram account' : 'Facebook Page' }}</h1>
         <p style="color:var(--muted);line-height:1.6;margin-bottom:22px">
             Legatus will connect only the account you select. Other Pages and accounts stay untouched.
         </p>
