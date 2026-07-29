@@ -22,5 +22,7 @@ Schedule::command('legatus:dispatch-channel-outbox')->everyMinute()->withoutOver
 // once by the Legatus operator; individual businesses never use a terminal.
 Schedule::command('queue:work database --stop-when-empty --max-time=50 --timeout=3600 --tries=3 --memory=128')
     ->everyMinute()
-    ->withoutOverlapping(10)
-    ->runInBackground();
+    // Shared hosts commonly disable the shell primitives Laravel uses for
+    // runInBackground(). Cron already provides the outer process, so execute
+    // the bounded worker directly and use the scheduler lock for overlap.
+    ->withoutOverlapping(10);
