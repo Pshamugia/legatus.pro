@@ -1,19 +1,41 @@
 @extends('layouts.app') @section('title','Knowledge · Legatus') @section('body')
+<style nonce="{{ request()->attributes->get('csp_nonce') }}">
+#connected-knowledge .knowledge-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
+#connected-knowledge .knowledge-heading .channel{line-height:1.5;text-align:right}
+#connected-knowledge .knowledge-source-row{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:start;gap:13px}
+#connected-knowledge .knowledge-source-copy{min-width:0}
+#connected-knowledge .knowledge-source-copy>p{max-width:none;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.55}
+#connected-knowledge .knowledge-source-copy>p:first-of-type{color:#596a64}
+#connected-knowledge .knowledge-source-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;max-width:330px}
+#connected-knowledge .knowledge-source-actions .channel{white-space:nowrap;margin-right:4px}
+#connected-knowledge .knowledge-source-actions form{margin:0}
+#connected-knowledge .knowledge-source-copy .progress{width:min(100%,360px)!important;margin-top:9px}
+@media(max-width:1050px){
+    #connected-knowledge .knowledge-source-row{grid-template-columns:40px minmax(0,1fr)}
+    #connected-knowledge .knowledge-source-actions{grid-column:2;justify-content:flex-start;max-width:none}
+}
+@media(max-width:600px){
+    #connected-knowledge .knowledge-source-row{grid-template-columns:1fr}
+    #connected-knowledge .knowledge-source-row>.avatar{display:none}
+    #connected-knowledge .knowledge-source-actions{grid-column:1}
+    #connected-knowledge .knowledge-heading .channel{text-align:left}
+}
+</style>
 <div class="dash-shell">@include('partials.workspace-navigation', ['active' => 'knowledge'])
 <main class="main"><div class="topline"><div><span class="eyebrow">Business brain</span><h1>Knowledge sources</h1><p style="color:var(--muted);margin:4px 0">ასწავლეთ Legatus-ს პროდუქტები, პოლიტიკა და ბრენდის ცოდნა.</p></div><a class="btn ghost" href="{{ $agent ? route('chat.show',$agent) : route('dashboard') }}">Test knowledge ↗</a></div>
 @if(session('success'))<div class="panel" style="margin-top:20px;border-color:#a9d6b4;color:#267244">✓ {{ session('success') }}</div>@endif @if(session('error'))<div class="panel" style="margin-top:20px;border-color:#e6afa9;color:#a43b32">{{ session('error') }}</div>@endif
 <div class="content-grid" style="margin-top:24px"><section class="panel"><h3>Add a source</h3><form method="post" enctype="multipart/form-data" action="{{ route('knowledge.store') }}">@csrf<label>Source type</label><div style="display:flex;gap:9px"><label class="tag"><input style="width:auto" type="radio" name="type" value="url" checked> Website URL</label><label class="tag"><input style="width:auto" type="radio" name="type" value="csv"> CSV catalog</label><label class="tag"><input style="width:auto" type="radio" name="type" value="pdf"> PDF / policy</label></div><label>Display name <span style="color:var(--muted);font-weight:400">(optional)</span></label><input name="name" placeholder="Summer catalog or Delivery policy"><div id="url-field"><label>Public website URL</label><input type="url" name="url" placeholder="https://store.example/products"></div><div id="file-field" style="display:none"><label>Choose CSV or PDF · max 10 MB</label><input type="file" name="file" accept=".csv,.txt,.pdf"></div><button class="btn lime" style="margin-top:22px;width:100%">Teach Legatus →</button></form></section>
 <aside class="agent-card"><span class="tag" style="background:#ffffff12;border-color:#ffffff20;color:white">How it works</span><h2 style="font-size:24px">From raw data to trusted answers.</h2><p>1. Content is fetched and validated.<br><br>2. Products are normalized and deduplicated.<br><br>3. Policies are split into searchable chunks.<br><br>4. Legatus cites the exact source used.</p><div style="padding-top:15px;border-top:1px solid #ffffff20;font-size:12px;color:#bcd0c9">Private network URLs are blocked. Catalog text is treated as data, never as AI instructions.</div></aside></div>
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
+    <div class="knowledge-heading">
         <h3>Connected knowledge</h3>
         <span class="channel">Live catalog search enabled · {{ number_format($agent->products()->where('is_active', true)->count()) }} products currently cached · {{ number_format($sources->sum('chunks_count')) }} searchable passages</span>
     </div>
     @forelse($sources as $source)
         @php($fixture = ! $source->isRefreshable())
-        <div class="conversation" style="align-items:center">
+        <div class="conversation knowledge-source-row">
             <span class="avatar" style="width:40px;height:40px;background:{{ $source->status==='ready'?'#e8f7d8':'#f3eee1' }};color:var(--ink)">{{ strtoupper(substr($source->type,0,1)) }}</span>
-            <div class="copy">
+            <div class="copy knowledge-source-copy">
                 <strong>{{ $source->name }}</strong>
                 @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill">{{ $source->status }}</span>@endif
                 @if($source->type === 'url')
@@ -37,13 +59,15 @@
                 </p>
                 <div class="progress" style="background:#edf1ed;width:260px"><i style="width:{{ $source->progress }}%"></i></div>
             </div>
-            <span class="channel">{{ $fixture ? 'Static fixture · no source payload' : ($source->last_synced_at?->diffForHumans() ?? 'Not synced') }}</span>
-            @if($source->isRefreshable())
-                <form method="post" action="{{ route('knowledge.sync',$source) }}">@csrf<button class="btn ghost" style="padding:8px 11px">↻ Sync</button></form>
-            @else
-                <span class="tag">Not refreshable</span>
-            @endif
-            <form method="post" action="{{ route('knowledge.destroy',$source) }}">@csrf @method('DELETE')<button class="btn ghost" style="padding:8px 11px;color:#a43b32">Remove</button></form>
+            <div class="knowledge-source-actions">
+                <span class="channel">{{ $fixture ? 'Static fixture · no source payload' : ($source->last_synced_at?->diffForHumans() ?? 'Not synced') }}</span>
+                @if($source->isRefreshable())
+                    <form method="post" action="{{ route('knowledge.sync',$source) }}">@csrf<button class="btn ghost" style="padding:8px 11px">↻ Sync</button></form>
+                @else
+                    <span class="tag">Not refreshable</span>
+                @endif
+                <form method="post" action="{{ route('knowledge.destroy',$source) }}">@csrf @method('DELETE')<button class="btn ghost" style="padding:8px 11px;color:#a43b32">Remove</button></form>
+            </div>
         </div>
     @empty
         <div style="text-align:center;padding:45px;color:var(--muted)"><div style="font-size:34px">◇</div><b>No knowledge sources yet</b><p>Add a URL, CSV catalog, or PDF policy above.</p></div>
