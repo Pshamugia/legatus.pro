@@ -229,6 +229,10 @@ class PublicStorefrontCatalogTest extends TestCase
     public function test_natural_lookup_uses_store_suggestions_and_preserves_available_and_sold_out_duplicates(): void
     {
         [$agent, $conversation] = $this->context();
+        config([
+            'legatus.semantic_orchestration_enabled' => true,
+            'services.openai.key' => 'must-not-be-called',
+        ]);
         Http::fake(function ($request) {
             $path = (string) parse_url($request->url(), PHP_URL_PATH);
             parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
@@ -277,11 +281,11 @@ class PublicStorefrontCatalogTest extends TestCase
             return Http::response([], 404);
         });
 
-        $result = app(SalesToolbox::class)->execute('search_products', [
-            'query' => 'ჯოისის დუბლინელები გაქვთ?',
-            'category' => null,
-            'max_price' => null,
-        ], $agent, $conversation);
+        $result = app(SalesAgentService::class)->reply(
+            $agent,
+            'ჯოისის დუბლინელები გაქვთ?',
+            $conversation,
+        );
 
         $this->assertSame(
             'დუბლინელები',
@@ -292,11 +296,17 @@ class PublicStorefrontCatalogTest extends TestCase
                 'requests' => collect(Http::recorded())->map(fn (array $record): string => $record[0]->url())->all(),
             ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
         );
-        $this->assertSame(9.0, data_get($result, 'products.0.price'));
-        $this->assertTrue(data_get($result, 'products.0.available'));
-        $this->assertSame('დუბლინელები', data_get($result, 'unavailable_products.0.name'));
-        $this->assertFalse(data_get($result, 'unavailable_products.0.available'));
+        $this->assertSame(9.0, (float) data_get($result, 'products.0.price'));
+        $this->assertSame('დუბლინელები', data_get($result, 'products.1.name'));
+        $this->assertStringContainsString('ხელმისაწვდომია', $result['text']);
+        $this->assertStringContainsString('მარაგში არ არის', $result['text']);
+        $this->assertSame(['search_products', 'check_stock'], $result['tools_used']);
         $this->assertDatabaseCount('products', 2);
+        $this->assertDatabaseHas('agent_runs', [
+            'conversation_id' => $conversation->id,
+            'provider' => 'local',
+            'model' => 'verified-catalog-responder',
+        ]);
     }
 
     /** @return array{Agent, Conversation} */

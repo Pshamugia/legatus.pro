@@ -22,7 +22,16 @@ class SalesAgentService
             && config('services.openai.key')
             && config('legatus.semantic_orchestration_enabled', true);
 
-        if (! $semanticOrchestration && $conversation && $reply = $this->catalog->respond($agent, $conversation, $message)) {
+        $hasPublicCatalog = $conversation
+            && $agent->knowledgeSources()
+                ->where('type', 'url')
+                ->whereNotNull('url')
+                ->whereIn('status', ['ready', 'processing'])
+                ->exists();
+
+        if ((! $semanticOrchestration || $hasPublicCatalog)
+            && $conversation
+            && $reply = $this->catalog->respond($agent, $conversation, $message)) {
             AgentRun::create([
                 'agent_id' => $agent->id,
                 'conversation_id' => $conversation->id,
