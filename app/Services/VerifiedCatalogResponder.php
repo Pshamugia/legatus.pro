@@ -166,6 +166,17 @@ class VerifiedCatalogResponder
             ];
         }
 
+        $availableVerified = $verified->filter(
+            fn (array $check): bool => $this->checkIsAvailable($check),
+        );
+        if ($availableVerified->isNotEmpty()) {
+            // When an available match exists, do not distract the customer
+            // with duplicate sold-out listings of the same requested item.
+            // Sold-out products remain useful only when no available match
+            // was found at all.
+            $verified = $availableVerified;
+        }
+
         $ids = $verified->keys()->map(fn ($id): int => (int) $id)->values();
         $rank = $ids->flip();
         $models = $agent->customerProducts()
@@ -248,6 +259,13 @@ class VerifiedCatalogResponder
         ])->filter(fn (array $check): bool => ($check['ok'] ?? false) === true);
         if ($checks->isEmpty()) {
             return null;
+        }
+
+        $availableChecks = $checks->filter(
+            fn (array $check): bool => $this->checkIsAvailable($check),
+        );
+        if ($availableChecks->isNotEmpty()) {
+            $checks = $availableChecks;
         }
 
         $verifiedProducts = $selected->filter(fn ($product): bool => $checks->has($product->id))->values();

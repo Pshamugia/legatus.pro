@@ -144,6 +144,59 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertNull($reply);
     }
 
+    public function test_available_match_hides_a_sold_out_duplicate(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $available = $agent->products()->create([
+            'name' => 'დუბლინელები',
+            'search_text' => 'დუბლინელები ჯეიმზ ჯოისი',
+            'price' => 9,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['author' => 'ჯეიმზ ჯოისი'],
+        ]);
+        $soldOut = $agent->products()->create([
+            'name' => 'დუბლინელები',
+            'search_text' => 'დუბლინელები ჯეიმზ ჯოისი',
+            'price' => 12,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => ['author' => 'ჯეიმზ ჯოისი'],
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'დუბლინელები გაქვთ?',
+        );
+
+        $this->assertSame([$available->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('9.00 ₾', $reply['text']);
+        $this->assertStringNotContainsString('12.00 ₾', $reply['text']);
+        $this->assertNotContains($soldOut->id, collect($reply['products'])->pluck('id')->all());
+    }
+
+    public function test_sold_out_match_is_shown_when_no_available_match_exists(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $soldOut = $agent->products()->create([
+            'name' => 'იშვიათი ნივთი',
+            'search_text' => 'იშვიათი ნივთი',
+            'price' => 12,
+            'stock' => 0,
+            'is_active' => true,
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'იშვიათი ნივთი გაქვთ?',
+        );
+
+        $this->assertSame([$soldOut->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('12.00 ₾', $reply['text']);
+    }
+
     public function test_plain_lookup_can_match_any_indexed_product_field(): void
     {
         [$agent, $conversation] = $this->context();
