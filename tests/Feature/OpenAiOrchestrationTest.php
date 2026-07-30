@@ -7,6 +7,7 @@ use App\Models\AgentRun;
 use App\Models\Reservation;
 use App\Services\SalesAgentService;
 use App\Services\SalesToolbox;
+use App\Services\OpenAiSalesOrchestrator;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -16,6 +17,33 @@ use Tests\TestCase;
 class OpenAiOrchestrationTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_recent_product_attributes_are_supplied_for_relational_follow_ups(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->firstOrFail();
+        $product->update(['metadata' => array_merge($product->metadata ?? [], [
+            'author' => 'James Joyce',
+        ])]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'entity-context-customer',
+            'status' => 'ai',
+            'channel' => 'facebook',
+            'context' => ['last_catalog_product_ids' => [$product->id]],
+        ]);
+
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'contextualCatalogInstructions');
+        $instructions = $method->invoke(
+            app(OpenAiSalesOrchestrator::class),
+            $agent,
+            $conversation,
+        );
+
+        $this->assertStringContainsString('James Joyce', $instructions);
+        $this->assertStringContainsString('mandatory query constraint', $instructions);
+        $this->assertStringContainsString('Do not return a product whose corresponding attribute differs', $instructions);
+    }
 
     #[DataProvider('crossIndustryMessages')]
     public function test_production_messages_use_semantic_orchestration_regardless_of_industry(string $message): void

@@ -51,6 +51,10 @@ class VerifiedCatalogResponder
             return null;
         }
 
+        if ($this->isRelatedEntityFollowUp($conversation, $message)) {
+            return null;
+        }
+
         $contextOnlyReference = $this->isContextOnlyProductReference($message);
         if ($contextOnlyReference && $this->recentProducts($agent, $conversation)->isEmpty()) {
             $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
@@ -612,6 +616,29 @@ class VerifiedCatalogResponder
             );
 
         return $askedForChoice;
+    }
+
+    private function isRelatedEntityFollowUp(Conversation $conversation, string $message): bool
+    {
+        if ($this->recentProducts($conversation->agent, $conversation)->isEmpty()) {
+            return false;
+        }
+
+        $text = Str::lower(trim($message));
+        if ($text === '' || mb_strlen($text) > 200) {
+            return false;
+        }
+
+        $asksForMore = preg_match(
+            '/(?:\b(?:another|other|more|else)\b|(?:სხვა|კიდევ|დამატებით))/iu',
+            $text,
+        ) === 1;
+        $refersBack = preg_match(
+            '/(?:\b(?:this|same|that|its)\b|(?:ამ|იგივე|მისი|იმავე))/iu',
+            $text,
+        ) === 1;
+
+        return $asksForMore && $refersBack;
     }
 
     private function isConversationRepair(string $message): bool

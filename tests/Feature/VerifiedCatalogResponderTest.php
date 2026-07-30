@@ -197,6 +197,30 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertStringContainsString('12.00 ₾', $reply['text']);
     }
 
+    public function test_related_entity_follow_up_is_left_for_semantic_resolution(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $book = $agent->products()->create([
+            'name' => 'დუბლინელები',
+            'search_text' => 'დუბლინელები ჯეიმზ ჯოისი',
+            'price' => 9,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['author' => 'ჯეიმზ ჯოისი'],
+        ]);
+        $conversation->update([
+            'context' => ['last_catalog_product_ids' => [$book->id]],
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'სხვა რა გაქვთ ამ ავტორის?',
+        );
+
+        $this->assertNull($reply);
+    }
+
     public function test_plain_lookup_can_match_any_indexed_product_field(): void
     {
         [$agent, $conversation] = $this->context();
