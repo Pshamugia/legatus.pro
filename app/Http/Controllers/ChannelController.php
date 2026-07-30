@@ -135,7 +135,7 @@ class ChannelController extends Controller
             ?? ($fallback['account_name'] ?? null);
 
         $connectUrl = Route::has('channels.meta.connect')
-            ? route('channels.meta.connect', ['provider' => $provider])
+            ? route('channels.meta.connect', ['provider' => 'meta'])
             : null;
         $disconnectUrl = $connection && Route::has('channels.meta.disconnect')
             ? route('channels.meta.disconnect', ['connection' => $connection])
