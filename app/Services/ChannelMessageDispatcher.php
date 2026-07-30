@@ -46,7 +46,7 @@ class ChannelMessageDispatcher
 
         if (in_array($delivery->status, ['queued', 'retrying'], true)) {
             try {
-                SendMetaMessage::dispatch($delivery->id)->afterCommit();
+                SendMetaMessage::dispatch($delivery->id)->onQueue('channels')->afterCommit();
             } catch (\Throwable) {
                 // The durable outbox row is authoritative; the scheduled
                 // sweeper will retry inserting the queue job.

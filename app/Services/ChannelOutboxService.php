@@ -61,9 +61,9 @@ class ChannelOutboxService
             foreach ($messages as $message) {
                 try {
                     if ($message->direction === 'inbound') {
-                        ProcessMetaInboundMessage::dispatch($message->id);
+                        ProcessMetaInboundMessage::dispatch($message->id)->onQueue('channels');
                     } else {
-                        SendMetaMessage::dispatch($message->id);
+                        SendMetaMessage::dispatch($message->id)->onQueue('channels');
                     }
                     $message->touch();
                     $dispatched++;
