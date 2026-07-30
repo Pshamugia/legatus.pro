@@ -1081,6 +1081,54 @@ class MetaTransportTest extends TestCase
             && str_starts_with($request->url(), 'https://graph.facebook.test/v25.0/page-disconnect/subscribed_apps?'));
     }
 
+    public function test_reconciliation_recovers_a_recent_message_missed_by_the_webhook(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-reconcile');
+        Http::fake(['https://graph.facebook.test/*' => Http::response([
+            'data' => [[
+                'id' => 'thread-1',
+                'updated_time' => now()->toIso8601String(),
+                'messages' => ['data' => [
+                    [
+                        'id' => 'mid-reconciled-inbound',
+                        'message' => 'Do you have this product?',
+                        'from' => ['id' => 'customer-reconcile', 'name' => 'Customer'],
+                        'to' => ['data' => [['id' => 'page-reconcile']]],
+                        'created_time' => now()->subMinute()->toIso8601String(),
+                    ],
+                    [
+                        'id' => 'mid-page-outbound',
+                        'message' => 'Previous reply',
+                        'from' => ['id' => 'page-reconcile', 'name' => 'Page'],
+                        'to' => ['data' => [['id' => 'customer-reconcile']]],
+                        'created_time' => now()->subSeconds(30)->toIso8601String(),
+                    ],
+                ]],
+            ]],
+        ])]);
+
+        $this->artisan('legatus:reconcile-meta-inbox --lookback=5')
+            ->expectsOutput('Meta inbox reconciliation complete: 1 new message(s).')
+            ->assertSuccessful();
+
+        $this->assertDatabaseHas('channel_messages', [
+            'channel_connection_id' => $connection->id,
+            'direction' => 'inbound',
+            'provider_message_id' => 'mid-reconciled-inbound',
+            'provider_sender_id' => 'customer-reconcile',
+            'status' => 'received',
+        ]);
+        $this->assertTrue((bool) data_get(ChannelMessage::query()->firstOrFail()->payload, 'reconciled_from_graph'));
+        $this->assertNotEmpty(data_get($connection->fresh()->metadata, 'inbox_reconciled_at'));
+        Queue::assertPushed(ProcessMetaInboundMessage::class, 1);
+
+        $this->artisan('legatus:reconcile-meta-inbox --lookback=5')
+            ->expectsOutput('Meta inbox reconciliation complete: 0 new message(s).')
+            ->assertSuccessful();
+        $this->assertDatabaseCount('channel_messages', 1);
+    }
+
     private function metaWebhook(string $body, string $signature)
     {
         return $this->call('POST', '/webhooks/meta', [], [], [], [
