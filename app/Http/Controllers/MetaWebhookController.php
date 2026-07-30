@@ -12,6 +12,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class MetaWebhookController extends Controller
@@ -43,7 +44,21 @@ class MetaWebhookController extends Controller
         }
         abort_unless(is_array($payload), 400, 'Invalid webhook payload.');
 
-        foreach ($normalizer->normalize($payload) as $event) {
+        $events = $normalizer->normalize($payload);
+        Log::info('Meta webhook received.', [
+            'object' => (string) ($payload['object'] ?? ''),
+            'entry_ids' => collect((array) ($payload['entry'] ?? []))
+                ->pluck('id')
+                ->filter(fn ($id): bool => is_string($id) || is_int($id))
+                ->map(fn ($id): string => (string) $id)
+                ->take(10)
+                ->values()
+                ->all(),
+            'event_count' => count($events),
+            'event_kinds' => collect($events)->pluck('kind')->filter()->unique()->values()->all(),
+        ]);
+
+        foreach ($events as $event) {
             $connection = ChannelConnection::query()
                 ->where('provider', $event['provider'])
                 ->where(function ($query) use ($event): void {
@@ -52,6 +67,12 @@ class MetaWebhookController extends Controller
                 })
                 ->first();
             if (! $connection) {
+                Log::warning('Meta webhook account did not match an active connection.', [
+                    'provider' => $event['provider'],
+                    'external_account_id' => $event['external_account_id'],
+                    'kind' => $event['kind'],
+                ]);
+
                 continue;
             }
 
