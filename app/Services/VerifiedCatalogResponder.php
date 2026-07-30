@@ -43,6 +43,14 @@ class VerifiedCatalogResponder
             return null;
         }
 
+        // A short answer to the assistant's immediately preceding choice or
+        // clarification question is not an independent catalog query. Let the
+        // semantic orchestrator resolve the omitted subject from conversation
+        // history (for example: "classic" after "classic or modern?").
+        if ($this->isAnswerToRecentQuestion($conversation, $message)) {
+            return null;
+        }
+
         $contextOnlyReference = $this->isContextOnlyProductReference($message);
         if ($contextOnlyReference && $this->recentProducts($agent, $conversation)->isEmpty()) {
             $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
@@ -554,6 +562,38 @@ class VerifiedCatalogResponder
                     ->orWhere('sku', 'like', "%{$literal}%");
             })
             ->exists();
+    }
+
+    private function isAnswerToRecentQuestion(Conversation $conversation, string $message): bool
+    {
+        $text = trim($message);
+        if ($text === '' || mb_strlen($text) > 100 || str_contains($text, '?')) {
+            return false;
+        }
+
+        $tokens = preg_split('/[^\pL\pN]+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if (count($tokens) > 8 || $this->hasExplicitLookupSignal($message)) {
+            return false;
+        }
+
+        $previous = $conversation->messages()
+            ->where('role', 'assistant')
+            ->latest('id')
+            ->first();
+        if (! $previous) {
+            return false;
+        }
+
+        $question = Str::lower(trim((string) $previous->content));
+        $askedForChoice = str_contains($question, '?')
+            && (
+                str_contains($question, ' თუ ')
+                || preg_match('/\bor\b/iu', $question) === 1
+                || str_contains($question, '/')
+                || preg_match('/(?:რომელ|რომელი|რომელს|რომლით|which|prefer|choose)/iu', $question) === 1
+            );
+
+        return $askedForChoice;
     }
 
     private function isConversationRepair(string $message): bool

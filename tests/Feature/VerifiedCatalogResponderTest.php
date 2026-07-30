@@ -89,6 +89,61 @@ class VerifiedCatalogResponderTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_short_choice_answer_is_left_for_semantic_conversation_resolution(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->products()->create([
+            'name' => 'კლასიკური სტილის ნივთი',
+            'search_text' => 'კლასიკური სტილის ნივთი',
+            'price' => 20,
+            'stock' => 3,
+            'is_active' => true,
+        ]);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'კლასიკური დეტექტივი გირჩევნიათ თუ მისტიკური?',
+            'metadata' => ['intent' => 'recommendation'],
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'კლასიკური',
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'კლასიკური',
+        );
+
+        $this->assertNull($reply);
+    }
+
+    public function test_short_choice_resolution_is_industry_neutral(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->update(['business_name' => 'Furniture Store']);
+        $agent->products()->create([
+            'name' => 'მინიმალისტური სანათი',
+            'search_text' => 'მინიმალისტური სანათი',
+            'price' => 80,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'ინდუსტრიული სტილი გირჩევნიათ თუ მინიმალისტური?',
+            'metadata' => ['intent' => 'recommendation'],
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'მინიმალისტური',
+        );
+
+        $this->assertNull($reply);
+    }
+
     public function test_plain_lookup_can_match_any_indexed_product_field(): void
     {
         [$agent, $conversation] = $this->context();
