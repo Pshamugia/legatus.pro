@@ -221,6 +221,54 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertNull($reply);
     }
 
+    public function test_single_match_offers_purchase_instead_of_asking_which_one(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->products()->create([
+            'name' => 'ერთადერთი ვარიანტი',
+            'search_text' => 'ერთადერთი ვარიანტი',
+            'price' => 15,
+            'stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'ერთადერთი ვარიანტი გაქვთ?',
+        );
+
+        $this->assertCount(1, $reply['products']);
+        $this->assertStringContainsString('გაინტერესებთ შეძენა?', $reply['text']);
+        $this->assertStringNotContainsString('რომელი გაინტერესებთ?', $reply['text']);
+    }
+
+    public function test_how_to_purchase_uses_the_recent_product_and_store_checkout(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $product = $agent->products()->create([
+            'name' => 'შესაძენი პროდუქტი',
+            'search_text' => 'შესაძენი პროდუქტი',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://store.example/products/25'],
+        ]);
+        $conversation->update([
+            'context' => ['last_catalog_product_ids' => [$product->id]],
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'როგორ შევიძინო?',
+        );
+
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('პროდუქტის ბარათზე', $reply['text']);
+        $this->assertStringContainsString('კალათაში', $reply['text']);
+    }
+
     public function test_plain_lookup_can_match_any_indexed_product_field(): void
     {
         [$agent, $conversation] = $this->context();

@@ -203,10 +203,14 @@ class VerifiedCatalogResponder
             ->values()
             ->all();
 
+        $nextStep = $models->count() === 1
+            ? ($georgian ? 'გაინტერესებთ შეძენა?' : 'Would you like to purchase it?')
+            : ($georgian ? 'რომელი გაინტერესებთ?' : 'Which one interests you?');
+
         return [
             'text' => $georgian
-                ? "ვიპოვე {$models->count()} შესაბამისი ვარიანტი:\n{$lines->implode("\n")}\nრომელი გაინტერესებთ?"
-                : "I found {$models->count()} matching option".($models->count() === 1 ? '' : 's').":\n{$lines->implode("\n")}\nWhich one interests you?",
+                ? "ვიპოვე {$models->count()} შესაბამისი ვარიანტი:\n{$lines->implode("\n")}\n{$nextStep}"
+                : "I found {$models->count()} matching option".($models->count() === 1 ? '' : 's').":\n{$lines->implode("\n")}\n{$nextStep}",
             'intent' => $this->intent($message),
             'confidence' => .99,
             'handoff' => false,
@@ -348,10 +352,14 @@ class VerifiedCatalogResponder
 
         $this->rememberProducts($conversation, $models->pluck('id')->all());
 
+        $nextStep = $models->count() === 1
+            ? ($georgian ? 'გაინტერესებთ ამ პროდუქტის შეძენა?' : 'Would you like to purchase this product?')
+            : ($georgian ? 'რომელი გაინტერესებთ?' : 'Which one interests you?');
+
         return [
             'text' => $georgian
-                ? 'ამავე კონტექსტით ეს ვარიანტები შევარჩიე. რომელი გაინტერესებთ?'
-                : 'Using the same context, I selected these alternatives. Which one interests you?',
+                ? "ამავე კონტექსტით შესაბამისი ვარიანტი შევარჩიე. {$nextStep}"
+                : "Using the same context, I selected the matching option. {$nextStep}",
             'intent' => 'recommendation', 'confidence' => .99, 'handoff' => false,
             'escalation_reason' => null, 'products' => $models,
             'sources' => [['label' => 'Verified product catalog', 'type' => 'catalog']],
@@ -438,8 +446,8 @@ class VerifiedCatalogResponder
     private function isCartFollowUp(string $message): bool
     {
         return Str::contains(Str::lower($message), [
-            'დამიმატ', 'კალათ', 'ვიყიდ', 'ყიდვა', 'შეძენა',
-            'add it', 'add this', 'add to cart', 'buy it', 'purchase',
+            'დამიმატ', 'კალათ', 'ვიყიდ', 'ვიყიდო', 'ყიდვა', 'შეძენა', 'შეიძ', 'შევიძ',
+            'add it', 'add this', 'add to cart', 'buy it', 'how to buy', 'purchase',
         ]);
     }
 
