@@ -10,6 +10,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
@@ -32,13 +33,15 @@ class MetaConnectionController extends Controller
             ->delete();
 
         $state = Str::random(64);
-        $request->session()->put('meta_oauth', [
+        $oauth = [
             'state' => $state,
             'provider' => $provider,
             'agent_id' => $agent->id,
             'user_id' => $request->user()->id,
-            'expires_at' => now()->addMinutes(10)->timestamp,
-        ]);
+            'expires_at' => now()->addMinutes(20)->timestamp,
+        ];
+        $request->session()->put('meta_oauth', $oauth);
+        Cache::put($this->oauthStateKey($state), $oauth, now()->addMinutes(20));
 
         return redirect()->away($meta->authorizationUrl($provider, $state, $this->redirectUri($provider)));
     }
@@ -48,19 +51,20 @@ class MetaConnectionController extends Controller
         $this->provider($provider);
         $tenant->authorize(['owner', 'admin']);
         $agent = $tenant->agent();
-        $oauth = $request->session()->pull('meta_oauth');
-
-        abort_unless(
-            is_array($oauth)
-            && ($oauth['provider'] ?? null) === $provider
-            && (int) ($oauth['agent_id'] ?? 0) === $agent->id
-            && (int) ($oauth['user_id'] ?? 0) === $request->user()->id
-            && (int) ($oauth['expires_at'] ?? 0) >= now()->timestamp
-            && is_string($request->query('state'))
-            && hash_equals((string) ($oauth['state'] ?? ''), (string) $request->query('state')),
-            403,
-            'The Meta authorization request is invalid or expired.'
+        $state = is_string($request->query('state')) ? (string) $request->query('state') : '';
+        $sessionOauth = $request->session()->pull('meta_oauth');
+        $cachedOauth = $state !== '' ? Cache::pull($this->oauthStateKey($state)) : null;
+        $oauth = collect([$sessionOauth, $cachedOauth])->first(
+            fn (mixed $candidate): bool => $this->validOauthState(
+                $candidate,
+                $state,
+                $provider,
+                $agent->id,
+                (int) $request->user()->id
+            )
         );
+
+        abort_unless(is_array($oauth), 403, 'The Meta authorization request is invalid or expired.');
 
         if ($request->filled('error')) {
             return to_route('channels.index')->with('error', 'Meta authorization was cancelled or denied.');
@@ -506,6 +510,27 @@ class MetaConnectionController extends Controller
         return $configured !== ''
             ? str_replace('{provider}', $provider, $configured)
             : route('channels.meta.callback', ['provider' => $provider]);
+    }
+
+    private function oauthStateKey(string $state): string
+    {
+        return 'meta_oauth_state:'.hash('sha256', $state);
+    }
+
+    private function validOauthState(
+        mixed $oauth,
+        string $state,
+        string $provider,
+        int $agentId,
+        int $userId
+    ): bool {
+        return is_array($oauth)
+            && $state !== ''
+            && ($oauth['provider'] ?? null) === $provider
+            && (int) ($oauth['agent_id'] ?? 0) === $agentId
+            && (int) ($oauth['user_id'] ?? 0) === $userId
+            && (int) ($oauth['expires_at'] ?? 0) >= now()->timestamp
+            && hash_equals((string) ($oauth['state'] ?? ''), $state);
     }
 
     private function provider(string $provider): void

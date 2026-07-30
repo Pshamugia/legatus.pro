@@ -455,6 +455,34 @@ class MetaTransportTest extends TestCase
         $this->assertStringNotContainsString('meta-app-secret', $response->headers->get('Location'));
     }
 
+    public function test_oauth_callback_can_use_the_one_time_server_state_when_session_payload_is_lost(): void
+    {
+        [$user, $agent] = $this->tenant();
+        $this->actingAs($user)->get('/app/channels/meta/meta/connect')->assertRedirect();
+        $state = session('meta_oauth.state');
+        session()->forget('meta_oauth');
+
+        Http::fakeSequence()
+            ->push(['access_token' => 'short-user-token'])
+            ->push(['access_token' => 'long-user-token'])
+            ->push(['data' => [[
+                'id' => 'cache-state-page',
+                'name' => 'Cache State Page',
+                'access_token' => 'cache-state-page-token',
+            ]]])
+            ->push(['success' => true]);
+
+        $this->get('/auth/meta/meta/callback?state='.urlencode($state).'&code=valid-code')
+            ->assertRedirect(route('channels.index'))
+            ->assertSessionHas('success');
+
+        $this->assertDatabaseHas('channel_connections', [
+            'agent_id' => $agent->id,
+            'provider' => 'facebook',
+            'external_account_id' => 'cache-state-page',
+        ]);
+    }
+
     public function test_one_meta_oauth_connects_managed_facebook_page_and_linked_instagram_account(): void
     {
         [$user, $agent] = $this->tenant();
