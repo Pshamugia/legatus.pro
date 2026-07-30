@@ -6,6 +6,7 @@ use App\Jobs\ProcessMetaInboundMessage;
 use App\Jobs\SendMetaMessage;
 use App\Models\ChannelConnection;
 use App\Models\ChannelMessage;
+use App\Models\Message;
 use App\Models\MetaOAuthSelection;
 use App\Models\Organization;
 use App\Models\User;
@@ -305,6 +306,11 @@ class MetaTransportTest extends TestCase
             'conversation_id' => $inbound->conversation_id,
             'role' => 'assistant',
         ]);
+        $assistant = Message::query()
+            ->where('conversation_id', $inbound->conversation_id)
+            ->where('role', 'assistant')
+            ->firstOrFail();
+        $this->assertStringContainsString('AI ასისტენტი', $assistant->content);
         $this->assertDatabaseHas('channel_messages', [
             'conversation_id' => $inbound->conversation_id,
             'direction' => 'outbound',

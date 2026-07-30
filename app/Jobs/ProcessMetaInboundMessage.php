@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\ChannelConnection;
 use App\Models\ChannelMessage;
 use App\Models\Conversation;
+use App\Models\Agent;
 use App\Models\Message;
 use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
@@ -17,6 +18,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 {
@@ -132,6 +134,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                         ->where('public_id', $result['message_id'])
                         ->first();
                     if ($assistant) {
+                        $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
                         $dispatcher->dispatch($assistant);
                     }
                 }
@@ -142,6 +145,36 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'processed_at' => now(),
                 ]);
             });
+    }
+
+    private function discloseAiIdentityOnFirstReply(
+        Message $assistant,
+        Conversation $conversation,
+        Agent $agent,
+        string $customerText,
+    ): void {
+        $hasEarlierAssistantReply = $conversation->messages()
+            ->where('role', 'assistant')
+            ->where('id', '!=', $assistant->id)
+            ->exists();
+        if ($hasEarlierAssistantReply) {
+            return;
+        }
+
+        $content = trim((string) $assistant->content);
+        $lower = Str::lower($content);
+        if (Str::contains($lower, ['ai assistant', 'ai ასისტენტ'])) {
+            return;
+        }
+
+        $assistantName = $agent->assistantDisplayName();
+        $businessName = trim((string) $agent->business_name);
+        $isGeorgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerText) === 1;
+        $disclosure = $isGeorgian
+            ? "გამარჯობა! მე ვარ {$assistantName} — {$businessName}-ის AI ასისტენტი 🤖"
+            : "Hi! I'm {$assistantName}, {$businessName}'s AI assistant 🤖";
+
+        $assistant->update(['content' => $disclosure.($content !== '' ? "\n\n{$content}" : '')]);
     }
 
     public function failed(?\Throwable $exception): void
