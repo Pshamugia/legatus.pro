@@ -112,8 +112,7 @@ class WidgetChannelTest extends TestCase
             ->assertSee('Instagram Direct')
             ->assertSee('Connect Facebook')
             ->assertSee('Connect Instagram')
-            ->assertSee(route('channels.meta.connect', ['provider' => 'facebook']), false)
-            ->assertSee(route('channels.meta.connect', ['provider' => 'instagram']), false)
+            ->assertSee(route('channels.meta.connect', ['provider' => 'meta']), false)
             ->assertSee('Meta-ს ოფიციალურ გვერდზე')
             ->assertDontSee('Paste token')
             ->assertDontSee('Webhook URL');
