@@ -60,7 +60,7 @@ class MetaInboxReconciler
                 );
 
                 if ($record->wasRecentlyCreated) {
-                    ProcessMetaInboundMessage::dispatch($record->id);
+                    ProcessMetaInboundMessage::dispatch($record->id)->onQueue('channels');
                     $imported++;
                 }
             }

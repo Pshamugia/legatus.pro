@@ -23,7 +23,7 @@ Schedule::command('legatus:reconcile-meta-inbox')->everyMinute()->withoutOverlap
 // short-lived worker from the platform scheduler so every tenant's one-click
 // sync continues after the browser request ends. The scheduler is configured
 // once by the Legatus operator; individual businesses never use a terminal.
-Schedule::command('queue:work database --stop-when-empty --max-time=50 --timeout=3600 --tries=3 --memory=128')
+Schedule::command('queue:work database --queue=channels,default --stop-when-empty --max-time=50 --timeout=3600 --tries=3 --memory=128')
     ->everyMinute()
     // Shared hosts commonly disable the shell primitives Laravel uses for
     // runInBackground(). Cron already provides the outer process, so execute

@@ -119,7 +119,7 @@ class MetaWebhookController extends Controller
         }
 
         if ($message->status === 'received') {
-            ProcessMetaInboundMessage::dispatch($message->id)->afterCommit();
+            ProcessMetaInboundMessage::dispatch($message->id)->onQueue('channels')->afterCommit();
         }
     }
 
