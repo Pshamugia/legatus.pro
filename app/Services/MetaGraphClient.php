@@ -11,13 +11,22 @@ class MetaGraphClient
 {
     public function authorizationUrl(string $provider, string $state, string $redirectUri): string
     {
-        $query = http_build_query([
+        $parameters = [
             'client_id' => config('meta.app_id'),
             'redirect_uri' => $redirectUri,
             'state' => $state,
             'response_type' => 'code',
             'scope' => implode(',', config("meta.scopes.{$provider}", [])),
-        ], '', '&', PHP_QUERY_RFC3986);
+        ];
+
+        $loginConfigId = trim((string) config('meta.login_config_id'));
+        if ($loginConfigId !== '') {
+            $parameters['config_id'] = $loginConfigId;
+            $parameters['override_default_response_type'] = 'true';
+            unset($parameters['scope']);
+        }
+
+        $query = http_build_query($parameters, '', '&', PHP_QUERY_RFC3986);
 
         return config('meta.dialog_url').'/'.config('meta.graph_version').'/dialog/oauth?'.$query;
     }

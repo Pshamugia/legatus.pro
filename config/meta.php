@@ -3,6 +3,7 @@
 return [
     'app_id' => env('META_APP_ID'),
     'app_secret' => env('META_APP_SECRET'),
+    'login_config_id' => env('META_LOGIN_CONFIG_ID'),
     'verify_token' => env('META_WEBHOOK_VERIFY_TOKEN'),
     'graph_url' => rtrim((string) env('META_GRAPH_URL', 'https://graph.facebook.com'), '/'),
     'dialog_url' => rtrim((string) env('META_DIALOG_URL', 'https://www.facebook.com'), '/'),

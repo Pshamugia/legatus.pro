@@ -442,6 +442,19 @@ class MetaTransportTest extends TestCase
         $this->assertStringNotContainsString('meta-app-secret', $response->headers->get('Location'));
     }
 
+    public function test_business_login_configuration_is_sent_without_exposing_a_secret(): void
+    {
+        [$user] = $this->tenant();
+        config()->set('meta.login_config_id', 'business-login-config-123');
+
+        $response = $this->actingAs($user)->get('/app/channels/meta/meta/connect');
+
+        $response->assertRedirectContains('config_id=business-login-config-123');
+        $response->assertRedirectContains('override_default_response_type=true');
+        $this->assertStringNotContainsString('scope=', $response->headers->get('Location'));
+        $this->assertStringNotContainsString('meta-app-secret', $response->headers->get('Location'));
+    }
+
     public function test_one_meta_oauth_connects_managed_facebook_page_and_linked_instagram_account(): void
     {
         [$user, $agent] = $this->tenant();
