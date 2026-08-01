@@ -631,6 +631,7 @@ class SalesToolboxHardeningTest extends TestCase
         ], $agent, $conversation);
 
         $this->assertSame([], $result['products']);
+        $this->assertTrue($result['category_index_pending']);
         $this->assertSame('processing', $source->fresh()->status);
         Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
     }

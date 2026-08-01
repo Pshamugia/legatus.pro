@@ -153,6 +153,7 @@ class SalesToolbox
             'unavailable_products' => $unavailableProducts->all(),
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,
+            'category_index_pending' => $taxonomyProductIds !== null && $taxonomyProductIds === [],
         ];
     }
 

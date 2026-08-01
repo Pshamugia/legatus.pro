@@ -111,6 +111,20 @@ class VerifiedCatalogResponder
         $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
 
         if ($products->isEmpty()) {
+            if (($search['category_index_pending'] ?? false) === true) {
+                return [
+                    'text' => $georgian
+                        ? 'ამ კატეგორიის მონაცემებს ახლა ვაახლებ. რამდენიმე წუთში ხელახლა სცადეთ.'
+                        : 'I am updating this category now. Please try again in a few minutes.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'products' => [],
+                    'sources' => $source,
+                    'tools_used' => ['search_products'],
+                ];
+            }
             $suggestion = trim((string) ($search['did_you_mean'] ?? ''));
             if ($suggestion === '' && ! $this->hasExplicitLookupSignal($message)) {
                 return null;
