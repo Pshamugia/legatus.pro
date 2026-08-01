@@ -127,9 +127,13 @@ class SalesToolbox
         // do not silently become stale between scheduled full syncs.
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
         $storefrontQuery = $storefrontQueries[0] ?? trim((string) $a['query']);
-        $publicSearch = ($taxonomyProductIds === null || $taxonomyProductIds === [])
-            ? $this->storefront->discover($agent, $storefrontQuery, array_slice($storefrontQueries, 1))
+        $publicSearch = $taxonomyProductIds === []
+            ? $this->storefront->discoverCategory($agent, (string) $a['query'])
             : ['imported' => 0, 'product_ids' => [], 'source' => 'knowledge_category_index'];
+        if (($taxonomyProductIds === null || $taxonomyProductIds === [])
+            && ($publicSearch['imported'] ?? 0) === 0) {
+            $publicSearch = $this->storefront->discover($agent, $storefrontQuery, array_slice($storefrontQueries, 1));
+        }
         if (($publicSearch['imported'] ?? 0) > 0) {
             if ($taxonomyProductIds === []) {
                 $taxonomyProductIds = collect($publicSearch['product_ids'] ?? [])
@@ -379,7 +383,13 @@ class SalesToolbox
         );
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
         $liveProductIds = collect();
-        if (($taxonomyProductIds === null || $taxonomyProductIds === []) && $storefrontQueries !== []) {
+        if ($taxonomyProductIds === [] && $storefrontQueries !== []) {
+            $liveSearch = $this->storefront->discoverCategory($agent, $criteria);
+            $liveProductIds = collect($liveSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id);
+        }
+        if (($taxonomyProductIds === null || $taxonomyProductIds === [])
+            && $liveProductIds->isEmpty()
+            && $storefrontQueries !== []) {
             // Recommendation intent must search the live catalogue too. The
             // locally cached HTML snapshot may contain only the first page.
             $liveSearch = $this->storefront->discover(

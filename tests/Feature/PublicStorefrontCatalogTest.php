@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Agent;
 use App\Models\Conversation;
 use App\Services\KnowledgeIngestionService;
+use App\Services\PublicStorefrontCatalog;
 use App\Services\SalesAgentService;
 use App\Services\SalesToolbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -255,6 +256,35 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertSame('ფილოსოფიური ეტიუდები', data_get($result, 'recommendations.0.name'));
         $this->assertSame('შალვა ნუცუბიძე', data_get($result, 'recommendations.0.author'));
         $this->assertGreaterThan(0, data_get($result, 'recommendations.0.score'));
+    }
+
+    public function test_unbuilt_named_category_reads_its_authoritative_url_before_general_site_search(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'დეტექტივი',
+            'name' => 'Category: დეტექტივი',
+            'url' => 'https://bukinistebi.ge/categories/detective',
+            'status' => 'ready',
+            'index_version' => 0,
+        ]);
+        $categoryHtml = str_replace(
+            ['საიუბილეო საარქივო გამოცემა', 'პაოლო იაშვილი'],
+            ['დეტექტიური ამბავი', 'ტესტ ავტორი'],
+            $this->searchCardsHtml(),
+        );
+        Http::fake([
+            'https://bukinistebi.ge/categories/detective' => Http::response($categoryHtml, 200, ['Content-Type' => 'text/html']),
+            '*' => Http::response('<html></html>', 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $result = app(PublicStorefrontCatalog::class)->discoverCategory($agent, 'დეტექტივები შემომთავაზე');
+
+        $this->assertGreaterThan(0, $result['imported'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://bukinistebi.ge/categories/detective');
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/search?title='));
     }
 
     public function test_live_text_search_never_replaces_complete_genre_matches_with_unrelated_cards(): void

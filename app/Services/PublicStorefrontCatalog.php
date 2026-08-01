@@ -10,6 +10,54 @@ class PublicStorefrontCatalog
     public function __construct(private KnowledgeIngestionService $ingestion) {}
 
     /** @return array{imported: int, product_ids: list<int>, did_you_mean: ?string, source: ?array} */
+    public function discoverCategory(Agent $agent, string $query): array
+    {
+        $needle = Str::lower(trim($query));
+        $source = $agent->knowledgeSources()
+            ->where('type', 'url')
+            ->where('source_scope', 'category')
+            ->whereNotNull('url')
+            ->get()
+            ->first(function ($source) use ($needle): bool {
+                $label = Str::lower(trim((string) $source->taxonomy_label));
+                $stem = mb_strlen($label) >= 6 ? mb_substr($label, 0, -1) : $label;
+
+                return $label !== '' && (
+                    Str::contains($needle, $label)
+                    || Str::contains($label, $needle)
+                    || ($stem !== '' && Str::contains($needle, $stem))
+                );
+            });
+
+        if (! $source) {
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
+        }
+
+        try {
+            $response = $this->ingestion->fetchPublicUrl((string) $source->url, ['Accept' => 'text/html'], 5, 1);
+            $parts = parse_url((string) $source->url);
+            $origin = ($parts['scheme'] ?? 'https').'://'.($parts['host'] ?? '');
+            $products = $this->ingestion->storefrontProductsFromHtml($response->body(), $origin, true);
+            if ($products === []) {
+                return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => $this->sourceEvidence((string) $source->url)];
+            }
+
+            $result = $this->ingestion->importDiscoveredUrlProducts($source, $products);
+
+            return [
+                'imported' => (int) $result['found'],
+                'product_ids' => $this->importedProductIds($agent, $products),
+                'did_you_mean' => null,
+                'source' => $this->sourceEvidence((string) $source->url),
+            ];
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => null];
+        }
+    }
+
+    /** @return array{imported: int, product_ids: list<int>, did_you_mean: ?string, source: ?array} */
     public function discover(Agent $agent, string $query, array $alternatives = []): array
     {
         $source = $this->catalogSource($agent);

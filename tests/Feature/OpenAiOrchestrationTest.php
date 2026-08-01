@@ -207,6 +207,49 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('resp_tool', $responseRequests[1]->data()['previous_response_id']);
     }
 
+    public function test_purchase_help_is_not_replaced_by_the_stock_verification_summary(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->where('stock', '>', 0)->firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'purchase-help-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => ['last_catalog_product_ids' => [$product->id]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'purchase-stock', 'output' => [[
+                'type' => 'function_call',
+                'name' => 'check_stock',
+                'call_id' => 'purchase-stock-call',
+                'arguments' => json_encode(['product_id' => $product->id, 'quantity' => 1]),
+            ]]])
+            ->push(['id' => 'purchase-help', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "გახსენით {$product->name}-ის პროდუქტის ბარათი, დაამატეთ კალათაში და შეკვეთა ბიზნესის ვებსაიტზე დაასრულეთ.",
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [$product->id],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $product->id, 'amount' => null, 'quantity' => null, 'reference' => null,
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'დიახ, დამეხმარე შეძენაში', $conversation);
+
+        $this->assertStringContainsString('დაამატეთ კალათაში', $reply['text']);
+        $this->assertStringNotContainsString('მარაგშია. ფასი', $reply['text']);
+        $this->assertSame('discovery', $reply['intent']);
+    }
+
     public function test_a_catalog_answer_blocked_by_the_verifier_is_rewritten_instead_of_repeating_a_fallback(): void
     {
         $this->seed();
