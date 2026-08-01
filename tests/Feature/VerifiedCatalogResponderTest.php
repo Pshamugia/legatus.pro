@@ -254,6 +254,36 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertStringNotContainsString('1 ც.', $reply['text']);
     }
 
+    public function test_sold_out_product_with_only_a_catalog_wide_category_never_gets_random_substitutes(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $soldOut = $agent->products()->create([
+            'name' => 'სასკოლო მოთხრობები',
+            'search_text' => 'სასკოლო მოთხრობები',
+            'category' => 'Books',
+            'price' => 15,
+            'stock' => 0,
+            'is_active' => true,
+        ]);
+        foreach (range(1, 10) as $index) {
+            $agent->products()->create([
+                'name' => "შემთხვევითი წიგნი {$index}",
+                'search_text' => "შემთხვევითი წიგნი {$index}",
+                'category' => 'Books',
+                'price' => 10 + $index,
+                'stock' => 2,
+                'is_active' => true,
+            ]);
+        }
+
+        $reply = app(VerifiedCatalogResponder::class)->respond($agent, $conversation, 'სასკოლო მოთხრობები გაქვთ?');
+
+        $this->assertSame([$soldOut->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('ამჟამად მარაგში არ არის', $reply['text']);
+        $this->assertStringNotContainsString('იმავე კატეგორიიდან', $reply['text']);
+        $this->assertStringNotContainsString('შემთხვევითი წიგნი', $reply['text']);
+    }
+
     public function test_sold_out_correction_rechecks_only_the_previous_product_and_never_offers_others(): void
     {
         [$agent, $conversation] = $this->context();

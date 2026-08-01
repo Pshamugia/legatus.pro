@@ -110,13 +110,12 @@ class SalesToolbox
             array_slice($storefrontQueries, 1),
         );
         if (($publicSearch['imported'] ?? 0) > 0) {
-            $liveIds = collect($publicSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id)->filter();
-            $matches = $liveIds->isNotEmpty()
-                ? $this->presentSearchProducts(
-                    $agent->customerProducts()->whereIn('id', $liveIds)->get(),
-                    $conversation,
-                )
-                : $localSearch();
+            // Live discovery refreshes product facts, but it must not replace
+            // the tenant's complete taxonomy index with a storefront's small
+            // or loosely matched text-search result set. Re-run the grounded
+            // local query after importing so category/genre membership remains
+            // authoritative for candidate selection.
+            $matches = $localSearch();
             $products = $matches->where('available', true)->values();
             $unavailableProducts = $matches->where('available', false)->values();
         }
@@ -174,6 +173,7 @@ class SalesToolbox
                     'sku' => $product->sku,
                     'author' => data_get($product->metadata, 'author'),
                     'genres' => array_values(array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar')),
+                    'taxonomy' => array_values(array_filter((array) data_get($product->metadata, 'taxonomy', []), 'is_scalar')),
                     'category' => $product->category,
                     'description' => $product->description,
                     'price' => (float) $product->price,
@@ -321,7 +321,7 @@ class SalesToolbox
             );
             $score = $relevance + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
 
-            $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance];
+            $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'taxonomy' => array_values(array_filter((array) data_get($p->metadata, 'taxonomy', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance];
             if ($result['stock_precision'] === 'exact') {
                 $result['stock'] = $available;
                 $result['available_stock'] = $available;

@@ -54,9 +54,23 @@ class PublicStorefrontCatalogTest extends TestCase
         app(KnowledgeIngestionService::class)->ingest($source);
 
         $product = $agent->products()->firstOrFail();
-        $this->assertSame(['თრილერი', 'მისტიკა'], data_get($product->metadata, 'genres'));
+        $this->assertSame([], data_get($product->metadata, 'genres'));
+        $this->assertSame(['თრილერი', 'მისტიკა'], data_get($product->metadata, 'taxonomy'));
         $this->assertStringContainsString('თრილერი', $product->search_text);
         $this->assertStringContainsString('მისტიკა', $product->search_text);
+
+        $categorySource = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'კატეგორია: ცომეული',
+            'url' => 'https://bukinistebi.ge/books',
+            'status' => 'ready',
+        ]);
+        app(KnowledgeIngestionService::class)->ingest($categorySource);
+
+        $this->assertEqualsCanonicalizing(
+            ['თრილერი', 'მისტიკა', 'ცომეული'],
+            data_get($product->fresh()->metadata, 'taxonomy'),
+        );
     }
 
     public function test_public_storefront_url_discovers_and_verifies_a_product_without_store_code(): void
@@ -171,7 +185,7 @@ class PublicStorefrontCatalogTest extends TestCase
         ]);
     }
 
-    public function test_public_search_trusts_the_dedicated_results_grid_even_when_the_match_is_in_hidden_store_data(): void
+    public function test_public_search_imports_dedicated_results_but_does_not_show_them_without_indexed_relevance(): void
     {
         [$agent, $conversation] = $this->context();
         $actualResult = str_replace(
@@ -200,7 +214,7 @@ class PublicStorefrontCatalogTest extends TestCase
             'max_price' => null,
         ], $agent, $conversation);
 
-        $this->assertSame('ნომერი პირველი', data_get($result, 'products.0.name'));
+        $this->assertSame([], $result['products']);
         $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'name' => 'ნომერი პირველი']);
         $this->assertDatabaseMissing('products', ['agent_id' => $agent->id, 'name' => 'დათა თუთაშხია']);
     }
@@ -241,6 +255,58 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertSame('ფილოსოფიური ეტიუდები', data_get($result, 'recommendations.0.name'));
         $this->assertSame('შალვა ნუცუბიძე', data_get($result, 'recommendations.0.author'));
         $this->assertGreaterThan(0, data_get($result, 'recommendations.0.score'));
+    }
+
+    public function test_live_text_search_never_replaces_complete_genre_matches_with_unrelated_cards(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $firstThriller = $agent->products()->create([
+            'name' => 'პირველი თრილერი',
+            'sku' => 'THRILLER-1',
+            'category' => 'წიგნები',
+            'search_text' => 'პირველი თრილერი',
+            'price' => 20,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['genres' => ['თრილერი']],
+        ]);
+        $secondThriller = $agent->products()->create([
+            'name' => 'მეორე თრილერი',
+            'sku' => 'THRILLER-2',
+            'category' => 'წიგნები',
+            'search_text' => 'მეორე თრილერი',
+            'price' => 22,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => ['genres' => ['თრილერი']],
+        ]);
+        $schoolCard = str_replace(
+            ['საიუბილეო საარქივო გამოცემა', 'პაოლო იაშვილი'],
+            ['სასკოლო მოთხრობები', 'სხვა ავტორი'],
+            $this->searchCardsHtml(),
+        );
+        Http::fake(function ($request) use ($schoolCard) {
+            if (str_contains($request->url(), '/search?title=')) {
+                return Http::response('<div id="search-results">'.$schoolCard.'</div>');
+            }
+            if (str_contains($request->url(), '/books/paolo-iashvili/42')) {
+                return Http::response('<div class="product-price"><strong>14 ₾</strong></div>');
+            }
+
+            return Http::response([], 404);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'თრილერი',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertEqualsCanonicalizing(
+            [$firstThriller->id, $secondThriller->id],
+            collect($result['products'])->pluck('id')->all(),
+        );
+        $this->assertNotContains('სასკოლო მოთხრობები', collect($result['products'])->pluck('name')->all());
     }
 
     public function test_natural_lookup_uses_store_suggestions_and_hides_sold_out_duplicate_when_available_exists(): void

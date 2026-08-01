@@ -495,16 +495,19 @@ class KnowledgeIngestionService
                 ? $source->agent->products()->where('sku', $sku)->first()
                 : $source->agent->products()->where('name', $values['name'])->first();
             if ($existing) {
-                $values['metadata']['genres'] = collect((array) data_get($existing->metadata, 'genres', []))
-                    ->merge((array) data_get($values, 'metadata.genres', []))
-                    ->filter(fn ($genre): bool => is_scalar($genre) && trim((string) $genre) !== '')
-                    ->map(fn ($genre): string => trim((string) $genre))
-                    ->unique(fn (string $genre): string => Str::lower($genre))
-                    ->values()
-                    ->all();
+                foreach (['genres', 'taxonomy'] as $metadataKey) {
+                    $values['metadata'][$metadataKey] = collect((array) data_get($existing->metadata, $metadataKey, []))
+                        ->merge((array) data_get($values, "metadata.{$metadataKey}", []))
+                        ->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
+                        ->map(fn ($value): string => trim((string) $value))
+                        ->unique(fn (string $value): string => Str::lower($value))
+                        ->values()
+                        ->all();
+                }
                 $values['search_text'] = $this->searchableProductText([
                     $values['search_text'],
                     $values['metadata']['genres'],
+                    $values['metadata']['taxonomy'],
                 ]);
                 $existing->update($values);
                 $updated++;
@@ -720,10 +723,15 @@ class KnowledgeIngestionService
         }
 
         $author = $this->catalogText($product['author'] ?? $product['brand']['name'] ?? null, 255) ?: null;
-        $genres = collect($this->searchableValues(
+        $genres = $this->searchableValues(
             $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [],
             120,
-        ))->merge($this->sourceTaxonomy($source))->unique(fn (string $value): string => Str::lower($value))->values()->all();
+        );
+        $taxonomy = collect($genres)
+            ->merge($this->sourceTaxonomy($source))
+            ->unique(fn (string $value): string => Str::lower($value))
+            ->values()
+            ->all();
         $isbn = $this->catalogText($product['isbn'] ?? $product['isbn_13'] ?? $product['isbn_10'] ?? null, 32) ?: null;
         $category = $this->catalogText($product['category'] ?? null, 255) ?: null;
         $description = $this->catalogText($product['description'] ?? null, 4000) ?: null;
@@ -734,7 +742,7 @@ class KnowledgeIngestionService
             'category' => $category,
             'description' => $description,
             'search_text' => $this->searchableProductText([
-                $name, $sku, $category, $author, $genres, $isbn,
+                $name, $sku, $category, $author, $taxonomy, $isbn,
                 $product['publisher'] ?? null, $description,
             ]),
             'price' => $price,
@@ -748,6 +756,7 @@ class KnowledgeIngestionService
                 'external_id' => $this->catalogText($product['id'] ?? null, 191) ?: null,
                 'author' => $author,
                 'genres' => $genres,
+                'taxonomy' => $taxonomy,
                 'isbn' => $isbn,
                 'currency' => $currency,
                 'original_price' => $originalPrice,

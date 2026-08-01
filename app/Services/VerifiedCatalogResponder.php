@@ -408,11 +408,18 @@ class VerifiedCatalogResponder
         }
 
         $taxonomy = collect((array) data_get($seed->metadata, 'genres', []))
+            ->merge((array) data_get($seed->metadata, 'taxonomy', []))
+            ->merge((array) data_get($seed->metadata, 'tags', []))
+            ->merge((array) data_get($seed->metadata, 'product_types', []))
+            ->merge(array_filter([data_get($seed->metadata, 'product_type')]))
             ->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
             ->map(fn ($value): string => trim((string) $value))
+            ->unique(fn (string $value): string => Str::lower($value))
             ->values();
         $category = trim((string) $seed->category);
-        $query = $taxonomy->isNotEmpty() ? $taxonomy->implode(' ') : $category;
+        $query = $taxonomy->isNotEmpty()
+            ? $taxonomy->implode(' ')
+            : ($this->categoryIsSpecificEnough($agent, $category) ? $category : '');
         if ($query === '') {
             return null;
         }
@@ -467,6 +474,27 @@ class VerifiedCatalogResponder
                 ->values()->all(),
             'tools_used' => ['search_products', 'check_stock', 'recommend_products'],
         ];
+    }
+
+    private function categoryIsSpecificEnough(Agent $agent, string $category): bool
+    {
+        if ($category === '') {
+            return false;
+        }
+
+        $products = $agent->customerProducts()->where('is_active', true);
+        $total = (clone $products)->count();
+        if ($total === 0) {
+            return false;
+        }
+
+        $sameCategory = (clone $products)->whereRaw('LOWER(products.category) = ?', [Str::lower($category)])->count();
+        $distinctCategories = (clone $products)->whereNotNull('category')->distinct()->count('category');
+
+        // A category attached to nearly the whole catalogue (for example
+        // "Books" in a bookstore) is a business type, not a useful similarity
+        // constraint. Require a narrower taxonomy signal before substituting.
+        return $distinctCategories > 1 && ($total < 10 || $sameCategory / $total < .6);
     }
 
     private function recentProducts(Agent $agent, Conversation $conversation)
