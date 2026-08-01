@@ -980,7 +980,7 @@ class KnowledgeIngestionService
         return ['host' => $parts['host'], 'port' => $port, 'ip' => $ips[0]];
     }
 
-    public function fetchPublicUrl(string $url, array $headers = [])
+    public function fetchPublicUrl(string $url, array $headers = [], int $timeout = 20, int $retries = 2)
     {
         $maximumBytes = 5_000_000;
         for ($redirect = 0; $redirect <= 3; $redirect++) {
@@ -1004,7 +1004,10 @@ class KnowledgeIngestionService
                         throw new \RuntimeException('Page exceeds the 5 MB safety limit.');
                     }
                 },
-            ])->timeout(20)->retry(2, 300)->withoutRedirecting()->withHeaders(array_merge([
+            ])->connectTimeout(min(3, max(1, $timeout)))
+                ->timeout(max(1, $timeout))
+                ->retry(max(1, $retries), 300)
+                ->withoutRedirecting()->withHeaders(array_merge([
                 'User-Agent' => 'LegatusKnowledgeBot/1.0',
             ], $headers))->get($url);
             if ($response->redirect()) {

@@ -32,6 +32,8 @@ class PublicStorefrontCatalog
                 $searchPage = $this->ingestion->fetchPublicUrl(
                     $origin.'/search?title='.rawurlencode($candidate),
                     ['Accept' => 'text/html'],
+                    5,
+                    1,
                 );
                 $dedicatedResults = $this->ingestion->hasDedicatedStorefrontSearchResults($searchPage->body());
                 $products = $this->ingestion->storefrontProductsFromHtml(
@@ -64,6 +66,8 @@ class PublicStorefrontCatalog
                 $response = $this->ingestion->fetchPublicUrl(
                     $origin.'/search/suggest?q='.rawurlencode($candidate),
                     ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'],
+                    5,
+                    1,
                 );
                 $candidatePayload = $response->json();
             } catch (\Throwable $exception) {
@@ -87,14 +91,14 @@ class PublicStorefrontCatalog
         }
 
         $products = [];
-        foreach (collect($payload['items'])->filter(fn ($item): bool => is_array($item))->take(12) as $item) {
+        foreach (collect($payload['items'])->filter(fn ($item): bool => is_array($item))->take(3) as $item) {
             $url = is_string($item['url'] ?? null) ? trim($item['url']) : '';
             if (! $this->sameOriginProductUrl($url, $parts)) {
                 continue;
             }
 
             try {
-                $detail = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html']);
+                $detail = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html'], 5, 1);
                 foreach ($this->ingestion->structuredProductsFromHtml($detail->body()) as $product) {
                     $product['url'] ??= $url;
                     if (empty($product['sku']) && preg_match('#/(\d+)(?:\?.*)?$#', $url, $idMatch)) {
@@ -210,7 +214,7 @@ class PublicStorefrontCatalog
             ->merge(collect($tokens)->sortByDesc(fn (string $token): int => mb_strlen($token)))
             ->filter(fn (string $candidate): bool => mb_strlen($candidate) >= 3)
             ->unique()
-            ->take(8)
+            ->take(3)
             ->values()
             ->all();
     }
