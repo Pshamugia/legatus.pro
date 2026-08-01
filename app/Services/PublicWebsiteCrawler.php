@@ -94,7 +94,12 @@ class PublicWebsiteCrawler
                         ->count();
                 }
 
-                $this->storeReadablePage($source, $url, $body, $products !== []);
+                // Named category/genre sources are lightweight product indexes.
+                // The listing pages already define membership, so crawling and
+                // embedding every linked detail page would duplicate the site.
+                if (! $taxonomyOnly) {
+                    $this->storeReadablePage($source, $url, $body, $products !== []);
+                }
 
                 foreach ($this->discoverLinks($body, $url, $products, $taxonomyOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
@@ -114,18 +119,30 @@ class PublicWebsiteCrawler
             // touched during this run retain their embeddings; only content
             // absent from a successfully completed crawl is retired here.
             $source->chunks()->where('updated_at', '<', $crawlStartedAt)->delete();
-            $source->agent->products()
-                ->where('metadata->source_id', $source->id)
-                ->where('updated_at', '<', $crawlStartedAt)
-                ->update(['is_active' => false]);
-            $productCount = $source->agent->products()
-                ->where('metadata->source_id', $source->id)
-                ->where('is_active', true)
-                ->count();
+            if ($taxonomyOnly) {
+                // A product may be owned by the main catalog and belong to many
+                // taxonomy sources. Product chunks are that membership mapping.
+                $productCount = $source->chunks()
+                    ->where('kind', 'product')
+                    ->get(['metadata'])
+                    ->pluck('metadata.product_id')
+                    ->filter()
+                    ->unique()
+                    ->count();
+            } else {
+                $source->agent->products()
+                    ->where('metadata->source_id', $source->id)
+                    ->where('updated_at', '<', $crawlStartedAt)
+                    ->update(['is_active' => false]);
+                $productCount = $source->agent->products()
+                    ->where('metadata->source_id', $source->id)
+                    ->where('is_active', true)
+                    ->count();
+            }
 
             $source->update([
-                'status' => config('services.openai.key') ? 'processing' : 'ready',
-                'progress' => config('services.openai.key') ? 96 : 100,
+                'status' => config('services.openai.key') && ! $taxonomyOnly ? 'processing' : 'ready',
+                'progress' => config('services.openai.key') && ! $taxonomyOnly ? 96 : 100,
                 'items_found' => $productCount,
                 'items_created' => $created,
                 'items_updated' => $updated,
@@ -135,7 +152,7 @@ class PublicWebsiteCrawler
                     ? null
                     : "Crawl reached the configured {$maximumPages}-page safety limit.",
             ]);
-            if (config('services.openai.key')) {
+            if (config('services.openai.key') && ! $taxonomyOnly) {
                 EmbedKnowledgeSource::dispatch($source->id);
             }
         } catch (\Throwable $exception) {
@@ -209,8 +226,10 @@ class PublicWebsiteCrawler
         $xpath = new \DOMXPath($dom);
         $links = [];
 
-        foreach ($products as $product) {
-            $links[] = $product['url'] ?? data_get($product, 'offers.url');
+        if (! $taxonomyOnly) {
+            foreach ($products as $product) {
+                $links[] = $product['url'] ?? data_get($product, 'offers.url');
+            }
         }
 
         $linkQuery = $taxonomyOnly

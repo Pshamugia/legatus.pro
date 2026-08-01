@@ -73,7 +73,11 @@ class KnowledgeController extends Controller
             $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
             CrawlPublicWebsite::dispatch($source->id);
 
-            return back()->with('success', 'The complete public website is now being re-indexed in the background.');
+            $message = $ingestion->taxonomyForSource($source) !== []
+                ? 'The category index is updating in the background. Only its listing pages will be checked.'
+                : 'The complete public website is now being re-indexed in the background.';
+
+            return back()->with('success', $message);
         }
         try {
             $ingestion->ingest($source);

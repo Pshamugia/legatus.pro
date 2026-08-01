@@ -559,14 +559,14 @@ HTML;
         $this->get('/app/knowledge')->assertOk()->assertSee('Knowledge sources');
     }
 
-    public function test_manual_url_sync_always_queues_a_fresh_complete_crawl(): void
+    public function test_manual_taxonomy_sync_queues_only_its_category_index(): void
     {
         Queue::fake();
         $this->seed();
         $user = User::firstOrFail();
         $source = Agent::firstOrFail()->knowledgeSources()->create([
             'type' => 'url',
-            'name' => 'Complete catalog',
+            'name' => 'genre: thriller',
             'url' => 'https://bukinistebi.ge/books',
             'status' => 'ready',
             'progress' => 100,
@@ -576,7 +576,7 @@ HTML;
         $this->actingAs($user)
             ->post(route('knowledge.sync', $source))
             ->assertRedirect()
-            ->assertSessionHas('success', 'The complete public website is now being re-indexed in the background.');
+            ->assertSessionHas('success', 'The category index is updating in the background. Only its listing pages will be checked.');
 
         $source->refresh();
         $this->assertSame('processing', $source->status);

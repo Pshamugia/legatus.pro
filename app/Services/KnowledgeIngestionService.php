@@ -495,6 +495,12 @@ class KnowledgeIngestionService
                 ? $source->agent->products()->where('sku', $sku)->first()
                 : $source->agent->products()->where('name', $values['name'])->first();
             if ($existing) {
+                // Taxonomy URLs classify an existing catalog product; they do
+                // not take ownership of it away from the source that created it.
+                if ($this->sourceTaxonomy($source) !== []) {
+                    $values['metadata']['source_id'] = data_get($existing->metadata, 'source_id');
+                    $values['metadata']['source_url'] = data_get($existing->metadata, 'source_url');
+                }
                 foreach (['genres', 'taxonomy'] as $metadataKey) {
                     $values['metadata'][$metadataKey] = collect((array) data_get($existing->metadata, $metadataKey, []))
                         ->merge((array) data_get($values, "metadata.{$metadataKey}", []))

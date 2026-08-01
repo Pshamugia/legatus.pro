@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\EmbedKnowledgeSource;
 use App\Models\Agent;
 use App\Services\PublicWebsiteCrawler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class PublicWebsiteCrawlerTest extends TestCase
@@ -77,8 +79,9 @@ class PublicWebsiteCrawlerTest extends TestCase
 
     public function test_taxonomy_url_stays_inside_its_collection_and_never_crawls_the_whole_domain(): void
     {
+        Queue::fake();
         $this->seed();
-        config(['services.openai.key' => null, 'legatus.public_crawl_max_pages' => 5000]);
+        config(['services.openai.key' => 'test-key', 'legatus.public_crawl_max_pages' => 5000]);
         $agent = Agent::firstOrFail();
         $source = $agent->knowledgeSources()->create([
             'type' => 'url',
@@ -108,8 +111,51 @@ class PublicWebsiteCrawlerTest extends TestCase
 
         $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'T-1']);
         $this->assertSame(['თრილერი', 'მისტიკა'], data_get($agent->products()->where('sku', 'T-1')->firstOrFail()->metadata, 'taxonomy'));
+        $this->assertSame('ready', $source->fresh()->status);
+        $this->assertSame(100, $source->fresh()->progress);
+        $this->assertSame(1, $source->fresh()->items_found);
+        $this->assertSame(1, $source->chunks()->count());
+        $this->assertSame('product', $source->chunks()->firstOrFail()->kind);
+        Queue::assertNotPushed(EmbedKnowledgeSource::class);
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'sitemap')
-            || str_contains($request->url(), '/unrelated/'));
+            || str_contains($request->url(), '/unrelated/')
+            || str_contains($request->url(), '/products/thriller/'));
+    }
+
+    public function test_taxonomy_sync_removes_legacy_passages_and_counts_shared_products(): void
+    {
+        $this->seed();
+        config(['services.openai.key' => null]);
+        $agent = Agent::firstOrFail();
+        $mainSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Main catalog', 'url' => 'https://bukinistebi.ge/products',
+        ]);
+        $product = $agent->products()->create([
+            'name' => 'Shared thriller', 'sku' => 'S-1', 'price' => 20, 'stock' => 1,
+            'is_active' => true, 'metadata' => ['source_id' => $mainSource->id],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'genre: thriller', 'url' => 'https://bukinistebi.ge/thrillers',
+        ]);
+        $legacyChunk = $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'webpage', 'title' => 'Legacy duplicate',
+            'content' => str_repeat('legacy passage ', 100), 'content_hash' => hash('sha256', 'legacy'),
+        ]);
+        $legacyChunk->update(['created_at' => now()->subDay(), 'updated_at' => now()->subDay()]);
+        Http::fake([
+            'https://bukinistebi.ge/thrillers' => Http::response(
+                $this->catalogPage('Shared thriller', 'S-1', 20, '/products/shared/1'),
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+        ]);
+
+        app(PublicWebsiteCrawler::class)->crawl($source);
+
+        $this->assertSame($mainSource->id, data_get($product->fresh()->metadata, 'source_id'));
+        $this->assertSame(1, $source->fresh()->items_found);
+        $this->assertSame(1, $source->chunks()->count());
+        $this->assertFalse($source->chunks()->where('kind', 'webpage')->exists());
     }
 
     public function test_unchanged_pages_keep_their_existing_embeddings_during_incremental_sync(): void
