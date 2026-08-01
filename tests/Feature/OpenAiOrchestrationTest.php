@@ -88,7 +88,7 @@ class OpenAiOrchestrationTest extends TestCase
             $conversation,
         );
 
-        $this->assertSame('clarification', $reply['intent']);
+        $this->assertSame('clarification', $reply['intent'], json_encode($reply, JSON_UNESCAPED_UNICODE));
         $this->assertDatabaseHas('agent_runs', [
             'conversation_id' => $conversation->id,
             'provider' => 'openai',
@@ -163,6 +163,57 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString('light and entertaining', $reply['text']);
         $this->assertSame([], $reply['products']->all());
         $this->assertSame(['recommend_products'], $reply['tools_used']);
+    }
+
+    public function test_verified_catalog_typo_suggestion_cannot_be_ignored_by_the_model(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Real catalog', 'url' => 'https://shop.example/catalog', 'status' => 'ready',
+        ]);
+        $product = $agent->products()->create([
+            'name' => 'ვეფხისტყაოსანი', 'sku' => 'TYPO-TITLE-1', 'search_text' => 'ვეფხისტყაოსანი შოთა რუსთაველი',
+            'price' => 15, 'stock' => 1, 'is_active' => true, 'metadata' => ['source_id' => $source->id, 'author' => 'შოთა რუსთაველი'],
+        ]);
+        $conversation = $agent->conversations()->create(['visitor_id' => 'title-typo-customer', 'status' => 'ai', 'channel' => 'widget']);
+        config(['services.openai.key' => 'test-key']);
+        $responseCall = 0;
+        Http::fake(function ($request) use (&$responseCall) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                $responseCall++;
+                if ($responseCall === 1) {
+                    return Http::response(['id' => 'typo-tool', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'typo-call',
+                        'arguments' => json_encode(['query' => 'ვეფხვისტყაოსანი', 'budget' => null, 'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 3]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'typo-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'ამ პასუხის სანდოდ გადამოწმება ვერ შევძელი.', 'intent' => 'recommendation', 'confidence' => .99,
+                        'handoff' => false, 'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                    ], JSON_UNESCAPED_UNICODE)]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $toolResult = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'ვეფხვისტყაოსანი', 'budget' => null, 'category' => null,
+            'mood' => null, 'occasion' => null, 'limit' => 3,
+        ], $agent, $conversation);
+        $this->assertSame('ვეფხისტყაოსანი', $toolResult['did_you_mean'] ?? null, json_encode($toolResult, JSON_UNESCAPED_UNICODE));
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'ვეფხვისტყაოსანი გაქვთ?', $conversation);
+
+        $this->assertSame('clarification', $reply['intent'], json_encode($reply, JSON_UNESCAPED_UNICODE));
+        $this->assertStringContainsString('ვეფხისტყაოსანი', $reply['text']);
+        $this->assertStringNotContainsString('სანდოდ გადამოწმება ვერ შევძელი', $reply['text']);
     }
 
     public function test_agent_executes_a_catalog_tool_and_returns_structured_output(): void

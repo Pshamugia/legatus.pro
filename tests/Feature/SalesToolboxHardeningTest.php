@@ -300,6 +300,40 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertTrue($result['suggestion_requires_confirmation']);
     }
 
+    public function test_product_search_suggests_a_long_georgian_title_with_one_inserted_letter(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'ვეფხისტყაოსანი',
+            'description' => 'შოთა რუსთაველის პოემა',
+            'search_text' => 'ვეფხისტყაოსანი შოთა რუსთაველი',
+            'metadata' => ['author' => 'შოთა რუსთაველი'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ვეფხვისტყაოსანი გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame('ვეფხისტყაოსანი', $result['did_you_mean']);
+        $this->assertTrue($result['suggestion_requires_confirmation']);
+
+        $recommendation = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'ვეფხვისტყაოსანი',
+            'budget' => null,
+            'category' => null,
+            'mood' => null,
+            'occasion' => null,
+            'limit' => 3,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $recommendation['recommendations']);
+        $this->assertSame('ვეფხისტყაოსანი', $recommendation['did_you_mean']);
+        $this->assertTrue($recommendation['suggestion_requires_confirmation']);
+    }
+
     public function test_local_typo_suggestions_are_near_match_only_and_tenant_isolated(): void
     {
         [$agent, , $conversation] = $this->context(stock: 4);

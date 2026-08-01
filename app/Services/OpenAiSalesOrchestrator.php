@@ -99,8 +99,31 @@ class OpenAiSalesOrchestrator
             $data['product_ids'] = [];
             $data['factual_claims'] = [];
         }
+        $verifiedSuggestion = $usedCollection
+            ->filter(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true))
+            ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
+            ->pluck('result.did_you_mean')
+            ->filter(fn ($suggestion): bool => is_string($suggestion) && trim($suggestion) !== '')
+            ->last();
+        if (is_string($verifiedSuggestion)) {
+            $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
+            $data['text'] = $georgian
+                ? "გულისხმობდით „{$verifiedSuggestion}“-ს? თუ დამიდასტურებთ, ზუსტად ამ სახელით მოვძებნი."
+                : "Did you mean “{$verifiedSuggestion}”? Confirm it and I will search for that exact name.";
+            $data['intent'] = 'clarification';
+            $data['confidence'] = 1;
+            $data['handoff'] = false;
+            $data['escalation_reason'] = null;
+            $data['product_ids'] = [];
+            $data['factual_claims'] = [];
+        }
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
+        if (is_string($verifiedSuggestion) && ($data['intent'] ?? null) === 'clarification') {
+            // did_you_mean is already tenant-scoped and edit-distance validated
+            // by the server. Mentioning it as a question is not a product claim.
+            $escalationReason = null;
+        }
         $verifiedAvailability = $this->verifiedAvailabilityReply($message, $usedCollection, $data);
         if ($verifiedAvailability !== null) {
             $data = $verifiedAvailability;

@@ -449,7 +449,11 @@ class SalesToolbox
             });
         RecommendationEvent::create(['conversation_id' => $c->id, 'query' => PrivacyRedactor::structured($a), 'ranked_products' => PrivacyRedactor::structured($ranked->all())]);
 
-        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'recommendations' => $ranked->all()];
+        $didYouMean = $ranked->isEmpty()
+            ? $this->validatedSearchSuggestion($criteria, $this->nearestCatalogSuggestion($agent, $termGroups))
+            : null;
+
+        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'recommendations' => $ranked->all(), 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
     }
 
     private function compare(Agent $agent, Conversation $conversation, array $a): array
