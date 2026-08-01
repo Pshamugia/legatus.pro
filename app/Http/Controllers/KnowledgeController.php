@@ -25,6 +25,29 @@ class KnowledgeController extends Controller
         return view('knowledge', compact('agent', 'sources'));
     }
 
+    public function status(TenantContext $tenant)
+    {
+        $sources = $tenant->agent()->knowledgeSources()
+            ->select(['id', 'name', 'source_scope', 'status', 'progress', 'items_found', 'error', 'last_synced_at'])
+            ->latest()
+            ->get()
+            ->map(fn (KnowledgeSource $source): array => [
+                'id' => $source->id,
+                'name' => $source->name,
+                'scope' => $source->source_scope,
+                'status' => $source->status,
+                'progress' => (int) $source->progress,
+                'items_found' => (int) $source->items_found,
+                'error' => $source->error,
+                'last_synced_at' => $source->last_synced_at?->toIso8601String(),
+            ]);
+
+        return response()->json([
+            'sources' => $sources,
+            'processing' => $sources->where('status', 'processing')->count(),
+        ]);
+    }
+
     public function store(Request $r, KnowledgeIngestionService $ingestion, TenantContext $tenant)
     {
         $tenant->authorize(['owner', 'admin']);

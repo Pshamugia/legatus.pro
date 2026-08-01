@@ -85,6 +85,9 @@ Route::middleware('auth')->group(function () {
     Route::post('/onboarding', [AgentController::class, 'store'])->name('onboarding.store');
     Route::post('/conversations/{conversation}/handoff', [ChatController::class, 'handoff'])->name('chat.handoff');
     Route::get('/app/knowledge', [KnowledgeController::class, 'index'])->name('knowledge.index');
+    Route::get('/app/knowledge/status', [KnowledgeController::class, 'status'])
+        ->middleware('throttle:60,1')
+        ->name('knowledge.status');
     Route::post('/app/knowledge', [KnowledgeController::class, 'store'])->name('knowledge.store');
     Route::post('/app/knowledge/{source}/sync', [KnowledgeController::class, 'sync'])->name('knowledge.sync');
     Route::delete('/app/knowledge/{source}', [KnowledgeController::class, 'destroy'])->name('knowledge.destroy');

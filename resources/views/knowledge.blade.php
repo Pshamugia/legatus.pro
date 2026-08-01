@@ -46,17 +46,17 @@
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
     <div class="knowledge-heading">
         <h3>Connected knowledge</h3>
-        <span class="channel">Live catalog search enabled · {{ number_format($agent->products()->where('is_active', true)->count()) }} products currently cached · {{ number_format($sources->sum('chunks_count')) }} searchable passages</span>
+        <span class="channel" id="knowledge-live-summary">Live catalog search enabled · {{ number_format($agent->products()->where('is_active', true)->count()) }} products currently cached · {{ number_format($sources->sum('chunks_count')) }} searchable passages</span>
     </div>
     @forelse($sources as $source)
         @php($fixture = ! $source->isRefreshable())
         <div class="conversation knowledge-source-row" data-source-row="{{ $source->id }}">
             <span class="avatar" style="width:40px;height:40px;background:{{ $source->status==='ready'?'#e8f7d8':'#f3eee1' }};color:var(--ink)">{{ strtoupper(substr($source->type,0,1)) }}</span>
             <div class="copy knowledge-source-copy">
-                <strong>{{ $source->name }}</strong>
-                @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill">{{ $source->status }}</span>@endif
+                <strong data-source-name>{{ $source->name }}</strong>
+                @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill" data-source-status>{{ $source->status }}</span>@endif
                 @if($source->type === 'url')
-                    <p><b>{{ $source->status === 'processing' ? 'Learning the complete public website' : 'Complete public-site knowledge' }}</b> · {{ number_format($source->items_found) }} products indexed · {{ number_format($source->chunks_count) }} searchable passages</p>
+                    <p><b>{{ $source->status === 'processing' ? 'Learning the complete public website' : 'Complete public-site knowledge' }}</b> · <span data-source-items>{{ number_format($source->items_found) }}</span> products indexed · {{ number_format($source->chunks_count) }} searchable passages</p>
                 @else
                     <p>{{ $source->items_found }} indexed in last sync · {{ $source->items_created }} created · {{ $source->items_updated }} updated · {{ $source->chunks_count }} chunks</p>
                 @endif
@@ -74,7 +74,8 @@
                         Lexical search available
                     @endif
                 </p>
-                <div class="progress" style="background:#edf1ed;width:260px"><i style="width:{{ $source->progress }}%"></i></div>
+                <div class="progress" style="background:#edf1ed;width:260px"><i data-source-progress style="width:{{ $source->progress }}%"></i></div>
+                <p class="channel" data-source-error style="margin-top:4px;color:#a43b32">{{ $source->error }}</p>
             </div>
             <div class="knowledge-source-actions">
                 <span class="channel">{{ $fixture ? 'Static fixture · no source payload' : ($source->last_synced_at?->diffForHumans() ?? 'Not synced') }}</span>
@@ -92,6 +93,8 @@
 </section></main></div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 const categoryFields=document.querySelector('#category-fields'),addCategory=document.querySelector('#add-category'),structureForm=document.querySelector('#website-structure-form'),structureStatus=document.querySelector('#website-structure-status');
+const knowledgeStatusUrl=@json(route('knowledge.status'));
+let trackedSourceIds=[];
 let categoryIndex=0;
 function appendCategory(){
     const row=document.createElement('div');
@@ -112,7 +115,9 @@ structureForm.addEventListener('submit',async event=>{
         const response=await fetch(structureForm.action,{method:'POST',headers:{Accept:'application/json'},body:new FormData(structureForm)});
         const payload=await response.json();
         if(!response.ok)throw new Error(payload.message||'Could not save the website structure.');
-        structureStatus.textContent=payload.message+' You can keep working on this page.';
+        trackedSourceIds=payload.source_ids||[];
+        structureStatus.textContent=payload.message+' Live progress will appear here; you can keep working on this page.';
+        scheduleKnowledgeStatus(300);
     }catch(error){structureStatus.textContent=error.message;}finally{button.disabled=false;}
 });
 document.querySelectorAll('.async-source-action').forEach(form=>form.addEventListener('submit',async event=>{
@@ -129,9 +134,41 @@ document.querySelectorAll('.async-source-action').forEach(form=>form.addEventLis
             const pill=row.querySelector('.pill');
             if(pill)pill.textContent='processing';
             button.textContent='Queued';
+            trackedSourceIds=[Number(row.dataset.sourceRow)];
+            scheduleKnowledgeStatus(300);
         }
     }catch(error){button.textContent=original;button.disabled=false;structureStatus.textContent=error.message;}
 }));
+let knowledgeStatusTimer=null,knowledgeStatusBusy=false;
+function scheduleKnowledgeStatus(delay=3000){
+    clearTimeout(knowledgeStatusTimer);
+    knowledgeStatusTimer=setTimeout(refreshKnowledgeStatus,delay);
+}
+async function refreshKnowledgeStatus(){
+    if(knowledgeStatusBusy)return;
+    knowledgeStatusBusy=true;
+    try{
+        const response=await fetch(knowledgeStatusUrl,{headers:{Accept:'application/json'},cache:'no-store'});
+        if(!response.ok)throw new Error('Live synchronization status is temporarily unavailable.');
+        const payload=await response.json();
+        payload.sources.forEach(source=>{
+            const row=document.querySelector(`[data-source-row="${source.id}"]`);
+            if(!row)return;
+            const status=row.querySelector('[data-source-status]'),progress=row.querySelector('[data-source-progress]'),items=row.querySelector('[data-source-items]'),error=row.querySelector('[data-source-error]');
+            if(status)status.textContent=source.status;
+            if(progress)progress.style.width=`${source.progress}%`;
+            if(items)items.textContent=new Intl.NumberFormat().format(source.items_found);
+            if(error)error.textContent=source.error||'';
+        });
+        if(trackedSourceIds.length){
+            const tracked=payload.sources.filter(source=>trackedSourceIds.includes(source.id));
+            structureStatus.textContent=tracked.map(source=>`${source.name}: ${source.progress}% (${source.status})`).join(' · ');
+            if(tracked.length&&tracked.every(source=>source.status!=='processing'))trackedSourceIds=[];
+        }
+        if(payload.processing>0)scheduleKnowledgeStatus();
+    }catch(error){structureStatus.textContent=error.message;scheduleKnowledgeStatus(10000);}finally{knowledgeStatusBusy=false;}
+}
+if(document.querySelector('[data-source-status]'))scheduleKnowledgeStatus(1000);
 const radios=document.querySelectorAll('input[name=type]'),file=document.querySelector('#file-field'),upload=file.querySelector('input[type=file]'),uploadLabel=file.querySelector('label');
 radios.forEach(r=>r.addEventListener('change',()=>{
     if(!r.checked)return;

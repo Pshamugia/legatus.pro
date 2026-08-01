@@ -559,6 +559,24 @@ HTML;
         $this->get('/app/knowledge')->assertOk()->assertSee('Knowledge sources');
     }
 
+    public function test_live_knowledge_status_is_tenant_scoped_and_excludes_heavy_chunks(): void
+    {
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Thriller',
+            'name' => 'Category: Thriller', 'url' => 'https://shop.example/thriller',
+            'status' => 'processing', 'progress' => 42, 'items_found' => 17,
+        ]);
+
+        $this->actingAs($user)->getJson(route('knowledge.status'))
+            ->assertOk()
+            ->assertJsonPath('processing', 1)
+            ->assertJsonFragment(['id' => $source->id, 'progress' => 42])
+            ->assertJsonMissingPath('sources.0.chunks');
+    }
+
     public function test_business_can_save_catalog_unlimited_categories_and_optional_sitemap_without_page_reload(): void
     {
         Queue::fake();
