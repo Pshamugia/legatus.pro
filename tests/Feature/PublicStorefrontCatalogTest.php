@@ -313,8 +313,8 @@ class PublicStorefrontCatalogTest extends TestCase
     {
         [$agent, $conversation] = $this->context();
         config([
-            'legatus.semantic_orchestration_enabled' => true,
-            'services.openai.key' => 'must-not-be-called',
+            'legatus.semantic_orchestration_enabled' => false,
+            'services.openai.key' => null,
         ]);
         Http::fake(function ($request) {
             $path = (string) parse_url($request->url(), PHP_URL_PATH);

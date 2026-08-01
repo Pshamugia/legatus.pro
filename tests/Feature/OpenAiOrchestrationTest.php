@@ -109,6 +109,7 @@ class OpenAiOrchestrationTest extends TestCase
             'professional service question' => ['Which package fits a small company with five employees?'],
             'travel follow-up question' => ['Does that option include airport transfer too?'],
             'ambiguous contextual follow-up' => ['What can you tell me about this one?'],
+            'natural seasonal recommendation' => ['რა წიგნს მირჩევდი ზაფხულში საკითხავად?'],
         ];
     }
 
