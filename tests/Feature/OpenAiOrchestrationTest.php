@@ -113,6 +113,58 @@ class OpenAiOrchestrationTest extends TestCase
         ];
     }
 
+    public function test_empty_business_catalog_recommendation_cannot_be_replaced_with_general_model_knowledge(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'catalog-boundary-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        $responseCall = 0;
+        Http::fake(function ($request) use (&$responseCall) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                $responseCall++;
+                if ($responseCall === 1) {
+                    return Http::response(['id' => 'catalog-boundary-tool', 'output' => [[
+                        'type' => 'function_call',
+                        'name' => 'recommend_products',
+                        'call_id' => 'recommend-empty',
+                        'arguments' => json_encode(['query' => 'summer detective', 'budget' => null, 'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 3]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'catalog-boundary-final', 'output' => [[
+                    'type' => 'message',
+                    'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'Summer detective fiction is usually light and entertaining.',
+                        'intent' => 'recommendation',
+                        'confidence' => .92,
+                        'handoff' => false,
+                        'escalation_reason' => null,
+                        'product_ids' => [],
+                        'sources' => [],
+                        'factual_claims' => [],
+                    ], JSON_UNESCAPED_UNICODE)]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'ზაფხულისთვის კლასიკური დეტექტივი მირჩიე', $conversation);
+
+        $this->assertStringContainsString('ბიზნესის ვებსაიტზე', $reply['text']);
+        $this->assertStringNotContainsString('light and entertaining', $reply['text']);
+        $this->assertSame([], $reply['products']->all());
+        $this->assertSame(['recommend_products'], $reply['tools_used']);
+    }
+
     public function test_agent_executes_a_catalog_tool_and_returns_structured_output(): void
     {
         $this->seed();

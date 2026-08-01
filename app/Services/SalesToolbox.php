@@ -84,7 +84,8 @@ class SalesToolbox
             $a['category'] ?? null,
             (string) $a['query'],
         );
-        $localSearch = function () use ($agent, $conversation, $a, $termGroups, $taxonomyProductIds) {
+        $categoryIndexPending = $taxonomyProductIds === [];
+        $localSearch = function () use ($agent, $conversation, $a, $termGroups, &$taxonomyProductIds) {
             if ($termGroups === []) {
                 return collect();
             }
@@ -126,10 +127,18 @@ class SalesToolbox
         // do not silently become stale between scheduled full syncs.
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
         $storefrontQuery = $storefrontQueries[0] ?? trim((string) $a['query']);
-        $publicSearch = $taxonomyProductIds === null
+        $publicSearch = ($taxonomyProductIds === null || $taxonomyProductIds === [])
             ? $this->storefront->discover($agent, $storefrontQuery, array_slice($storefrontQueries, 1))
             : ['imported' => 0, 'product_ids' => [], 'source' => 'knowledge_category_index'];
         if (($publicSearch['imported'] ?? 0) > 0) {
+            if ($taxonomyProductIds === []) {
+                $taxonomyProductIds = collect($publicSearch['product_ids'] ?? [])
+                    ->map(fn ($id): int => (int) $id)
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+            }
             // Live discovery refreshes product facts, but it must not replace
             // the tenant's complete taxonomy index with a storefront's small
             // or loosely matched text-search result set. Re-run the grounded
@@ -165,7 +174,7 @@ class SalesToolbox
             'unavailable_products' => $unavailableProducts->all(),
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,
-            'category_index_pending' => $taxonomyProductIds !== null && $taxonomyProductIds === [],
+            'category_index_pending' => $categoryIndexPending && $products->isEmpty() && $unavailableProducts->isEmpty(),
         ];
     }
 
@@ -370,7 +379,7 @@ class SalesToolbox
         );
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
         $liveProductIds = collect();
-        if ($taxonomyProductIds === null && $storefrontQueries !== []) {
+        if (($taxonomyProductIds === null || $taxonomyProductIds === []) && $storefrontQueries !== []) {
             // Recommendation intent must search the live catalogue too. The
             // locally cached HTML snapshot may contain only the first page.
             $liveSearch = $this->storefront->discover(
@@ -381,11 +390,15 @@ class SalesToolbox
             $liveProductIds = collect($liveSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id);
         }
 
+        $candidateProductIds = $taxonomyProductIds === [] && $liveProductIds->isNotEmpty()
+            ? $liveProductIds->unique()->values()->all()
+            : $taxonomyProductIds;
+
         $query = $agent->customerProducts()->where('is_active', true);
-        if ($taxonomyProductIds !== null) {
-            $query->whereIn('products.id', $taxonomyProductIds);
+        if ($candidateProductIds !== null) {
+            $query->whereIn('products.id', $candidateProductIds);
         }
-        if (filled($a['category'] ?? null)) {
+        if ($candidateProductIds === null && filled($a['category'] ?? null)) {
             $query->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
                 $this->literalContainsPattern(Str::lower((string) $a['category'])),
             ]);

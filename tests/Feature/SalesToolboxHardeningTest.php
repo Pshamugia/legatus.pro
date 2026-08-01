@@ -618,6 +618,7 @@ class SalesToolboxHardeningTest extends TestCase
     public function test_unbuilt_category_queues_its_url_without_blocking_chat_or_returning_unrelated_products(): void
     {
         Queue::fake();
+        Http::fake(['*' => Http::response('<html><body>No matching products</body></html>')]);
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);
         $unrelated->update(['search_text' => 'fiction biography', 'metadata' => ['taxonomy' => ['Biography']]]);
         $source = $agent->knowledgeSources()->create([
