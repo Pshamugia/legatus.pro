@@ -12,17 +12,32 @@ use Illuminate\Validation\Rule;
 
 class KnowledgeController extends Controller
 {
-    public function index(TenantContext $tenant)
+    public function index(TenantContext $tenant, KnowledgeIngestionService $ingestion)
     {
         $agent = $tenant->agent();
         $sources = $agent->knowledgeSources()
-            // Never scan the large embedding JSON column on a page request.
-            // Semantic indexing progress is maintained by the background job.
-            ->withCount('chunks')
+            // Never count or scan the large knowledge_chunks table while
+            // rendering this control screen. Progress is stored on the source.
             ->latest()
             ->get();
+        $catalogSource = $sources->firstWhere('source_scope', 'catalog');
+        $sitemapSource = $sources->firstWhere('source_scope', 'sitemap');
+        $categorySources = $sources
+            ->map(function (KnowledgeSource $source) use ($ingestion): ?array {
+                $taxonomy = $ingestion->taxonomyForSource($source);
+                if ($source->source_scope !== 'category' && $taxonomy === []) {
+                    return null;
+                }
 
-        return view('knowledge', compact('agent', 'sources'));
+                return [
+                    'name' => $source->taxonomy_label ?: implode(', ', $taxonomy),
+                    'url' => $source->url,
+                ];
+            })
+            ->filter()
+            ->values();
+
+        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources'));
     }
 
     public function status(TenantContext $tenant)
@@ -52,7 +67,7 @@ class KnowledgeController extends Controller
     {
         $tenant->authorize(['owner', 'admin']);
         if ($r->input('mode') === 'website_structure') {
-            return $this->storeWebsiteStructure($r, $tenant);
+            return $this->storeWebsiteStructure($r, $tenant, $ingestion);
         }
 
         $data = $r->validate([
@@ -87,7 +102,7 @@ class KnowledgeController extends Controller
         }
     }
 
-    private function storeWebsiteStructure(Request $request, TenantContext $tenant)
+    private function storeWebsiteStructure(Request $request, TenantContext $tenant, KnowledgeIngestionService $ingestion)
     {
         $data = $request->validate([
             'catalog_url' => 'required|url|max:2000',
@@ -101,7 +116,7 @@ class KnowledgeController extends Controller
             ->unique(fn (array $category): string => mb_strtolower(trim($category['name'])).'|'.trim($category['url']))
             ->values();
         $agent = $tenant->agent();
-        $sourceIds = DB::transaction(function () use ($agent, $data, $categories): array {
+        $sourceIds = DB::transaction(function () use ($agent, $data, $categories, $ingestion): array {
             $sources = [];
             $catalog = $agent->knowledgeSources()->updateOrCreate(
                 ['source_scope' => 'catalog'],
@@ -111,10 +126,23 @@ class KnowledgeController extends Controller
 
             foreach ($categories as $category) {
                 $label = trim($category['name']);
-                $source = $agent->knowledgeSources()->updateOrCreate(
-                    ['source_scope' => 'category', 'taxonomy_label' => $label],
-                    ['type' => 'url', 'name' => "Category: {$label}", 'url' => trim($category['url']), 'status' => 'processing', 'progress' => 1, 'error' => null],
-                );
+                $source = $agent->knowledgeSources()
+                    ->where('source_scope', 'category')
+                    ->where('taxonomy_label', $label)
+                    ->first();
+                if (! $source) {
+                    $source = $agent->knowledgeSources()
+                        ->whereNull('source_scope')
+                        ->get()
+                        ->first(fn (KnowledgeSource $candidate): bool => collect($ingestion->taxonomyForSource($candidate))
+                            ->contains(fn (string $value): bool => mb_strtolower($value) === mb_strtolower($label)));
+                }
+                $source ??= new KnowledgeSource(['agent_id' => $agent->id]);
+                $source->fill([
+                    'source_scope' => 'category', 'taxonomy_label' => $label,
+                    'type' => 'url', 'name' => "Category: {$label}", 'url' => trim($category['url']),
+                    'status' => 'processing', 'progress' => 1, 'error' => null,
+                ])->save();
                 $sources[] = $source->id;
             }
 

@@ -11,6 +11,7 @@ use App\Services\KnowledgeIngestionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -559,6 +560,37 @@ HTML;
         $this->get('/app/knowledge')->assertOk()->assertSee('Knowledge sources');
     }
 
+    public function test_knowledge_screen_never_counts_or_scans_the_large_chunks_table(): void
+    {
+        $this->seed();
+        $queries = [];
+        DB::listen(function ($query) use (&$queries): void {
+            $queries[] = mb_strtolower($query->sql);
+        });
+
+        $this->actingAs(User::firstOrFail())->get(route('knowledge.index'))->assertOk();
+
+        $this->assertFalse(collect($queries)->contains(
+            fn (string $sql): bool => str_contains($sql, 'knowledge_chunks'),
+        ), 'Knowledge screen queried the large knowledge_chunks table.');
+    }
+
+    public function test_knowledge_form_restores_legacy_named_categories(): void
+    {
+        $this->seed();
+        $user = User::firstOrFail();
+        Agent::firstOrFail()->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Category: Thriller',
+            'url' => 'https://shop.example/category/thriller',
+        ]);
+
+        $this->actingAs($user)->get(route('knowledge.index'))
+            ->assertOk()
+            ->assertSee('Website catalog structure')
+            ->assertSee('Thriller');
+    }
+
     public function test_live_knowledge_status_is_tenant_scoped_and_excludes_heavy_chunks(): void
     {
         $this->seed();
@@ -633,6 +665,27 @@ HTML;
         $this->assertSame('https://shop.example/new-products', $catalog->fresh()->url);
         $this->assertSame($category->id, $agent->knowledgeSources()->where('source_scope', 'category')->sole()->id);
         $this->assertSame('https://shop.example/new-thriller', $category->fresh()->url);
+    }
+
+    public function test_saving_structure_adopts_legacy_category_instead_of_duplicating_it(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+        $legacy = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Genre: Thriller',
+            'url' => 'https://shop.example/old-thriller', 'status' => 'ready', 'progress' => 100,
+        ]);
+
+        $this->actingAs($user)->postJson(route('knowledge.store'), [
+            'mode' => 'website_structure',
+            'catalog_url' => 'https://shop.example/products',
+            'categories' => [['name' => 'Thriller', 'url' => 'https://shop.example/new-thriller']],
+        ])->assertAccepted();
+
+        $this->assertSame(1, $agent->knowledgeSources()->where('source_scope', 'category')->count());
+        $this->assertSame($legacy->id, $agent->knowledgeSources()->where('source_scope', 'category')->sole()->id);
     }
 
     public function test_manual_taxonomy_sync_queues_only_its_category_index(): void

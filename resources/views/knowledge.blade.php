@@ -31,12 +31,12 @@
         @csrf
         <input type="hidden" name="mode" value="website_structure">
         <label>1. Site catalog URL <span style="color:var(--muted);font-weight:400">(all products)</span></label>
-        <input type="url" name="catalog_url" required placeholder="https://store.example/products">
+        <input type="url" name="catalog_url" required value="{{ $catalogSource?->url }}" placeholder="https://store.example/products">
         <label>2. Categories</label>
         <div id="category-fields"></div>
         <button type="button" class="btn ghost" id="add-category" style="margin-top:10px">＋ Add category</button>
         <label>3. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
-        <input type="url" name="sitemap_url" placeholder="https://store.example/sitemap.xml">
+        <input type="url" name="sitemap_url" value="{{ $sitemapSource?->url }}" placeholder="https://store.example/sitemap.xml">
         <button class="btn lime" style="margin-top:22px">Save and synchronize →</button>
         <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>
     </form>
@@ -46,7 +46,7 @@
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
     <div class="knowledge-heading">
         <h3>Connected knowledge</h3>
-        <span class="channel" id="knowledge-live-summary">Live catalog search enabled · {{ number_format($agent->products()->where('is_active', true)->count()) }} products currently cached · {{ number_format($sources->sum('chunks_count')) }} searchable passages</span>
+        <span class="channel" id="knowledge-live-summary">Live catalog search enabled · synchronization runs in the background</span>
     </div>
     @forelse($sources as $source)
         @php($fixture = ! $source->isRefreshable())
@@ -56,9 +56,9 @@
                 <strong data-source-name>{{ $source->name }}</strong>
                 @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill" data-source-status>{{ $source->status }}</span>@endif
                 @if($source->type === 'url')
-                    <p><b>{{ $source->status === 'processing' ? 'Learning the complete public website' : 'Complete public-site knowledge' }}</b> · <span data-source-items>{{ number_format($source->items_found) }}</span> products indexed · {{ number_format($source->chunks_count) }} searchable passages</p>
+                    <p><b>{{ $source->status === 'processing' ? 'Synchronizing in the background' : 'Public-site knowledge ready' }}</b> · <span data-source-items>{{ number_format($source->items_found) }}</span> products indexed</p>
                 @else
-                    <p>{{ $source->items_found }} indexed in last sync · {{ $source->items_created }} created · {{ $source->items_updated }} updated · {{ $source->chunks_count }} chunks</p>
+                    <p>{{ $source->items_found }} indexed in last sync · {{ $source->items_created }} created · {{ $source->items_updated }} updated</p>
                 @endif
                 @if($source->type === 'url')
                     <p class="channel" style="margin-top:4px">{{ $source->status === 'processing' ? 'Legatus is following sitemaps, catalog pages, product details and business-policy pages in the background.' : 'Products, descriptions, prices, sale data and public business policies are refreshed from this website.' }}</p>
@@ -94,18 +94,21 @@
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 const categoryFields=document.querySelector('#category-fields'),addCategory=document.querySelector('#add-category'),structureForm=document.querySelector('#website-structure-form'),structureStatus=document.querySelector('#website-structure-status');
 const knowledgeStatusUrl=@json(route('knowledge.status'));
+const existingCategories=@json($categorySources);
 let trackedSourceIds=[];
 let categoryIndex=0;
-function appendCategory(){
+function appendCategory(category={}){
     const row=document.createElement('div');
     row.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:9px;align-items:end;margin-top:9px';
     row.innerHTML=`<div><label>Category name</label><input required name="categories[${categoryIndex}][name]" placeholder="e.g. Thriller"></div><div><label>Category URL</label><input required type="url" name="categories[${categoryIndex}][url]" placeholder="https://store.example/category/thriller"></div><button type="button" class="btn ghost remove-category" aria-label="Remove category">×</button>`;
     row.querySelector('.remove-category').addEventListener('click',()=>row.remove());
+    row.querySelector('input[name$="[name]"]').value=category.name||'';
+    row.querySelector('input[name$="[url]"]').value=category.url||'';
     categoryFields.appendChild(row);
     categoryIndex++;
 }
-addCategory.addEventListener('click',appendCategory);
-appendCategory();
+addCategory.addEventListener('click',()=>appendCategory());
+if(existingCategories.length)existingCategories.forEach(appendCategory);else appendCategory();
 structureForm.addEventListener('submit',async event=>{
     event.preventDefault();
     const button=structureForm.querySelector('button[type=submit],button:not([type])');
