@@ -8,7 +8,8 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Schedule::command('legatus:sync-knowledge')->dailyAt('03:15')->withoutOverlapping();
+// Full-site knowledge refresh is intentionally manual. Automatically queuing
+// every tenant/source at once can exhaust shared-hosting CPU and process limits.
 Schedule::command('legatus:purge-expired-data')->dailyAt('03:45')->withoutOverlapping();
 Schedule::command('legatus:expire-reservations')->everyMinute()->withoutOverlapping();
 // The catalog is an authoritative discovery snapshot. Price and stock are checked
@@ -29,6 +30,6 @@ Schedule::command('queue:work database --queue=channels,default --stop-when-empt
     // runInBackground(). Cron already provides the outer process, so execute
     // the bounded worker directly and use the scheduler lock for overlap.
     ->withoutOverlapping(10);
-Schedule::command('queue:work database --queue=knowledge --stop-when-empty --max-time=50 --timeout=3600 --tries=2 --memory=192')
-    ->everyMinute()
-    ->withoutOverlapping(70);
+Schedule::command('queue:work database --queue=knowledge --stop-when-empty --max-jobs=1 --max-time=45 --timeout=45 --tries=1 --memory=128')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10);

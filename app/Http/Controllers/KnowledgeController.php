@@ -118,10 +118,14 @@ class KnowledgeController extends Controller
         $agent = $tenant->agent();
         $sourceIds = DB::transaction(function () use ($agent, $data, $categories, $ingestion): array {
             $sources = [];
-            $catalog = $agent->knowledgeSources()->updateOrCreate(
-                ['source_scope' => 'catalog'],
-                ['type' => 'url', 'name' => 'Site catalog', 'url' => $data['catalog_url'], 'status' => 'processing', 'progress' => 1, 'error' => null],
+            $catalog = $agent->knowledgeSources()->firstOrNew(['source_scope' => 'catalog']);
+            $catalog->fill(
+                ['type' => 'url', 'name' => 'Site catalog', 'url' => $data['catalog_url']],
             );
+            if (! $catalog->exists) {
+                $catalog->fill(['status' => 'pending', 'progress' => 0]);
+            }
+            $catalog->save();
             $sources[] = $catalog->id;
 
             foreach ($categories as $category) {
@@ -141,30 +145,31 @@ class KnowledgeController extends Controller
                 $source->fill([
                     'source_scope' => 'category', 'taxonomy_label' => $label,
                     'type' => 'url', 'name' => "Category: {$label}", 'url' => trim($category['url']),
-                    'status' => 'processing', 'progress' => 1, 'error' => null,
-                ])->save();
+                ]);
+                if (! $source->exists) {
+                    $source->fill(['status' => 'pending', 'progress' => 0]);
+                }
+                $source->save();
                 $sources[] = $source->id;
             }
 
             if (filled($data['sitemap_url'] ?? null)) {
-                $sitemap = $agent->knowledgeSources()->updateOrCreate(
-                    ['source_scope' => 'sitemap'],
-                    ['type' => 'url', 'name' => 'Sitemap', 'url' => $data['sitemap_url'], 'status' => 'processing', 'progress' => 1, 'error' => null],
-                );
+                $sitemap = $agent->knowledgeSources()->firstOrNew(['source_scope' => 'sitemap']);
+                $sitemap->fill(['type' => 'url', 'name' => 'Sitemap', 'url' => $data['sitemap_url']]);
+                if (! $sitemap->exists) {
+                    $sitemap->fill(['status' => 'pending', 'progress' => 0]);
+                }
+                $sitemap->save();
                 $sources[] = $sitemap->id;
             }
 
             return $sources;
         });
 
-        foreach ($sourceIds as $sourceId) {
-            CrawlPublicWebsite::dispatch($sourceId);
-        }
-
-        $message = count($sourceIds).' website knowledge indexes were queued safely in the background.';
+        $message = count($sourceIds).' website knowledge sources were saved. Synchronization was not started automatically.';
 
         return $request->expectsJson()
-            ? response()->json(['message' => $message, 'source_ids' => $sourceIds], 202)
+            ? response()->json(['message' => $message, 'source_ids' => $sourceIds])
             : back()->with('success', $message);
     }
 

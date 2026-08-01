@@ -37,7 +37,7 @@
         <button type="button" class="btn ghost" id="add-category" style="margin-top:10px">＋ Add category</button>
         <label>3. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
         <input type="url" name="sitemap_url" value="{{ $sitemapSource?->url }}" placeholder="https://store.example/sitemap.xml">
-        <button class="btn lime" style="margin-top:22px">Save and synchronize →</button>
+        <button class="btn lime" style="margin-top:22px">Save structure →</button>
         <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>
     </form>
 </section>
@@ -113,14 +113,13 @@ structureForm.addEventListener('submit',async event=>{
     event.preventDefault();
     const button=structureForm.querySelector('button[type=submit],button:not([type])');
     button.disabled=true;
-    structureStatus.textContent='Queuing synchronization…';
+    structureStatus.textContent='Saving structure…';
     try{
         const response=await fetch(structureForm.action,{method:'POST',headers:{Accept:'application/json'},body:new FormData(structureForm)});
         const payload=await response.json();
         if(!response.ok)throw new Error(payload.message||'Could not save the website structure.');
         trackedSourceIds=payload.source_ids||[];
-        structureStatus.textContent=payload.message+' Live progress will appear here; you can keep working on this page.';
-        scheduleKnowledgeStatus(300);
+        structureStatus.textContent=payload.message;
     }catch(error){structureStatus.textContent=error.message;}finally{button.disabled=false;}
 });
 document.querySelectorAll('.async-source-action').forEach(form=>form.addEventListener('submit',async event=>{

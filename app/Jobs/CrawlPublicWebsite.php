@@ -14,11 +14,11 @@ class CrawlPublicWebsite implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Queueable;
 
-    public int $timeout = 3600;
+    public int $timeout = 45;
 
-    public int $tries = 2;
+    public int $tries = 1;
 
-    public int $uniqueFor = 7200;
+    public int $uniqueFor = 600;
 
     public function __construct(public int $sourceId)
     {
@@ -32,7 +32,7 @@ class CrawlPublicWebsite implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(60)->expireAfter(3700)];
+        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(30)->expireAfter(60)];
     }
 
     public function handle(PublicWebsiteCrawler $crawler): void

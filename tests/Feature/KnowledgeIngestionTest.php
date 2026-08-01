@@ -627,7 +627,7 @@ HTML;
             'sitemap_url' => 'https://shop.example/sitemap.xml',
         ]);
 
-        $response->assertAccepted()->assertJsonCount(5, 'source_ids');
+        $response->assertOk()->assertJsonCount(5, 'source_ids');
         $this->assertDatabaseHas('knowledge_sources', [
             'agent_id' => $agent->id, 'source_scope' => 'catalog', 'url' => 'https://shop.example/products',
         ]);
@@ -637,7 +637,7 @@ HTML;
         $this->assertDatabaseHas('knowledge_sources', [
             'agent_id' => $agent->id, 'source_scope' => 'sitemap', 'url' => 'https://shop.example/sitemap.xml',
         ]);
-        Queue::assertPushed(CrawlPublicWebsite::class, 5);
+        Queue::assertNothingPushed();
     }
 
     public function test_saving_website_structure_updates_single_catalog_and_existing_category(): void
@@ -659,7 +659,7 @@ HTML;
             'mode' => 'website_structure',
             'catalog_url' => 'https://shop.example/new-products',
             'categories' => [['name' => 'Thriller', 'url' => 'https://shop.example/new-thriller']],
-        ])->assertAccepted();
+        ])->assertOk();
 
         $this->assertSame($catalog->id, $agent->knowledgeSources()->where('source_scope', 'catalog')->sole()->id);
         $this->assertSame('https://shop.example/new-products', $catalog->fresh()->url);
@@ -682,7 +682,7 @@ HTML;
             'mode' => 'website_structure',
             'catalog_url' => 'https://shop.example/products',
             'categories' => [['name' => 'Thriller', 'url' => 'https://shop.example/new-thriller']],
-        ])->assertAccepted();
+        ])->assertOk();
 
         $this->assertSame(1, $agent->knowledgeSources()->where('source_scope', 'category')->count());
         $this->assertSame($legacy->id, $agent->knowledgeSources()->where('source_scope', 'category')->sole()->id);

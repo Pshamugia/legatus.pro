@@ -149,6 +149,7 @@ class PublicWebsiteCrawler
                 'items_updated' => $updated,
                 'content_hash' => hash_final($hash),
                 'last_synced_at' => now(),
+                'index_version' => $taxonomyOnly ? 2 : (int) $source->index_version,
                 'error' => $queue === []
                     ? null
                     : "Crawl reached the configured {$maximumPages}-page safety limit.",

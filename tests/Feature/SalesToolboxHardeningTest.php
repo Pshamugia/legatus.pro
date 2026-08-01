@@ -571,6 +571,53 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertFalse($agent->customerProducts()->whereKey($existing->id)->exists());
     }
 
+    public function test_configured_business_category_url_is_searched_before_general_catalog_text(): void
+    {
+        [$agent, $unrelated, $conversation] = $this->context(stock: 3);
+        $unrelated->update([
+            'name' => 'Fictional dystopia',
+            'search_text' => 'fictional dystopia biography',
+            'metadata' => ['taxonomy' => ['Biography']],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Biography',
+            'name' => 'Category: Biography',
+            'url' => 'https://bukinistebi.ge/categories/biography',
+            'status' => 'ready',
+        ]);
+        Http::fake([
+            'https://bukinistebi.ge/categories/biography' => Http::response(
+                '<script type="application/ld+json">'.json_encode([
+                    '@type' => 'Product',
+                    'name' => 'Verified life story',
+                    'sku' => 'BIO-1',
+                    'url' => 'https://bukinistebi.ge/products/bio-1',
+                    'offers' => [
+                        'price' => 25,
+                        'priceCurrency' => 'GEL',
+                        'availability' => 'https://schema.org/InStock',
+                    ],
+                ], JSON_UNESCAPED_SLASHES).'</script>',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+            '*' => Http::response('<html></html>', 404),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Biography books',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame(['Verified life story'], collect($result['products'])->pluck('name')->all());
+        $this->assertNotContains($unrelated->id, collect($result['products'])->pluck('id')->all());
+        $this->assertSame(2, $source->fresh()->index_version);
+        Http::assertSentCount(1);
+    }
+
     private function context(int $stock = 10): array
     {
         $agent = Agent::create([

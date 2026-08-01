@@ -20,6 +20,7 @@ class SalesToolbox
         private EmbeddingService $embeddings,
         private CommerceConnectorClient $commerce,
         private PublicStorefrontCatalog $storefront,
+        private KnowledgeIngestionService $ingestion,
     ) {}
 
     public function definitions(?Agent $agent = null): array
@@ -65,11 +66,20 @@ class SalesToolbox
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
         $termGroups = $this->searchTermGroups((string) $a['query']);
-        $localSearch = function () use ($agent, $conversation, $a, $termGroups) {
+        $taxonomyProductIds = $this->authoritativeTaxonomyProductIds(
+            $agent,
+            $termGroups,
+            $a['category'] ?? null,
+            (string) $a['query'],
+        );
+        $localSearch = function () use ($agent, $conversation, $a, $termGroups, $taxonomyProductIds) {
             if ($termGroups === []) {
                 return collect();
             }
             $q = $agent->customerProducts()->where('is_active', true);
+            if ($taxonomyProductIds !== null) {
+                $q->whereIn('products.id', $taxonomyProductIds);
+            }
             $q->where(function ($termQuery) use ($termGroups): void {
                 foreach ($termGroups as $variants) {
                     $patterns = collect($variants)
@@ -104,11 +114,9 @@ class SalesToolbox
         // do not silently become stale between scheduled full syncs.
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
         $storefrontQuery = $storefrontQueries[0] ?? trim((string) $a['query']);
-        $publicSearch = $this->storefront->discover(
-            $agent,
-            $storefrontQuery,
-            array_slice($storefrontQueries, 1),
-        );
+        $publicSearch = $taxonomyProductIds === null
+            ? $this->storefront->discover($agent, $storefrontQuery, array_slice($storefrontQueries, 1))
+            : ['imported' => 0, 'product_ids' => [], 'source' => 'knowledge_category_index'];
         if (($publicSearch['imported'] ?? 0) > 0) {
             // Live discovery refreshes product facts, but it must not replace
             // the tenant's complete taxonomy index with a storefront's small
@@ -120,7 +128,7 @@ class SalesToolbox
             $unavailableProducts = $matches->where('available', false)->values();
         }
         $remoteSearch = null;
-        if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
+        if ($taxonomyProductIds === null && $products->isEmpty() && $unavailableProducts->isEmpty()) {
             $remoteSearch = $this->commerceSearchResponse($agent, $a, $termGroups);
             $remoteMatches = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
             $products = $remoteMatches->where('available', true)->values();
@@ -146,6 +154,101 @@ class SalesToolbox
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,
         ];
+    }
+
+    private function authoritativeTaxonomyProductIds(Agent $agent, array $termGroups, ?string $category, string $rawQuery): ?array
+    {
+        $needles = collect($termGroups)
+            ->flatten()
+            ->push($category)
+            ->push($rawQuery)
+            ->filter(fn ($value): bool => is_string($value) && mb_strlen(trim($value)) > 2)
+            ->map(fn (string $value): string => Str::lower(trim($value)))
+            ->unique();
+        if ($needles->isEmpty()) {
+            return null;
+        }
+
+        $sources = $agent->knowledgeSources()
+            ->where('source_scope', 'category')
+            ->get(['id', 'agent_id', 'name', 'source_scope', 'url', 'taxonomy_label', 'index_version', 'last_synced_at'])
+            ->filter(function ($source) use ($needles): bool {
+                $label = Str::lower(trim((string) $source->taxonomy_label));
+
+                return $label !== '' && $needles->contains(
+                    fn (string $needle): bool => Str::contains($needle, $label) || Str::contains($label, $needle),
+                );
+            });
+        if ($sources->isEmpty()) {
+            return null;
+        }
+
+        $productIds = collect();
+        foreach ($sources as $source) {
+            if ((int) $source->index_version >= 2 && $source->last_synced_at?->isAfter(now()->subMinutes(15))) {
+                $productIds->push(...$this->mappedProductIds($source));
+
+                continue;
+            }
+
+            try {
+                $response = $this->ingestion->fetchPublicUrl((string) $source->url, [
+                    'Accept' => 'text/html,application/xhtml+xml,application/json',
+                ]);
+                $body = $response->body();
+                $products = array_merge(
+                    $this->ingestion->structuredProductsFromHtml($body),
+                    $this->ingestion->storefrontProductsFromHtml($body, $this->origin((string) $source->url)),
+                );
+                $result = $products === []
+                    ? ['product_ids' => []]
+                    : $this->ingestion->importDiscoveredUrlProducts($source, $products);
+                $ids = collect($result['product_ids'] ?? [])->map(fn ($id): int => (int) $id)->unique()->values();
+
+                // Replace legacy whole-site membership with exactly the
+                // products verified on this business's configured category URL.
+                $source->chunks()->where('kind', '!=', 'product')->delete();
+                $source->chunks()->where('kind', 'product')->get()->each(function ($chunk) use ($ids): void {
+                    if (! $ids->contains((int) data_get($chunk->metadata, 'product_id'))) {
+                        $chunk->delete();
+                    }
+                });
+                $source->update([
+                    'status' => 'ready',
+                    'progress' => 100,
+                    'items_found' => $ids->count(),
+                    'index_version' => 2,
+                    'last_synced_at' => now(),
+                    'error' => null,
+                ]);
+                $productIds->push(...$ids);
+            } catch (\Throwable $exception) {
+                report($exception);
+                // A category URL is authoritative. Failure must return no
+                // category products, never unrelated general-search matches.
+            }
+        }
+
+        return $productIds->unique()->values()->all();
+    }
+
+    private function mappedProductIds($source): array
+    {
+        return $source->chunks()->where('kind', 'product')
+            ->get(['metadata'])
+            ->pluck('metadata.product_id')
+            ->filter()
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function origin(string $url): string
+    {
+        $parts = parse_url($url);
+
+        return ($parts['scheme'] ?? 'https').'://'.($parts['host'] ?? '');
     }
 
     private function applyProductSearchFilters($query, array $arguments): void
@@ -285,9 +388,15 @@ class SalesToolbox
     {
         $criteria = trim(implode(' ', array_filter([$a['query'], $a['category'], $a['mood'], $a['occasion']])));
         $termGroups = $this->searchTermGroups($criteria);
+        $taxonomyProductIds = $this->authoritativeTaxonomyProductIds(
+            $agent,
+            $termGroups,
+            $a['category'] ?? null,
+            $criteria,
+        );
         $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
         $liveProductIds = collect();
-        if ($storefrontQueries !== []) {
+        if ($taxonomyProductIds === null && $storefrontQueries !== []) {
             // Recommendation intent must search the live catalogue too. The
             // locally cached HTML snapshot may contain only the first page.
             $liveSearch = $this->storefront->discover(
@@ -299,6 +408,9 @@ class SalesToolbox
         }
 
         $query = $agent->customerProducts()->where('is_active', true);
+        if ($taxonomyProductIds !== null) {
+            $query->whereIn('products.id', $taxonomyProductIds);
+        }
         if (filled($a['category'] ?? null)) {
             $query->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
                 $this->literalContainsPattern(Str::lower((string) $a['category'])),

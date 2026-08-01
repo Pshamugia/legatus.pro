@@ -476,19 +476,19 @@ class KnowledgeIngestionService
     }
 
     /** @param list<array> $products
-     * @return array{found: int, created: int, updated: int}
+     * @return array{found: int, created: int, updated: int, product_ids: list<int>}
      */
     private function importUrlProducts(KnowledgeSource $source, array $products, ?string $payloadCurrency = null): array
     {
         $this->assertCatalogItemLimit(count($products));
         $found = $created = $updated = 0;
+        $productIds = [];
 
         foreach ($products as $product) {
             $values = $this->normalizeUrlProduct($source, $product, $payloadCurrency);
             if ($values === null) {
                 continue;
             }
-
             $found++;
             $sku = $values['sku'];
             $existing = $sku
@@ -521,6 +521,7 @@ class KnowledgeIngestionService
                 $existing = $source->agent->products()->create($values);
                 $created++;
             }
+            $productIds[] = (int) $existing->id;
 
             $this->chunk(
                 $source,
@@ -531,7 +532,12 @@ class KnowledgeIngestionService
             );
         }
 
-        return compact('found', 'created', 'updated');
+        return [
+            'found' => $found,
+            'created' => $created,
+            'updated' => $updated,
+            'product_ids' => array_values(array_unique($productIds)),
+        ];
     }
 
     /**
@@ -540,7 +546,7 @@ class KnowledgeIngestionService
      * ingestion applies here; public HTML never becomes trusted instructions.
      *
      * @param  list<array>  $products
-     * @return array{found: int, created: int, updated: int}
+     * @return array{found: int, created: int, updated: int, product_ids: list<int>}
      */
     public function importDiscoveredUrlProducts(KnowledgeSource $source, array $products): array
     {
