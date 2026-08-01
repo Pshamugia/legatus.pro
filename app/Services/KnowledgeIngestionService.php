@@ -880,6 +880,12 @@ class KnowledgeIngestionService
             ->all();
     }
 
+    /** @return list<string> */
+    public function taxonomyForSource(KnowledgeSource $source): array
+    {
+        return $this->sourceTaxonomy($source);
+    }
+
     private function catalogText(mixed $value, int $limit): string
     {
         if (is_array($value)) {

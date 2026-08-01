@@ -4,10 +4,13 @@ namespace App\Jobs;
 
 use App\Models\KnowledgeSource;
 use App\Services\PublicWebsiteCrawler;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Throwable;
 
-class CrawlPublicWebsite implements ShouldQueue
+class CrawlPublicWebsite implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Queueable;
 
@@ -15,7 +18,22 @@ class CrawlPublicWebsite implements ShouldQueue
 
     public int $tries = 2;
 
-    public function __construct(public int $sourceId) {}
+    public int $uniqueFor = 7200;
+
+    public function __construct(public int $sourceId)
+    {
+        $this->onQueue('knowledge');
+    }
+
+    public function uniqueId(): string
+    {
+        return "knowledge-source:{$this->sourceId}";
+    }
+
+    public function middleware(): array
+    {
+        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(60)->expireAfter(3700)];
+    }
 
     public function handle(PublicWebsiteCrawler $crawler): void
     {
@@ -24,5 +42,19 @@ class CrawlPublicWebsite implements ShouldQueue
         if ($source?->type === 'url' && $source->isRefreshable() && (int) $source->progress <= 1) {
             $crawler->crawl($source);
         }
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        $source = KnowledgeSource::find($this->sourceId);
+        if (! $source) {
+            return;
+        }
+
+        $source->update([
+            'status' => $source->chunks()->exists() ? 'ready' : 'failed',
+            'progress' => $source->chunks()->exists() ? max(1, (int) $source->progress) : 0,
+            'error' => 'Website synchronization stopped safely. Existing searchable knowledge remains available; retry the source shortly.',
+        ]);
     }
 }

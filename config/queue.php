@@ -41,7 +41,7 @@ return [
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             // Must remain comfortably above the longest queued job timeout.
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 180),
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 4000),
             'after_commit' => false,
         ],
 

@@ -25,7 +25,14 @@ class PublicWebsiteCrawler
         }
 
         $maximumPages = max(10, min(10_000, (int) config('legatus.public_crawl_max_pages', 5000)));
+        $taxonomyOnly = $this->ingestion->taxonomyForSource($source) !== [];
+        if ($taxonomyOnly) {
+            // A named category/genre URL is a scoped collection, not another
+            // request to crawl the business's entire domain.
+            $maximumPages = min($maximumPages, max(10, (int) config('legatus.taxonomy_crawl_max_pages', 250)));
+        }
         $maximumProducts = max(1, min(10_000, (int) config('legatus.commerce_max_catalog_products', 10000)));
+        $crawlStartedAt = now();
         $queue = [$startUrl];
         $queued = [$startUrl => true];
         $visited = [];
@@ -34,16 +41,14 @@ class PublicWebsiteCrawler
         $hash = hash_init('sha256');
 
         $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
-        $source->chunks()->delete();
-        $source->agent->products()
-            ->where('metadata->source_id', $source->id)
-            ->update(['is_active' => false]);
 
-        foreach ([
-            $this->origin($startUrl).'/sitemap.xml',
-            $this->origin($startUrl).'/sitemap_index.xml',
-        ] as $sitemapUrl) {
-            $this->enqueue($queue, $queued, $sitemapUrl, $host, $maximumPages);
+        if (! $taxonomyOnly) {
+            foreach ([
+                $this->origin($startUrl).'/sitemap.xml',
+                $this->origin($startUrl).'/sitemap_index.xml',
+            ] as $sitemapUrl) {
+                $this->enqueue($queue, $queued, $sitemapUrl, $host, $maximumPages);
+            }
         }
 
         try {
@@ -91,7 +96,7 @@ class PublicWebsiteCrawler
 
                 $this->storeReadablePage($source, $url, $body, $products !== []);
 
-                foreach ($this->discoverLinks($body, $url, $products) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $taxonomyOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 
@@ -104,6 +109,19 @@ class PublicWebsiteCrawler
             if ($source->chunks()->count() === 0) {
                 throw new \RuntimeException('The public website did not expose readable content.');
             }
+
+            // Keep the last-known-good index live throughout the crawl. Rows
+            // touched during this run retain their embeddings; only content
+            // absent from a successfully completed crawl is retired here.
+            $source->chunks()->where('updated_at', '<', $crawlStartedAt)->delete();
+            $source->agent->products()
+                ->where('metadata->source_id', $source->id)
+                ->where('updated_at', '<', $crawlStartedAt)
+                ->update(['is_active' => false]);
+            $productCount = $source->agent->products()
+                ->where('metadata->source_id', $source->id)
+                ->where('is_active', true)
+                ->count();
 
             $source->update([
                 'status' => config('services.openai.key') ? 'processing' : 'ready',
@@ -184,7 +202,7 @@ class PublicWebsiteCrawler
     }
 
     /** @return list<string> */
-    private function discoverLinks(string $html, string $pageUrl, array $products): array
+    private function discoverLinks(string $html, string $pageUrl, array $products, bool $taxonomyOnly = false): array
     {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
@@ -195,7 +213,10 @@ class PublicWebsiteCrawler
             $links[] = $product['url'] ?? data_get($product, 'offers.url');
         }
 
-        foreach ($xpath->query('//a[@href]') as $node) {
+        $linkQuery = $taxonomyOnly
+            ? '//a[@href and (contains(concat(" ", normalize-space(@rel), " "), " next ") or contains(concat(" ", normalize-space(@class), " "), " pagination ") or @data-page)]'
+            : '//a[@href]';
+        foreach ($xpath->query($linkQuery) as $node) {
             $links[] = $node->getAttribute('href');
         }
         foreach ($xpath->query('//*[@data-next-page]') as $node) {

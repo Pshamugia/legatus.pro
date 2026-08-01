@@ -16,7 +16,10 @@ class EmbedKnowledgeSource implements ShouldQueue
 
     public int $tries = 3;
 
-    public function __construct(public int $sourceId) {}
+    public function __construct(public int $sourceId)
+    {
+        $this->onQueue('knowledge');
+    }
 
     public function handle(EmbeddingService $embeddings): void
     {

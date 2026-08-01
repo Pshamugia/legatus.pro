@@ -44,13 +44,14 @@ class KnowledgeController extends Controller
         $file = $r->file('file');
         $name = $data['name'] ?? ($data['type'] === 'url' ? parse_url($data['url'], PHP_URL_HOST) : $file->getClientOriginalName());
         $source = $agent->knowledgeSources()->create(['type' => $data['type'], 'name' => $name, 'url' => $data['url'] ?? null, 'file_path' => $file ? $ingestion->storeFile($file, $data['type']) : null]);
+        if ($source->type === 'url') {
+            $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+            CrawlPublicWebsite::dispatch($source->id);
+
+            return back()->with('success', "{$source->name} is connected. Legatus is now learning the scoped website source in the background.");
+        }
         try {
             $ingestion->ingest($source);
-            if ($source->type === 'url') {
-                CrawlPublicWebsite::dispatch($source->id);
-
-                return back()->with('success', "{$source->name} is connected. Legatus is now learning the complete public website in the background.");
-            }
 
             return back()->with('success', "{$source->name} successfully learned.");
         } catch (\Throwable) {
@@ -66,6 +67,9 @@ class KnowledgeController extends Controller
             return back()->with('success', 'Static fixture snapshot has no source payload to synchronize. Add a real URL or file source for refreshable knowledge.');
         }
         if ($source->type === 'url') {
+            if ($source->status === 'processing' && $source->updated_at?->isAfter(now()->subHours(2))) {
+                return back()->with('success', 'This source is already queued or synchronizing. A duplicate crawl was not started.');
+            }
             $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
             CrawlPublicWebsite::dispatch($source->id);
 

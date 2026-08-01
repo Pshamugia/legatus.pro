@@ -75,6 +75,73 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertTrue($source->chunks()->where('content', 'like', '%memory, identity, and freedom%')->exists());
     }
 
+    public function test_taxonomy_url_stays_inside_its_collection_and_never_crawls_the_whole_domain(): void
+    {
+        $this->seed();
+        config(['services.openai.key' => null, 'legatus.public_crawl_max_pages' => 5000]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'ჟანრი: თრილერი, მისტიკა',
+            'url' => 'https://bukinistebi.ge/genres/thriller',
+        ]);
+
+        Http::fake(function ($request) {
+            return match ($request->url()) {
+                'https://bukinistebi.ge/genres/thriller' => Http::response(
+                    $this->catalogPage('Scoped Thriller', 'T-1', 19, '/products/thriller/1')
+                    .'<p>This thriller collection contains scoped products and useful category context.</p>'
+                    .'<a href="/unrelated/all-products">All products</a>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                ),
+                'https://bukinistebi.ge/products/thriller/1' => Http::response(
+                    '<html><title>Scoped Thriller</title><body>A suspense thriller product with enough readable detail.</body></html>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                ),
+                default => Http::response('', 404, ['Content-Type' => 'text/html']),
+            };
+        });
+
+        app(PublicWebsiteCrawler::class)->crawl($source);
+
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'T-1']);
+        $this->assertSame(['თრილერი', 'მისტიკა'], data_get($agent->products()->where('sku', 'T-1')->firstOrFail()->metadata, 'taxonomy'));
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'sitemap')
+            || str_contains($request->url(), '/unrelated/'));
+    }
+
+    public function test_unchanged_pages_keep_their_existing_embeddings_during_incremental_sync(): void
+    {
+        $this->seed();
+        config(['services.openai.key' => null, 'legatus.public_crawl_max_pages' => 10]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Incremental source',
+            'url' => 'https://bukinistebi.ge/catalog',
+        ]);
+        Http::fake([
+            'https://bukinistebi.ge/catalog' => Http::response(
+                '<html><title>Catalog</title><body>This unchanged catalog page has enough useful searchable content for indexing.</body></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+            '*' => Http::response('', 404, ['Content-Type' => 'text/html']),
+        ]);
+
+        $crawler = app(PublicWebsiteCrawler::class);
+        $crawler->crawl($source);
+        $chunk = $source->chunks()->firstOrFail();
+        $chunk->update(['embedding' => [0.1, 0.2, 0.3]]);
+
+        $crawler->crawl($source->fresh());
+
+        $this->assertSame($chunk->id, $source->chunks()->firstOrFail()->id);
+        $this->assertSame([0.1, 0.2, 0.3], $source->chunks()->firstOrFail()->embedding);
+    }
+
     private function catalogPage(
         string $name,
         string $sku,
