@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Models\Agent;
 use App\Models\Conversation;
 use App\Models\KnowledgeChunk;
@@ -20,7 +21,6 @@ class SalesToolbox
         private EmbeddingService $embeddings,
         private CommerceConnectorClient $commerce,
         private PublicStorefrontCatalog $storefront,
-        private KnowledgeIngestionService $ingestion,
     ) {}
 
     public function definitions(?Agent $agent = null): array
@@ -185,47 +185,14 @@ class SalesToolbox
 
         $productIds = collect();
         foreach ($sources as $source) {
-            if ((int) $source->index_version >= 2 && $source->last_synced_at?->isAfter(now()->subMinutes(15))) {
+            if ((int) $source->index_version >= 2) {
                 $productIds->push(...$this->mappedProductIds($source));
-
-                continue;
             }
 
-            try {
-                $response = $this->ingestion->fetchPublicUrl((string) $source->url, [
-                    'Accept' => 'text/html,application/xhtml+xml,application/json',
-                ]);
-                $body = $response->body();
-                $products = array_merge(
-                    $this->ingestion->structuredProductsFromHtml($body),
-                    $this->ingestion->storefrontProductsFromHtml($body, $this->origin((string) $source->url)),
-                );
-                $result = $products === []
-                    ? ['product_ids' => []]
-                    : $this->ingestion->importDiscoveredUrlProducts($source, $products);
-                $ids = collect($result['product_ids'] ?? [])->map(fn ($id): int => (int) $id)->unique()->values();
-
-                // Replace legacy whole-site membership with exactly the
-                // products verified on this business's configured category URL.
-                $source->chunks()->where('kind', '!=', 'product')->delete();
-                $source->chunks()->where('kind', 'product')->get()->each(function ($chunk) use ($ids): void {
-                    if (! $ids->contains((int) data_get($chunk->metadata, 'product_id'))) {
-                        $chunk->delete();
-                    }
-                });
-                $source->update([
-                    'status' => 'ready',
-                    'progress' => 100,
-                    'items_found' => $ids->count(),
-                    'index_version' => 2,
-                    'last_synced_at' => now(),
-                    'error' => null,
-                ]);
-                $productIds->push(...$ids);
-            } catch (\Throwable $exception) {
-                report($exception);
-                // A category URL is authoritative. Failure must return no
-                // category products, never unrelated general-search matches.
+            $stale = ! $source->last_synced_at || $source->last_synced_at->isBefore(now()->subMinutes(15));
+            if ($stale && $source->status !== 'processing') {
+                $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+                CrawlPublicWebsite::dispatch($source->id);
             }
         }
 
@@ -244,12 +211,6 @@ class SalesToolbox
             ->all();
     }
 
-    private function origin(string $url): string
-    {
-        $parts = parse_url($url);
-
-        return ($parts['scheme'] ?? 'https').'://'.($parts['host'] ?? '');
-    }
 
     private function applyProductSearchFilters($query, array $arguments): void
     {

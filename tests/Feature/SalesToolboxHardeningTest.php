@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\Reservation;
+use App\Jobs\CrawlPublicWebsite;
 use App\Services\SalesToolbox;
 use App\Support\PrivacyRedactor;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class SalesToolboxHardeningTest extends TestCase
@@ -571,7 +573,7 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertFalse($agent->customerProducts()->whereKey($existing->id)->exists());
     }
 
-    public function test_configured_business_category_url_is_searched_before_general_catalog_text(): void
+    public function test_verified_business_category_index_is_used_before_polluted_general_catalog_text(): void
     {
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);
         $unrelated->update([
@@ -586,25 +588,20 @@ class SalesToolboxHardeningTest extends TestCase
             'name' => 'Category: Biography',
             'url' => 'https://bukinistebi.ge/categories/biography',
             'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
         ]);
-        Http::fake([
-            'https://bukinistebi.ge/categories/biography' => Http::response(
-                '<script type="application/ld+json">'.json_encode([
-                    '@type' => 'Product',
-                    'name' => 'Verified life story',
-                    'sku' => 'BIO-1',
-                    'url' => 'https://bukinistebi.ge/products/bio-1',
-                    'offers' => [
-                        'price' => 25,
-                        'priceCurrency' => 'GEL',
-                        'availability' => 'https://schema.org/InStock',
-                    ],
-                ], JSON_UNESCAPED_SLASHES).'</script>',
-                200,
-                ['Content-Type' => 'text/html'],
-            ),
-            '*' => Http::response('<html></html>', 404),
+        $verified = $agent->products()->create([
+            'name' => 'Verified life story', 'sku' => 'BIO-1', 'search_text' => 'Verified life story Biography',
+            'price' => 25, 'stock' => 2, 'is_active' => true, 'metadata' => ['taxonomy' => ['Biography']],
         ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'product', 'title' => $verified->name,
+            'content' => '{"name":"Verified life story"}', 'content_hash' => hash('sha256', 'verified-biography'),
+            'metadata' => ['product_id' => $verified->id],
+        ]);
+        Http::fake();
 
         $result = app(SalesToolbox::class)->execute('search_products', [
             'query' => 'Biography books',
@@ -615,7 +612,27 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame(['Verified life story'], collect($result['products'])->pluck('name')->all());
         $this->assertNotContains($unrelated->id, collect($result['products'])->pluck('id')->all());
         $this->assertSame(2, $source->fresh()->index_version);
-        Http::assertSentCount(1);
+        Http::assertNothingSent();
+    }
+
+    public function test_unbuilt_category_queues_its_url_without_blocking_chat_or_returning_unrelated_products(): void
+    {
+        Queue::fake();
+        [$agent, $unrelated, $conversation] = $this->context(stock: 3);
+        $unrelated->update(['search_text' => 'fiction biography', 'metadata' => ['taxonomy' => ['Biography']]]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Biography',
+            'name' => 'Category: Biography', 'url' => 'https://bukinistebi.ge/categories/biography',
+            'status' => 'ready', 'index_version' => 0,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Biography books', 'category' => null, 'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame('processing', $source->fresh()->status);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
     private function context(int $stock = 10): array
