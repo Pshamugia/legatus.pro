@@ -42,6 +42,23 @@ class PublicStorefrontCatalogTest extends TestCase
         ]);
     }
 
+    public function test_named_taxonomy_source_enriches_every_imported_product_for_category_search(): void
+    {
+        [$agent] = $this->context();
+        $source = $agent->knowledgeSources()->firstOrFail();
+        $source->update(['name' => 'ჟანრი: თრილერი, მისტიკა']);
+        Http::fake([
+            'https://bukinistebi.ge/books' => Http::response($this->searchCardsHtml(), 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        app(KnowledgeIngestionService::class)->ingest($source);
+
+        $product = $agent->products()->firstOrFail();
+        $this->assertSame(['თრილერი', 'მისტიკა'], data_get($product->metadata, 'genres'));
+        $this->assertStringContainsString('თრილერი', $product->search_text);
+        $this->assertStringContainsString('მისტიკა', $product->search_text);
+    }
+
     public function test_public_storefront_url_discovers_and_verifies_a_product_without_store_code(): void
     {
         [$agent, $conversation] = $this->context();
@@ -67,7 +84,7 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertStringContainsString('პაოლო იაშვილი', $reply['text']);
         $this->assertStringContainsString('20.00 ₾-ის ნაცვლად 14.00 ₾', $reply['text']);
         $this->assertStringContainsString('30% ფასდაკლება', $reply['text']);
-        $this->assertStringContainsString('ხელმისაწვდომია', $reply['text']);
+        $this->assertStringContainsString('მარაგშია', $reply['text']);
         $this->assertStringNotContainsString('მარაგში 1 ც.', $reply['text']);
         $product = $agent->products()->firstOrFail();
         $check = app(SalesToolbox::class)->execute('check_stock', [
@@ -226,7 +243,7 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertGreaterThan(0, data_get($result, 'recommendations.0.score'));
     }
 
-    public function test_natural_lookup_uses_store_suggestions_and_preserves_available_and_sold_out_duplicates(): void
+    public function test_natural_lookup_uses_store_suggestions_and_hides_sold_out_duplicate_when_available_exists(): void
     {
         [$agent, $conversation] = $this->context();
         config([
@@ -297,9 +314,10 @@ class PublicStorefrontCatalogTest extends TestCase
             ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
         );
         $this->assertSame(9.0, (float) data_get($result, 'products.0.price'));
-        $this->assertSame('დუბლინელები', data_get($result, 'products.1.name'));
-        $this->assertStringContainsString('ხელმისაწვდომია', $result['text']);
-        $this->assertStringContainsString('მარაგში არ არის', $result['text']);
+        $this->assertCount(1, $result['products']);
+        $this->assertStringContainsString('მარაგშია', $result['text']);
+        $this->assertStringNotContainsString('მარაგში არ არის', $result['text']);
+        $this->assertStringNotContainsString('მარაგში 1 ც.', $result['text']);
         $this->assertSame(['search_products', 'check_stock'], $result['tools_used']);
         $this->assertDatabaseCount('products', 2);
         $this->assertDatabaseHas('agent_runs', [
@@ -346,6 +364,7 @@ class PublicStorefrontCatalogTest extends TestCase
           <h2 class="book-title-strong" title="საიუბილეო საარქივო გამოცემა">საიუბილეო საარქივო გამოცემა</h2>
           <a class="book-author-link">პაოლო იაშვილი</a>
           <p>₾ <span>14.00</span></p>
+          <input class="quantity" name="quantity" type="number" value="1">
           <button class="toggle-cart-btn" data-product-id="42">კალათაში</button>
         </div>
         </body></html>

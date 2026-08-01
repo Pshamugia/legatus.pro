@@ -299,6 +299,11 @@ class SalesToolbox
         }
 
         $query = $agent->customerProducts()->where('is_active', true);
+        if (filled($a['category'] ?? null)) {
+            $query->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
+                $this->literalContainsPattern(Str::lower((string) $a['category'])),
+            ]);
+        }
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }

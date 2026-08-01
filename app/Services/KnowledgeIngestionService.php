@@ -495,6 +495,17 @@ class KnowledgeIngestionService
                 ? $source->agent->products()->where('sku', $sku)->first()
                 : $source->agent->products()->where('name', $values['name'])->first();
             if ($existing) {
+                $values['metadata']['genres'] = collect((array) data_get($existing->metadata, 'genres', []))
+                    ->merge((array) data_get($values, 'metadata.genres', []))
+                    ->filter(fn ($genre): bool => is_scalar($genre) && trim((string) $genre) !== '')
+                    ->map(fn ($genre): string => trim((string) $genre))
+                    ->unique(fn (string $genre): string => Str::lower($genre))
+                    ->values()
+                    ->all();
+                $values['search_text'] = $this->searchableProductText([
+                    $values['search_text'],
+                    $values['metadata']['genres'],
+                ]);
                 $existing->update($values);
                 $updated++;
             } else {
@@ -709,7 +720,10 @@ class KnowledgeIngestionService
         }
 
         $author = $this->catalogText($product['author'] ?? $product['brand']['name'] ?? null, 255) ?: null;
-        $genres = $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [];
+        $genres = collect($this->searchableValues(
+            $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [],
+            120,
+        ))->merge($this->sourceTaxonomy($source))->unique(fn (string $value): string => Str::lower($value))->values()->all();
         $isbn = $this->catalogText($product['isbn'] ?? $product['isbn_13'] ?? $product['isbn_10'] ?? null, 32) ?: null;
         $category = $this->catalogText($product['category'] ?? null, 255) ?: null;
         $description = $this->catalogText($product['description'] ?? null, 4000) ?: null;
@@ -733,7 +747,7 @@ class KnowledgeIngestionService
                 'product_url' => $productUrl,
                 'external_id' => $this->catalogText($product['id'] ?? null, 191) ?: null,
                 'author' => $author,
-                'genres' => $this->searchableValues($genres, 120),
+                'genres' => $genres,
                 'isbn' => $isbn,
                 'currency' => $currency,
                 'original_price' => $originalPrice,
@@ -838,6 +852,23 @@ class KnowledgeIngestionService
         }
 
         return 0;
+    }
+
+    /** @return list<string> */
+    private function sourceTaxonomy(KnowledgeSource $source): array
+    {
+        $name = trim((string) $source->name);
+        if (! preg_match('/^(?:category|categories|genre|genres|tag|tags|collection|კატეგორია|კატეგორიები|ჟანრი|ჟანრები|თეგი|თეგები|კოლექცია)\s*:\s*(.+)$/iu', $name, $matches)) {
+            return [];
+        }
+
+        return collect(preg_split('/\s*[,;|]\s*/u', $matches[1], -1, PREG_SPLIT_NO_EMPTY))
+            ->map(fn (string $value): string => trim($value))
+            ->filter(fn (string $value): bool => $value !== '' && mb_strlen($value) <= 120)
+            ->unique(fn (string $value): string => Str::lower($value))
+            ->take(20)
+            ->values()
+            ->all();
     }
 
     private function catalogText(mixed $value, int $limit): string

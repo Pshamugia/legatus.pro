@@ -55,6 +55,13 @@ class VerifiedCatalogResponder
             return null;
         }
 
+        // A customer challenging the availability shown in the previous
+        // answer is asking us to re-check that same item, not to run a broad
+        // catalog search or suggest substitutes.
+        if ($this->isAvailabilityCorrectionFollowUp($conversation, $message)) {
+            return $this->respondFromRecentProducts($agent, $conversation, $message, true);
+        }
+
         $contextOnlyReference = $this->isContextOnlyProductReference($message);
         if ($contextOnlyReference && $this->recentProducts($agent, $conversation)->isEmpty()) {
             $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
@@ -203,6 +210,20 @@ class VerifiedCatalogResponder
             ->values()
             ->all();
 
+        if ($verified->every(fn (array $check): bool => ! $this->checkIsAvailable($check))) {
+            $alternativeReply = $this->soldOutAlternatives(
+                $agent,
+                $conversation,
+                $models->first(),
+                $lines->first(),
+                $georgian,
+                $sources,
+            );
+            if ($alternativeReply !== null) {
+                return $alternativeReply;
+            }
+        }
+
         $nextStep = $models->count() === 1
             ? ($georgian ? 'გაინტერესებთ შეძენა?' : 'Would you like to purchase it?')
             : ($georgian ? 'რომელი გაინტერესებთ?' : 'Which one interests you?');
@@ -221,8 +242,12 @@ class VerifiedCatalogResponder
         ];
     }
 
-    private function respondFromRecentProducts(Agent $agent, Conversation $conversation, string $message): ?array
-    {
+    private function respondFromRecentProducts(
+        Agent $agent,
+        Conversation $conversation,
+        string $message,
+        bool $onlyReferencedProduct = false,
+    ): ?array {
         $products = $this->recentProducts($agent, $conversation);
         if ($products->isEmpty()) {
             return null;
@@ -244,6 +269,9 @@ class VerifiedCatalogResponder
         }
 
         $selected = $this->selectRecentProducts($products, $text);
+        if ($onlyReferencedProduct && $selected->count() > 1) {
+            $selected = $selected->take(1)->values();
+        }
         if ($cart && $selected->count() !== 1) {
             return $this->clarifySelection($products, $georgian);
         }
@@ -367,6 +395,80 @@ class VerifiedCatalogResponder
         ];
     }
 
+    private function soldOutAlternatives(
+        Agent $agent,
+        Conversation $conversation,
+        $seed,
+        ?string $soldOutLine,
+        bool $georgian,
+        array $sources,
+    ): ?array {
+        if (! $seed || ! is_string($soldOutLine)) {
+            return null;
+        }
+
+        $taxonomy = collect((array) data_get($seed->metadata, 'genres', []))
+            ->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
+            ->map(fn ($value): string => trim((string) $value))
+            ->values();
+        $category = trim((string) $seed->category);
+        $query = $taxonomy->isNotEmpty() ? $taxonomy->implode(' ') : $category;
+        if ($query === '') {
+            return null;
+        }
+
+        $recommendation = $this->tools->execute('recommend_products', [
+            'query' => Str::limit($query, 300, ''),
+            'budget' => null,
+            'category' => $category !== '' ? $category : null,
+            'mood' => null,
+            'occasion' => null,
+            'limit' => 5,
+        ], $agent, $conversation);
+        if (($recommendation['ok'] ?? false) !== true) {
+            return null;
+        }
+
+        $ids = collect($recommendation['recommendations'] ?? [])
+            ->pluck('id')->map(fn ($id): int => (int) $id)
+            ->reject(fn (int $id): bool => $id === (int) $seed->id)
+            ->take(3)->values();
+        $alternatives = $agent->customerProducts()->whereIn('id', $ids)->get()
+            ->sortBy(fn ($product): int => (int) $ids->search((int) $product->id))->values();
+        $checks = $alternatives->mapWithKeys(fn ($product): array => [
+            $product->id => $this->tools->execute('check_stock', [
+                'product_id' => $product->id,
+                'quantity' => 1,
+            ], $agent, $conversation),
+        ])->filter(fn (array $check): bool => ($check['ok'] ?? false) === true && $this->checkIsAvailable($check));
+        $alternatives = $alternatives->filter(fn ($product): bool => $checks->has($product->id))->values();
+        if ($alternatives->isEmpty()) {
+            return null;
+        }
+
+        $alternativeLines = $alternatives->map(fn ($product): string => $this->productLine(
+            $product,
+            $checks->get($product->id, []),
+            $georgian,
+        ));
+        $this->rememberProducts($conversation, $alternatives->pluck('id')->all());
+
+        return [
+            'text' => $georgian
+                ? "{$soldOutLine}\nიმავე კატეგორიიდან შემიძლია შემოგთავაზოთ:\n{$alternativeLines->implode("\n")}"
+                : "{$soldOutLine}\nFrom the same category, I can offer:\n{$alternativeLines->implode("\n")}",
+            'intent' => 'recommendation',
+            'confidence' => .99,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'products' => $alternatives,
+            'sources' => collect($sources)
+                ->merge($checks->pluck('source')->filter(fn ($item): bool => is_array($item)))
+                ->values()->all(),
+            'tools_used' => ['search_products', 'check_stock', 'recommend_products'],
+        ];
+    }
+
     private function recentProducts(Agent $agent, Conversation $conversation)
     {
         $ids = collect(data_get($conversation->context, 'last_catalog_product_ids', []))
@@ -397,8 +499,13 @@ class VerifiedCatalogResponder
             $name = Str::lower((string) $product->name);
             $author = Str::lower((string) data_get($product->metadata, 'author', ''));
 
+            $nameTokenMatch = collect(preg_split('/[^\pL\pN]+/u', $name, -1, PREG_SPLIT_NO_EMPTY))
+                ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+                ->contains(fn (string $token): bool => Str::contains($message, $token));
+
             return ($name !== '' && Str::contains($message, $name))
-                || ($author !== '' && Str::contains($message, $author));
+                || ($author !== '' && Str::contains($message, $author))
+                || $nameTokenMatch;
         })->values();
 
         return $named->isNotEmpty() ? $named : $products;
@@ -496,7 +603,7 @@ class VerifiedCatalogResponder
         return match (true) {
             $georgian && ! $available => "• {$identity} — {$sale} · ამჟამად მარაგში არ არის",
             ! $available => "• {$identity} — {$sale} · currently out of stock",
-            $georgian && $availabilityOnly => "• {$identity} — {$sale} · ხელმისაწვდომია",
+            $georgian && $availabilityOnly => "• {$identity} — {$sale} · მარაგშია",
             $georgian => "• {$identity} — {$sale} · მარაგში {$stock} ც.",
             $availabilityOnly => "• {$identity} — {$sale} · available",
             default => "• {$identity} — {$sale} · {$stock} in stock",
@@ -602,7 +709,11 @@ class VerifiedCatalogResponder
         }
 
         $tokens = preg_split('/[^\pL\pN]+/u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        if (count($tokens) > 8 || $this->hasExplicitLookupSignal($message)) {
+        $contextualShortAnswer = preg_match(
+            '/^(?:კი|არა|დიახ|კლასიკური|ამ\s+ავტორის|ეს\s+(?:წიგნი|პროდუქტი)|yes|no|classic|this\s+(?:book|product)|by\s+this\s+author)$/iu',
+            Str::lower($text),
+        ) === 1;
+        if (count($tokens) > 8 || (! $contextualShortAnswer && $this->hasExplicitLookupSignal($message))) {
             return false;
         }
 
@@ -647,6 +758,19 @@ class VerifiedCatalogResponder
         ) === 1;
 
         return $asksForMore && $refersBack;
+    }
+
+    private function isAvailabilityCorrectionFollowUp(Conversation $conversation, string $message): bool
+    {
+        if ($this->recentProducts($conversation->agent, $conversation)->isEmpty()) {
+            return false;
+        }
+
+        $text = Str::lower(trim($message));
+        $challengesPreviousAnswer = preg_match('/(?:კი\s*მაგრამ|მაგრამ|but|however|წერია\s+რომ)/iu', $text) === 1;
+        $mentionsUnavailable = preg_match('/(?:ამოწურულ|ამოიწურა|მარაგში\s+არ\s+არის|sold\s*out|out\s+of\s+stock|unavailable)/iu', $text) === 1;
+
+        return $challengesPreviousAnswer && $mentionsUnavailable;
     }
 
     private function isConversationRepair(string $message): bool

@@ -104,18 +104,15 @@ class VerifiedCatalogResponderTest extends TestCase
             'content' => 'კლასიკური დეტექტივი გირჩევნიათ თუ მისტიკური?',
             'metadata' => ['intent' => 'recommendation'],
         ]);
-        $conversation->messages()->create([
-            'role' => 'customer',
-            'content' => 'კლასიკური',
-        ]);
+        foreach (['კი', 'არა', 'კლასიკური', 'ამ ავტორის', 'ეს წიგნი'] as $shortReply) {
+            $reply = app(VerifiedCatalogResponder::class)->respond(
+                $agent,
+                $conversation,
+                $shortReply,
+            );
 
-        $reply = app(VerifiedCatalogResponder::class)->respond(
-            $agent,
-            $conversation,
-            'კლასიკური',
-        );
-
-        $this->assertNull($reply);
+            $this->assertNull($reply, "Short contextual reply was misrouted: {$shortReply}");
+        }
     }
 
     public function test_short_choice_resolution_is_industry_neutral(): void
@@ -195,6 +192,98 @@ class VerifiedCatalogResponderTest extends TestCase
 
         $this->assertSame([$soldOut->id], collect($reply['products'])->pluck('id')->all());
         $this->assertStringContainsString('12.00 ₾', $reply['text']);
+    }
+
+    public function test_sold_out_product_offers_only_available_alternatives_from_its_taxonomy(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $soldOut = $agent->products()->create([
+            'name' => 'ძველი თრილერი',
+            'search_text' => 'ძველი თრილერი თრილერი',
+            'category' => 'წიგნები',
+            'price' => 12,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => ['genres' => ['თრილერი']],
+        ]);
+        $alternative = $agent->products()->create([
+            'name' => 'ახალი თრილერი',
+            'search_text' => 'ახალი თრილერი თრილერი',
+            'category' => 'წიგნები',
+            'price' => 15,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => ['genres' => ['თრილერი']],
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'სპორტული ფეხსაცმელი',
+            'search_text' => 'სპორტული ფეხსაცმელი',
+            'category' => 'ფეხსაცმელი',
+            'price' => 90,
+            'stock' => 8,
+            'is_active' => true,
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond($agent, $conversation, 'ძველი თრილერი გაქვთ?');
+
+        $this->assertSame([$alternative->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString($soldOut->name, $reply['text']);
+        $this->assertStringContainsString('ამჟამად მარაგში არ არის', $reply['text']);
+        $this->assertStringContainsString('იმავე კატეგორიიდან', $reply['text']);
+        $this->assertStringContainsString($alternative->name, $reply['text']);
+        $this->assertStringNotContainsString($unrelated->name, $reply['text']);
+    }
+
+    public function test_availability_only_product_says_only_that_it_is_in_stock_without_treating_one_as_quantity(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $product = $agent->products()->create([
+            'name' => 'თოვლის კაცი',
+            'search_text' => 'თოვლის კაცი',
+            'price' => 10,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['stock_precision' => 'availability_only'],
+        ]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond($agent, $conversation, 'თოვლის კაცი გაქვთ?');
+
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('მარაგშია', $reply['text']);
+        $this->assertStringNotContainsString('მარაგში 1', $reply['text']);
+        $this->assertStringNotContainsString('1 ც.', $reply['text']);
+    }
+
+    public function test_sold_out_correction_rechecks_only_the_previous_product_and_never_offers_others(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $snowman = $agent->products()->create([
+            'name' => 'თოვლის კაცი',
+            'search_text' => 'თოვლის კაცი',
+            'price' => 10,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => ['stock_precision' => 'availability_only'],
+        ]);
+        $other = $agent->products()->create([
+            'name' => 'სხვა წიგნი',
+            'search_text' => 'სხვა წიგნი',
+            'price' => 12,
+            'stock' => 5,
+            'is_active' => true,
+        ]);
+        $conversation->update(['context' => ['last_catalog_product_ids' => [$snowman->id]]]);
+
+        $reply = app(VerifiedCatalogResponder::class)->respond(
+            $agent,
+            $conversation,
+            'კი მაგრამ წერია რომ ამოწურულია მარაგი თოვლის კაცის',
+        );
+
+        $this->assertSame([$snowman->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('ამჟამად მარაგში არ არის', $reply['text']);
+        $this->assertStringNotContainsString($other->name, $reply['text']);
+        $this->assertSame(['remember_recent_products', 'check_stock'], $reply['tools_used']);
     }
 
     public function test_related_entity_follow_up_is_left_for_semantic_resolution(): void

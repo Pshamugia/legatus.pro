@@ -37,7 +37,7 @@
     <main class="hero" id="product">
         <section>
             <span class="tag"><span class="dot"></span> AI sales employee · online 24/7</span>
-            <h1>Every conversation can become <em>a sale.</em></h1>
+            <h1>You imagine. We  <em>execute</em></h1>
             <p>საქართველოში მცირე ონლაინ ბიზნესები Instagram-სა და Messenger-ში გაყიდვებს ხშირად ხელით მართავენ. როცა მფლობელს სძინავს ან დაკავებულია, პასუხი გვიანდება და გაყიდვა იკარგება. Legatus თითოეულ ბიზნესს აძლევს ციფრულ ელჩს, რომელიც მომხმარებელს უპასუხოდ არ ტოვებს — და ზუსტად იცის, როდის უნდა დაუძახოს ადამიანს.</p>
             <div class="actions">
                 <a class="btn lime" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
