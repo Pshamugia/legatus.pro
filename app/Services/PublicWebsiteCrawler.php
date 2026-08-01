@@ -26,7 +26,8 @@ class PublicWebsiteCrawler
 
         $maximumPages = max(10, min(10_000, (int) config('legatus.public_crawl_max_pages', 5000)));
         $taxonomyOnly = $this->ingestion->taxonomyForSource($source) !== [];
-        if ($taxonomyOnly) {
+        $listingOnly = $taxonomyOnly || $source->source_scope === 'catalog';
+        if ($listingOnly) {
             // A named category/genre URL is a scoped collection, not another
             // request to crawl the business's entire domain.
             $maximumPages = min($maximumPages, max(10, (int) config('legatus.taxonomy_crawl_max_pages', 250)));
@@ -42,7 +43,7 @@ class PublicWebsiteCrawler
 
         $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
 
-        if (! $taxonomyOnly) {
+        if (! $listingOnly) {
             foreach ([
                 $this->origin($startUrl).'/sitemap.xml',
                 $this->origin($startUrl).'/sitemap_index.xml',
@@ -97,11 +98,11 @@ class PublicWebsiteCrawler
                 // Named category/genre sources are lightweight product indexes.
                 // The listing pages already define membership, so crawling and
                 // embedding every linked detail page would duplicate the site.
-                if (! $taxonomyOnly) {
+                if (! $listingOnly) {
                     $this->storeReadablePage($source, $url, $body, $products !== []);
                 }
 
-                foreach ($this->discoverLinks($body, $url, $products, $taxonomyOnly) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $listingOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 
@@ -141,8 +142,8 @@ class PublicWebsiteCrawler
             }
 
             $source->update([
-                'status' => config('services.openai.key') && ! $taxonomyOnly ? 'processing' : 'ready',
-                'progress' => config('services.openai.key') && ! $taxonomyOnly ? 96 : 100,
+                'status' => config('services.openai.key') && ! $listingOnly ? 'processing' : 'ready',
+                'progress' => config('services.openai.key') && ! $listingOnly ? 96 : 100,
                 'items_found' => $productCount,
                 'items_created' => $created,
                 'items_updated' => $updated,
@@ -152,7 +153,7 @@ class PublicWebsiteCrawler
                     ? null
                     : "Crawl reached the configured {$maximumPages}-page safety limit.",
             ]);
-            if (config('services.openai.key') && ! $taxonomyOnly) {
+            if (config('services.openai.key') && ! $listingOnly) {
                 EmbedKnowledgeSource::dispatch($source->id);
             }
         } catch (\Throwable $exception) {

@@ -872,6 +872,10 @@ class KnowledgeIngestionService
     /** @return list<string> */
     private function sourceTaxonomy(KnowledgeSource $source): array
     {
+        if ($source->source_scope === 'category' && filled($source->taxonomy_label)) {
+            return $this->searchableValues($source->taxonomy_label, 120);
+        }
+
         $name = trim((string) $source->name);
         if (! preg_match('/^(?:category|categories|genre|genres|tag|tags|collection|კატეგორია|კატეგორიები|ჟანრი|ჟანრები|თეგი|თეგები|კოლექცია)\s*:\s*(.+)$/iu', $name, $matches)) {
             return [];

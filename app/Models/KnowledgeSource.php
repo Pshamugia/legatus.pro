@@ -26,4 +26,14 @@ class KnowledgeSource extends Model
     {
         return $this->type === 'url' ? filled($this->url) : filled($this->file_path);
     }
+
+    public function isCategoryIndex(): bool
+    {
+        return $this->source_scope === 'category';
+    }
+
+    public function isListingIndex(): bool
+    {
+        return in_array($this->source_scope, ['catalog', 'category'], true);
+    }
 }

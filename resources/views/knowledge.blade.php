@@ -24,7 +24,24 @@
 <div class="dash-shell">@include('partials.workspace-navigation', ['active' => 'knowledge'])
 <main class="main"><div class="topline"><div><span class="eyebrow">Business brain</span><h1>Knowledge sources</h1><p style="color:var(--muted);margin:4px 0">ასწავლეთ Legatus-ს პროდუქტები, პოლიტიკა და ბრენდის ცოდნა.</p></div><a class="btn ghost" href="{{ $agent ? route('chat.show',$agent) : route('dashboard') }}">Test knowledge ↗</a></div>
 @if(session('success'))<div class="panel" style="margin-top:20px;border-color:#a9d6b4;color:#267244">✓ {{ session('success') }}</div>@endif @if(session('error'))<div class="panel" style="margin-top:20px;border-color:#e6afa9;color:#a43b32">{{ session('error') }}</div>@endif
-<div class="content-grid" style="margin-top:24px"><section class="panel"><h3>Add a source</h3><form method="post" enctype="multipart/form-data" action="{{ route('knowledge.store') }}">@csrf<label>Source type</label><div style="display:flex;gap:9px"><label class="tag"><input style="width:auto" type="radio" name="type" value="url" checked> Website URL</label><label class="tag"><input style="width:auto" type="radio" name="type" value="csv"> CSV catalog</label><label class="tag"><input style="width:auto" type="radio" name="type" value="pdf"> PDF / policy</label></div><label>Display name <span style="color:var(--muted);font-weight:400">(optional)</span></label><input name="name" placeholder="Summer catalog or Delivery policy"><div id="url-field"><label>Public website URL</label><input type="url" name="url" placeholder="https://store.example/products"></div><div id="file-field" style="display:none"><label>Choose CSV or PDF · max 10 MB</label><input type="file" name="file" accept=".csv,.txt,.pdf"></div><button class="btn lime" style="margin-top:22px;width:100%">Teach Legatus →</button></form></section>
+<section class="panel" style="margin-top:24px">
+    <h3>Website catalog structure</h3>
+    <p class="channel">Connect the complete product catalog once, then map each business-specific category by its own name and URL.</p>
+    <form id="website-structure-form" method="post" action="{{ route('knowledge.store') }}">
+        @csrf
+        <input type="hidden" name="mode" value="website_structure">
+        <label>1. Site catalog URL <span style="color:var(--muted);font-weight:400">(all products)</span></label>
+        <input type="url" name="catalog_url" required placeholder="https://store.example/products">
+        <label>2. Categories</label>
+        <div id="category-fields"></div>
+        <button type="button" class="btn ghost" id="add-category" style="margin-top:10px">＋ Add category</button>
+        <label>3. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <input type="url" name="sitemap_url" placeholder="https://store.example/sitemap.xml">
+        <button class="btn lime" style="margin-top:22px">Save and synchronize →</button>
+        <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>
+    </form>
+</section>
+<div class="content-grid" style="margin-top:24px"><section class="panel"><h3>Upload a catalog or policy</h3><form method="post" enctype="multipart/form-data" action="{{ route('knowledge.store') }}">@csrf<label>Source type</label><div style="display:flex;gap:9px"><label class="tag"><input style="width:auto" type="radio" name="type" value="csv" checked> CSV catalog</label><label class="tag"><input style="width:auto" type="radio" name="type" value="pdf"> PDF / policy</label></div><label>Display name <span style="color:var(--muted);font-weight:400">(optional)</span></label><input name="name" placeholder="Summer catalog or Delivery policy"><div id="file-field"><label>Choose CSV or TXT · max 10 MB</label><input type="file" name="file" accept=".csv,.txt"></div><button class="btn lime" style="margin-top:22px;width:100%">Teach Legatus →</button></form></section>
 <aside class="agent-card"><span class="tag" style="background:#ffffff12;border-color:#ffffff20;color:white">How it works</span><h2 style="font-size:24px">From raw data to trusted answers.</h2><p>1. Content is fetched and validated.<br><br>2. Products are normalized and deduplicated.<br><br>3. Policies are split into searchable chunks.<br><br>4. Legatus cites the exact source used.</p><div style="padding-top:15px;border-top:1px solid #ffffff20;font-size:12px;color:#bcd0c9">Private network URLs are blocked. Catalog text is treated as data, never as AI instructions.</div></aside></div>
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
     <div class="knowledge-heading">
@@ -33,7 +50,7 @@
     </div>
     @forelse($sources as $source)
         @php($fixture = ! $source->isRefreshable())
-        <div class="conversation knowledge-source-row">
+        <div class="conversation knowledge-source-row" data-source-row="{{ $source->id }}">
             <span class="avatar" style="width:40px;height:40px;background:{{ $source->status==='ready'?'#e8f7d8':'#f3eee1' }};color:var(--ink)">{{ strtoupper(substr($source->type,0,1)) }}</span>
             <div class="copy knowledge-source-copy">
                 <strong>{{ $source->name }}</strong>
@@ -62,11 +79,11 @@
             <div class="knowledge-source-actions">
                 <span class="channel">{{ $fixture ? 'Static fixture · no source payload' : ($source->last_synced_at?->diffForHumans() ?? 'Not synced') }}</span>
                 @if($source->isRefreshable())
-                    <form method="post" action="{{ route('knowledge.sync',$source) }}">@csrf<button class="btn ghost" style="padding:8px 11px">↻ Sync</button></form>
+                    <form class="async-source-action" data-action="sync" method="post" action="{{ route('knowledge.sync',$source) }}">@csrf<button class="btn ghost" style="padding:8px 11px">↻ Sync</button></form>
                 @else
                     <span class="tag">Not refreshable</span>
                 @endif
-                <form method="post" action="{{ route('knowledge.destroy',$source) }}">@csrf @method('DELETE')<button class="btn ghost" style="padding:8px 11px;color:#a43b32">Remove</button></form>
+                <form class="async-source-action" data-action="remove" method="post" action="{{ route('knowledge.destroy',$source) }}">@csrf @method('DELETE')<button class="btn ghost" style="padding:8px 11px;color:#a43b32">Remove</button></form>
             </div>
         </div>
     @empty
@@ -74,11 +91,50 @@
     @endforelse
 </section></main></div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
-const radios=document.querySelectorAll('input[name=type]'),url=document.querySelector('#url-field'),file=document.querySelector('#file-field'),upload=file.querySelector('input[type=file]'),uploadLabel=file.querySelector('label');
+const categoryFields=document.querySelector('#category-fields'),addCategory=document.querySelector('#add-category'),structureForm=document.querySelector('#website-structure-form'),structureStatus=document.querySelector('#website-structure-status');
+let categoryIndex=0;
+function appendCategory(){
+    const row=document.createElement('div');
+    row.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:9px;align-items:end;margin-top:9px';
+    row.innerHTML=`<div><label>Category name</label><input required name="categories[${categoryIndex}][name]" placeholder="e.g. Thriller"></div><div><label>Category URL</label><input required type="url" name="categories[${categoryIndex}][url]" placeholder="https://store.example/category/thriller"></div><button type="button" class="btn ghost remove-category" aria-label="Remove category">×</button>`;
+    row.querySelector('.remove-category').addEventListener('click',()=>row.remove());
+    categoryFields.appendChild(row);
+    categoryIndex++;
+}
+addCategory.addEventListener('click',appendCategory);
+appendCategory();
+structureForm.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const button=structureForm.querySelector('button[type=submit],button:not([type])');
+    button.disabled=true;
+    structureStatus.textContent='Queuing synchronization…';
+    try{
+        const response=await fetch(structureForm.action,{method:'POST',headers:{Accept:'application/json'},body:new FormData(structureForm)});
+        const payload=await response.json();
+        if(!response.ok)throw new Error(payload.message||'Could not save the website structure.');
+        structureStatus.textContent=payload.message+' You can keep working on this page.';
+    }catch(error){structureStatus.textContent=error.message;}finally{button.disabled=false;}
+});
+document.querySelectorAll('.async-source-action').forEach(form=>form.addEventListener('submit',async event=>{
+    event.preventDefault();
+    const button=form.querySelector('button'),row=form.closest('[data-source-row]'),action=form.dataset.action;
+    button.disabled=true;
+    const original=button.textContent;
+    button.textContent=action==='remove'?'Removing…':'Queued…';
+    try{
+        const response=await fetch(form.action,{method:'POST',headers:{Accept:'text/html'},body:new FormData(form)});
+        if(!response.ok)throw new Error('The action could not be completed.');
+        if(action==='remove')row.remove();
+        else{
+            const pill=row.querySelector('.pill');
+            if(pill)pill.textContent='processing';
+            button.textContent='Queued';
+        }
+    }catch(error){button.textContent=original;button.disabled=false;structureStatus.textContent=error.message;}
+}));
+const radios=document.querySelectorAll('input[name=type]'),file=document.querySelector('#file-field'),upload=file.querySelector('input[type=file]'),uploadLabel=file.querySelector('label');
 radios.forEach(r=>r.addEventListener('change',()=>{
     if(!r.checked)return;
-    url.style.display=r.value==='url'?'block':'none';
-    file.style.display=r.value==='url'?'none':'block';
     if(r.value==='pdf'){
         upload.accept='.pdf';
         uploadLabel.textContent='Choose PDF · max 10 MB';

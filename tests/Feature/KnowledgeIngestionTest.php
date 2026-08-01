@@ -559,6 +559,64 @@ HTML;
         $this->get('/app/knowledge')->assertOk()->assertSee('Knowledge sources');
     }
 
+    public function test_business_can_save_catalog_unlimited_categories_and_optional_sitemap_without_page_reload(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+
+        $response = $this->actingAs($user)->postJson(route('knowledge.store'), [
+            'mode' => 'website_structure',
+            'catalog_url' => 'https://shop.example/products',
+            'categories' => [
+                ['name' => 'Thriller', 'url' => 'https://shop.example/category/thriller'],
+                ['name' => 'Denim trousers', 'url' => 'https://shop.example/category/denim'],
+                ['name' => 'Pastry', 'url' => 'https://shop.example/category/pastry'],
+            ],
+            'sitemap_url' => 'https://shop.example/sitemap.xml',
+        ]);
+
+        $response->assertAccepted()->assertJsonCount(5, 'source_ids');
+        $this->assertDatabaseHas('knowledge_sources', [
+            'agent_id' => $agent->id, 'source_scope' => 'catalog', 'url' => 'https://shop.example/products',
+        ]);
+        $this->assertDatabaseHas('knowledge_sources', [
+            'agent_id' => $agent->id, 'source_scope' => 'category', 'taxonomy_label' => 'Thriller',
+        ]);
+        $this->assertDatabaseHas('knowledge_sources', [
+            'agent_id' => $agent->id, 'source_scope' => 'sitemap', 'url' => 'https://shop.example/sitemap.xml',
+        ]);
+        Queue::assertPushed(CrawlPublicWebsite::class, 5);
+    }
+
+    public function test_saving_website_structure_updates_single_catalog_and_existing_category(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+        $catalog = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Site catalog',
+            'url' => 'https://shop.example/old-products', 'status' => 'ready', 'progress' => 100,
+        ]);
+        $category = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Thriller',
+            'name' => 'Category: Thriller', 'url' => 'https://shop.example/old-thriller',
+        ]);
+
+        $this->actingAs($user)->postJson(route('knowledge.store'), [
+            'mode' => 'website_structure',
+            'catalog_url' => 'https://shop.example/new-products',
+            'categories' => [['name' => 'Thriller', 'url' => 'https://shop.example/new-thriller']],
+        ])->assertAccepted();
+
+        $this->assertSame($catalog->id, $agent->knowledgeSources()->where('source_scope', 'catalog')->sole()->id);
+        $this->assertSame('https://shop.example/new-products', $catalog->fresh()->url);
+        $this->assertSame($category->id, $agent->knowledgeSources()->where('source_scope', 'category')->sole()->id);
+        $this->assertSame('https://shop.example/new-thriller', $category->fresh()->url);
+    }
+
     public function test_manual_taxonomy_sync_queues_only_its_category_index(): void
     {
         Queue::fake();

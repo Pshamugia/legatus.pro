@@ -7,6 +7,7 @@ use App\Models\KnowledgeSource;
 use App\Services\KnowledgeIngestionService;
 use App\Services\TenantContext;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class KnowledgeController extends Controller
@@ -27,6 +28,10 @@ class KnowledgeController extends Controller
     public function store(Request $r, KnowledgeIngestionService $ingestion, TenantContext $tenant)
     {
         $tenant->authorize(['owner', 'admin']);
+        if ($r->input('mode') === 'website_structure') {
+            return $this->storeWebsiteStructure($r, $tenant);
+        }
+
         $data = $r->validate([
             'type' => 'required|in:url,csv,pdf',
             'url' => 'nullable|required_if:type,url|url|max:2000',
@@ -57,6 +62,59 @@ class KnowledgeController extends Controller
         } catch (\Throwable) {
             return back()->with('error', $source->fresh()->error);
         }
+    }
+
+    private function storeWebsiteStructure(Request $request, TenantContext $tenant)
+    {
+        $data = $request->validate([
+            'catalog_url' => 'required|url|max:2000',
+            'sitemap_url' => 'nullable|url|max:2000',
+            'categories' => 'nullable|array',
+            'categories.*.name' => 'required_with:categories.*.url|nullable|string|max:150',
+            'categories.*.url' => 'required_with:categories.*.name|nullable|url|max:2000',
+        ]);
+        $categories = collect($data['categories'] ?? [])
+            ->filter(fn (array $category): bool => filled($category['name'] ?? null) && filled($category['url'] ?? null))
+            ->unique(fn (array $category): string => mb_strtolower(trim($category['name'])).'|'.trim($category['url']))
+            ->values();
+        $agent = $tenant->agent();
+        $sourceIds = DB::transaction(function () use ($agent, $data, $categories): array {
+            $sources = [];
+            $catalog = $agent->knowledgeSources()->updateOrCreate(
+                ['source_scope' => 'catalog'],
+                ['type' => 'url', 'name' => 'Site catalog', 'url' => $data['catalog_url'], 'status' => 'processing', 'progress' => 1, 'error' => null],
+            );
+            $sources[] = $catalog->id;
+
+            foreach ($categories as $category) {
+                $label = trim($category['name']);
+                $source = $agent->knowledgeSources()->updateOrCreate(
+                    ['source_scope' => 'category', 'taxonomy_label' => $label],
+                    ['type' => 'url', 'name' => "Category: {$label}", 'url' => trim($category['url']), 'status' => 'processing', 'progress' => 1, 'error' => null],
+                );
+                $sources[] = $source->id;
+            }
+
+            if (filled($data['sitemap_url'] ?? null)) {
+                $sitemap = $agent->knowledgeSources()->updateOrCreate(
+                    ['source_scope' => 'sitemap'],
+                    ['type' => 'url', 'name' => 'Sitemap', 'url' => $data['sitemap_url'], 'status' => 'processing', 'progress' => 1, 'error' => null],
+                );
+                $sources[] = $sitemap->id;
+            }
+
+            return $sources;
+        });
+
+        foreach ($sourceIds as $sourceId) {
+            CrawlPublicWebsite::dispatch($sourceId);
+        }
+
+        $message = count($sourceIds).' website knowledge indexes were queued safely in the background.';
+
+        return $request->expectsJson()
+            ? response()->json(['message' => $message, 'source_ids' => $sourceIds], 202)
+            : back()->with('success', $message);
     }
 
     public function sync(KnowledgeSource $source, KnowledgeIngestionService $ingestion, TenantContext $tenant)
