@@ -636,6 +636,24 @@ class SalesToolboxHardeningTest extends TestCase
         Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
+    public function test_generic_georgian_follow_up_never_matches_a_product_by_substring(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 3);
+        $product->update([
+            'name' => 'დრამები',
+            'search_text' => 'დრამები ჰენრიკ იბსენი',
+        ]);
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'რამე გაქვთ საერთოდ?', 'category' => null, 'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame([], $result['unavailable_products']);
+        Http::assertNothingSent();
+    }
+
     private function context(int $stock = 10): array
     {
         $agent = Agent::create([

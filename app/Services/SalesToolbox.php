@@ -66,6 +66,18 @@ class SalesToolbox
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
         $termGroups = $this->searchTermGroups((string) $a['query']);
+        if ($termGroups === []) {
+            return [
+                'ok' => true,
+                'data_boundary' => $this->catalogDataBoundary(),
+                'source' => $this->catalogSource($agent),
+                'products' => [],
+                'unavailable_products' => [],
+                'did_you_mean' => null,
+                'suggestion_requires_confirmation' => false,
+                'category_index_pending' => false,
+            ];
+        }
         $taxonomyProductIds = $this->authoritativeTaxonomyProductIds(
             $agent,
             $termGroups,
@@ -809,6 +821,7 @@ class SalesToolbox
             'წიგნი', 'წიგნები', 'წიგნის', 'წიგნებს', 'პროდუქტი', 'პროდუქტები',
             'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები',
             'ფასი', 'ღირს', 'მარაგი', 'მარაგშია', 'მარაგში', 'ხელმისაწვდომი', 'ხელმისაწვდომია',
+            'რამე', 'საერთოდ',
         ];
 
         return collect($tokens)
@@ -1114,7 +1127,7 @@ class SalesToolbox
                         $best = max($best, $weight + 80);
                     } elseif (in_array($variant, $tokens[$name], true)) {
                         $best = max($best, $weight + 40);
-                    } elseif (str_contains($field, $variant)) {
+                    } elseif (mb_strlen($variant) >= 5 && str_contains($field, $variant)) {
                         $best = max($best, $weight);
                     }
                 }
@@ -1142,7 +1155,7 @@ class SalesToolbox
         ]));
 
         return collect($termGroups)->filter(fn (array $variants): bool => collect($variants)
-            ->contains(fn (string $variant): bool => str_contains($haystack, $variant)))->count();
+            ->contains(fn (string $variant): bool => $this->textMatchesVariant($haystack, $variant)))->count();
     }
 
     private function productMatchesTermGroup($product, array $variants): bool
@@ -1160,8 +1173,19 @@ class SalesToolbox
         ]));
 
         return collect($variants)->contains(
-            fn (string $variant): bool => mb_strlen($variant) >= 2 && str_contains($haystack, $variant)
+            fn (string $variant): bool => $this->textMatchesVariant($haystack, $variant)
         );
+    }
+
+    private function textMatchesVariant(string $haystack, string $variant): bool
+    {
+        if (mb_strlen($variant) < 2) {
+            return false;
+        }
+        $tokens = preg_split('/[^\p{L}\p{N}%_+\-.]+/u', $haystack, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return in_array($variant, $tokens, true)
+            || (mb_strlen($variant) >= 5 && str_contains($haystack, $variant));
     }
 
     private function utf8Distance(string $left, string $right): int
