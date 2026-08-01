@@ -214,6 +214,33 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('clarification', $reply['intent'], json_encode($reply, JSON_UNESCAPED_UNICODE));
         $this->assertStringContainsString('ვეფხისტყაოსანი', $reply['text']);
         $this->assertStringNotContainsString('სანდოდ გადამოწმება ვერ შევძელი', $reply['text']);
+        $this->assertSame('ვეფხისტყაოსანი', data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
+
+        $followupCall = 0;
+        Http::fake(function ($request) use (&$followupCall, $product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                $followupCall++;
+                return Http::response(['id' => 'confirmed-typo-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => "ვიპოვე „{$product->name}“.", 'intent' => 'discovery', 'confidence' => .99,
+                        'handoff' => false, 'escalation_reason' => null, 'product_ids' => [$product->id], 'sources' => [],
+                        'factual_claims' => [['type' => 'product', 'product_id' => $product->id, 'amount' => null, 'quantity' => null, 'reference' => null]],
+                    ], JSON_UNESCAPED_UNICODE)]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $confirmed = app(SalesAgentService::class)->reply($agent, 'დიახ', $conversation->fresh());
+
+        $this->assertNull($confirmed['escalation_reason'], json_encode($confirmed, JSON_UNESCAPED_UNICODE));
+        $this->assertStringContainsString('ვეფხისტყაოსანი', $confirmed['text'], json_encode($confirmed, JSON_UNESCAPED_UNICODE));
+        $this->assertSame([$product->id], $confirmed['products']->pluck('id')->all());
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
     }
 
     public function test_agent_executes_a_catalog_tool_and_returns_structured_output(): void
