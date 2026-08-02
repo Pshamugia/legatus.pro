@@ -33,7 +33,6 @@
         <div class="bubble">გამარჯობა! 👋 {{ $assistantIntroduction }} რას ეძებთ? გირჩევთ პროდუქტს თქვენი გემოვნების, ბიუჯეტისა და საჭიროების მიხედვით.</div>
     </main>
     <div class="suggest">
-        <button type="button" data-q="30 ლარამდე საჩუქარს ვეძებ">🎁 საჩუქარი 30₾-მდე</button>
         <button type="button" data-q="დამეხმარე არჩევანში — ჯერ რამდენიმე კითხვა დამისვი და შემდეგ მხოლოდ თქვენი კატალოგიდან მირჩიე">✨ პერსონალური რჩევა</button>
         <button type="button" data-q="ხვალ მიწოდება შეიძლება?">🚚 მიწოდება</button>
     </div>
