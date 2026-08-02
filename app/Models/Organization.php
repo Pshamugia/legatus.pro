@@ -21,4 +21,19 @@ class Organization extends Model
     {
         return $this->hasMany(Agent::class);
     }
+
+    public function paddleSubscriptions(): HasMany
+    {
+        return $this->hasMany(PaddleSubscription::class);
+    }
+
+    public function currentSubscription(): ?PaddleSubscription
+    {
+        return $this->paddleSubscriptions()->latest('paddle_occurred_at')->first();
+    }
+
+    public function hasBillingAccess(): bool
+    {
+        return $this->currentSubscription()?->grantsAccess() ?? false;
+    }
 }
