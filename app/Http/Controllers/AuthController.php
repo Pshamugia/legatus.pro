@@ -52,7 +52,10 @@ class AuthController extends Controller
         });
         $r->session()->regenerate();
 
-        return redirect()->route('onboarding');
+        $billingConfigured = filled(config('paddle.client_token'))
+            && collect(config('paddle.prices'))->filter()->count() === 3;
+
+        return redirect()->route($billingConfigured ? 'billing.index' : 'onboarding');
     }
 
     public function logout(Request $r)
