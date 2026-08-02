@@ -1,7 +1,6 @@
 @extends('layouts.app')
 @section('title', 'Choose your Legatus plan')
 @section('body')
-@vite(['resources/js/app.js'])
 <div class="chatpage" style="display:block;padding:40px 24px"><main style="max-width:1050px;margin:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:20px"><a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn ghost">Log out</button></form></div>
     <section style="text-align:center;margin:55px auto 34px;max-width:700px"><span class="tag"><span class="dot"></span>2-day free trial</span><h1 style="font-size:44px;letter-spacing:-2px;margin:18px 0 10px">Activate {{ $organization->name }}</h1><p style="color:var(--muted);font-size:17px">Add a payment method today. You will not be charged until the 2-day trial ends.</p></section>
@@ -16,4 +15,26 @@
 </main></div>
 <div id="paddle-config" data-token="{{ $paddleClientToken }}" data-environment="{{ $paddleEnvironment }}" data-email="{{ auth()->user()->email }}" data-billing-reference="{{ $billingReference }}" data-success-url="{{ route('billing.index', ['checkout' => 'complete']) }}"></div>
 <style>@media(max-width:800px){.billing-grid{grid-template-columns:1fr!important}}</style>
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+<script>
+(() => {
+    const config = document.getElementById('paddle-config');
+    const message = document.getElementById('paddle-message');
+    if (!config?.dataset.token || !window.Paddle) return;
+    if (config.dataset.environment === 'sandbox') window.Paddle.Environment.set('sandbox');
+    window.Paddle.Initialize({
+        token: config.dataset.token,
+        eventCallback(event) {
+            if (event.name === 'checkout.completed' && message) message.textContent = 'Payment details received. Activating your workspace…';
+            if ((event.name === 'checkout.error' || event.name === 'checkout.payment.error') && message) message.textContent = 'Checkout could not be completed. Please try again.';
+        },
+    });
+    document.querySelectorAll('.paddle-checkout').forEach((button) => button.addEventListener('click', () => window.Paddle.Checkout.open({
+        items: [{ priceId: button.dataset.priceId, quantity: 1 }],
+        customer: { email: config.dataset.email },
+        customData: { billing_reference: config.dataset.billingReference },
+        settings: { variant: 'one-page', successUrl: config.dataset.successUrl },
+    })));
+})();
+</script>
 @endsection
