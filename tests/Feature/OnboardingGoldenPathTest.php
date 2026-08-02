@@ -13,6 +13,12 @@ class OnboardingGoldenPathTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.openai.key' => null]);
+    }
+
     public function test_onboarding_updates_the_workspace_and_learns_url_and_catalog(): void
     {
         config(['services.openai.key' => null]);

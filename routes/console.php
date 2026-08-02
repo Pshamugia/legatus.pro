@@ -20,6 +20,10 @@ Schedule::command('legatus:dispatch-channel-outbox')->everyMinute()->withoutOver
 // delivery gaps caused by Meta development mode, routing changes, or outages.
 Schedule::command('legatus:reconcile-meta-inbox')->everyMinute()->withoutOverlapping();
 
+// Rebuild legacy category mappings one at a time. This keeps tenant taxonomy
+// indexes moving without creating a burst of crawlers on shared hosting.
+Schedule::command('legatus:rebuild-category-indexes')->everyFiveMinutes()->withoutOverlapping(10);
+
 // Shared-hosting production does not necessarily provide Supervisor. Run a
 // short-lived worker from the platform scheduler so every tenant's one-click
 // sync continues after the browser request ends. The scheduler is configured

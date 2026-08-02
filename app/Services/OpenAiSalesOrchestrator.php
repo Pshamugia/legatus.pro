@@ -292,6 +292,18 @@ class OpenAiSalesOrchestrator
         }
 
         if ($escalationReason) {
+            // A repair request is preferable when it succeeds, but verified
+            // catalog evidence must still survive an unavailable or mistaken
+            // model. Never replace successful search results with a generic
+            // "could not verify" response.
+            $verifiedCatalogFallback = $this->verifiedCatalogFallbackReply($message, $usedCollection);
+            if ($verifiedCatalogFallback !== null) {
+                $data = $verifiedCatalogFallback;
+                $escalationReason = null;
+            }
+        }
+
+        if ($escalationReason) {
             $handoffEnabled = $agent->humanHandoffEnabled();
             if ($handoffEnabled) {
                 $this->forceHandoff($conversation, $escalationReason, 'Review the verified conversation context and confirm the safest next step.');
@@ -453,6 +465,52 @@ class OpenAiSalesOrchestrator
             'product_ids' => [$productId],
             'sources' => [],
             'factual_claims' => $claims,
+        ];
+    }
+
+    private function verifiedCatalogFallbackReply(string $customerMessage, Collection $used): ?array
+    {
+        $successfulCatalogCalls = $used
+            ->filter(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true))
+            ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false));
+        if ($successfulCatalogCalls->isEmpty()) {
+            return null;
+        }
+
+        $products = $successfulCatalogCalls
+            ->flatMap(fn (array $call) => array_merge(
+                data_get($call, 'result.products', []),
+                data_get($call, 'result.recommendations', []),
+            ))
+            ->filter(fn ($product): bool => is_array($product)
+                && (int) ($product['id'] ?? 0) > 0
+                && ($product['available'] ?? true) === true)
+            ->unique(fn (array $product): int => (int) $product['id'])
+            ->take(5)
+            ->values();
+        $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
+
+        return [
+            'text' => $products->isNotEmpty()
+                ? ($georgian
+                    ? 'კატალოგში შესაბამისი ხელმისაწვდომი ვარიანტები ვიპოვე. შეგიძლიათ ქვემოთ შეარჩიოთ.'
+                    : 'I found matching available options in the verified catalog. You can choose below.')
+                : ($georgian
+                    ? 'კატალოგში ამ მოთხოვნის შესაბამისი ხელმისაწვდომი პროდუქტი ვერ ვიპოვე.'
+                    : 'I could not find a matching available product in the verified catalog.'),
+            'intent' => 'discovery',
+            'confidence' => 1,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'product_ids' => $products->pluck('id')->all(),
+            'sources' => [],
+            'factual_claims' => $products->map(fn (array $product): array => [
+                'type' => 'product',
+                'product_id' => (int) $product['id'],
+                'amount' => null,
+                'quantity' => null,
+                'reference' => null,
+            ])->all(),
         ];
     }
 

@@ -857,4 +857,28 @@ HTML;
         $this->assertSame('ready', $source->fresh()->status);
         $this->assertNull($source->fresh()->error);
     }
+
+    public function test_legacy_category_rebuild_queues_only_one_scoped_source_at_a_time(): void
+    {
+        Queue::fake();
+        $agent = Agent::create(['name' => 'Shop', 'slug' => 'category-rebuild', 'business_name' => 'Shop']);
+        $first = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Biography',
+            'name' => 'Category: Biography', 'url' => 'https://shop.example/biography',
+            'status' => 'ready', 'progress' => 100, 'items_found' => 1283, 'index_version' => 0,
+        ]);
+        $second = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Thriller',
+            'name' => 'Category: Thriller', 'url' => 'https://shop.example/thriller',
+            'status' => 'ready', 'progress' => 100, 'items_found' => 900, 'index_version' => 0,
+        ]);
+
+        $this->artisan('legatus:rebuild-category-indexes')->assertSuccessful();
+
+        Queue::assertPushed(CrawlPublicWebsite::class, 1);
+        Queue::assertPushed(fn (CrawlPublicWebsite $job): bool => $job->sourceId === $first->id);
+        $this->assertSame('processing', $first->fresh()->status);
+        $this->assertSame(0, $first->fresh()->items_found);
+        $this->assertSame('ready', $second->fresh()->status);
+    }
 }

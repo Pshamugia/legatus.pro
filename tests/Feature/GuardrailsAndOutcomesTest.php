@@ -399,14 +399,19 @@ class GuardrailsAndOutcomesTest extends TestCase
         config(['services.openai.key' => 'test-key']);
         Http::fakeSequence()
             ->push(['results' => [['flagged' => false]]])
-            ->push(['id' => 'recommend-tool', 'output' => [['type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'recommend-call', 'arguments' => json_encode(['query' => 'safe', 'budget' => 150, 'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 3])]]])
+            ->push(['id' => 'recommend-tool', 'output' => [['type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'recommend-call', 'arguments' => json_encode(['query' => 'Verified Product', 'budget' => 150, 'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 3])]]])
             ->push(['id' => 'recommend-final', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode(['text' => "Choose {$unverified->name}.", 'intent' => 'recommendation', 'confidence' => .99, 'handoff' => false, 'escalation_reason' => null, 'product_ids' => [$unverified->id], 'sources' => []])]]]], 'usage' => []]);
 
         $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Recommend something safe.'])
-            ->assertOk()->assertJsonPath('handoff', true)->assertJsonCount(0, 'products');
+            ->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonCount(1, 'products')
+            ->assertJsonPath('products.0.id', $verified->id)
+            ->assertJsonMissing(['id' => $unverified->id]);
 
         $this->assertSame($verified->id, $agent->products()->where('stock', '>', 0)->firstOrFail()->id);
-        $this->assertStringContainsString('not returned by a successful verification tool', $response->json('escalation_reason'));
+        $this->assertNull($response->json('escalation_reason'));
+        $this->assertNotContains('server_guardrail', $response->json('tools_used'));
     }
 
     public function test_ai_does_not_reply_after_human_ownership(): void

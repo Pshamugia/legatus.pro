@@ -19,7 +19,10 @@ class PublicStorefrontCatalogTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['legatus.semantic_orchestration_enabled' => false]);
+        config([
+            'legatus.semantic_orchestration_enabled' => false,
+            'services.openai.key' => null,
+        ]);
     }
 
     public function test_catalog_url_ingestion_accepts_public_product_cards_with_prices(): void

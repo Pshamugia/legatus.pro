@@ -13,6 +13,12 @@ class OnboardingCommerceAuthorityTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['services.openai.key' => null]);
+    }
+
     public function test_active_live_connector_is_shown_as_authoritative_and_saved_catalog_url_is_not_reingested(): void
     {
         [$owner, $agent] = $this->tenant('authoritative-catalog', [
