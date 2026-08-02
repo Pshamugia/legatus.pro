@@ -351,6 +351,41 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNull(data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
     }
 
+    public function test_new_explicit_subject_cannot_inherit_an_older_pending_suggestion(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'new-subject-customer', 'status' => 'ai', 'channel' => 'widget',
+            'context' => ['pending_catalog_suggestion' => 'ვეფხისტყაოსანი'],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        $instructions = null;
+        Http::fake(function ($request) use (&$instructions) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                $instructions = $request->data()['instructions'] ?? '';
+
+                return Http::response(['id' => 'new-subject-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'დოსტოევსკის მოთხოვნას ცალკე დავამუშავებ.', 'intent' => 'clarification', 'confidence' => .99,
+                        'handoff' => false, 'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                    ], JSON_UNESCAPED_UNICODE)]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response([], 404);
+        });
+
+        app(SalesAgentService::class)->reply($agent, 'დოსტოევსკი გაქვთ?', $conversation);
+
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
+        $this->assertStringNotContainsString('The customer has an unresolved, server-validated catalog spelling suggestion', (string) $instructions);
+        $this->assertStringNotContainsString('ვეფხისტყაოსანი', (string) $instructions);
+    }
+
     public function test_explicit_budget_promise_is_executed_and_never_returns_an_over_budget_product(): void
     {
         $this->seed();
