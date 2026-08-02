@@ -690,6 +690,36 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertDatabaseHas('agent_runs', ['status' => 'failed']);
     }
 
+    public function test_responses_api_failure_still_uses_verified_tenant_catalog_search(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                return Http::response(['error' => ['message' => 'billing unavailable']], 429);
+            }
+
+            return Http::response('', 503);
+        });
+
+        $this->postJson("/demo/{$agent->slug}/message", ['message' => "Do you have {$product->name}?"])
+            ->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('products.0.id', $product->id)
+            ->assertJsonPath('tools_used.0', 'search_products')
+            ->assertJsonPath('tools_used.2', 'provider_outage_fallback');
+
+        $this->assertDatabaseHas('agent_runs', [
+            'model' => 'verified-catalog-provider-fallback',
+            'status' => 'fallback',
+        ]);
+    }
+
     public function test_raw_contact_is_only_ephemeral_while_the_persisted_transcript_is_immediately_redacted(): void
     {
         $this->seed();

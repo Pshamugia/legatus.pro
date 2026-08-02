@@ -47,6 +47,35 @@ class SalesAgentService
             } catch (\Throwable $e) {
                 report($e);
 
+                // The language-model provider may be rate-limited or have a
+                // billing outage while the tenant's verified catalog and live
+                // storefront are still healthy. Preserve product discovery by
+                // falling back to the same tenant-scoped search and stock
+                // tools; never turn a provider outage into "nothing found".
+                $verifiedCatalogReply = $this->catalog->respond($agent, $conversation, $message);
+                if ($verifiedCatalogReply !== null) {
+                    AgentRun::create([
+                        'agent_id' => $agent->id,
+                        'conversation_id' => $conversation->id,
+                        'provider' => 'local',
+                        'model' => 'verified-catalog-provider-fallback',
+                        'status' => 'fallback',
+                        'tools_used' => collect($verifiedCatalogReply['tools_used'] ?? [])
+                            ->map(fn ($name): array => ['name' => $name])
+                            ->push(['name' => 'provider_outage_fallback'])
+                            ->all(),
+                        'error' => PrivacyRedactor::text(Str::limit($e->getMessage(), 1000)),
+                    ]);
+
+                    $verifiedCatalogReply['tools_used'] = collect($verifiedCatalogReply['tools_used'] ?? [])
+                        ->push('provider_outage_fallback')
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    return $verifiedCatalogReply;
+                }
+
                 return $this->failClosed($agent, $conversation, $message, 'The AI provider or verification workflow failed safely.', $e);
             }
         }
