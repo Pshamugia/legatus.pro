@@ -333,7 +333,10 @@ class MetaConnectionController extends Controller
         if ($absolute !== null && $absolute !== '') {
             try {
                 $expiresAt = is_numeric($absolute)
-                    ? Carbon::createFromTimestamp(((int) $absolute) > 9999999999 ? intdiv((int) $absolute, 1000) : (int) $absolute)
+                    ? Carbon::createFromTimestamp(
+                        ((int) $absolute) > 9999999999 ? intdiv((int) $absolute, 1000) : (int) $absolute,
+                        config('app.timezone'),
+                    )
                     : Carbon::parse((string) $absolute);
 
                 return $expiresAt->isFuture() ? $expiresAt->toIso8601String() : false;
