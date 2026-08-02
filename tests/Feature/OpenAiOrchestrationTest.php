@@ -622,6 +622,52 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertDatabaseHas('conversations', ['visitor_id' => $visitorId, 'status' => 'human']);
     }
 
+    public function test_moderation_outage_does_not_block_a_grounded_catalog_search(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+        $responseCalls = 0;
+        Http::fake(function ($request) use (&$responseCalls, $product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['error' => ['message' => 'temporary outage']], 503);
+            }
+
+            $responseCalls++;
+            if ($responseCalls === 1) {
+                return Http::response(['id' => 'catalog-search', 'output' => [[
+                    'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'search-call',
+                    'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null]),
+                ]]]);
+            }
+
+            return Http::response([
+                'id' => 'catalog-answer',
+                'output' => [[
+                    'type' => 'message',
+                    'content' => [[
+                        'type' => 'output_text',
+                        'text' => json_encode([
+                            'text' => "Yes, {$product->name} is available.", 'intent' => 'discovery',
+                            'confidence' => .99, 'handoff' => false, 'escalation_reason' => null,
+                            'product_ids' => [$product->id], 'sources' => [], 'factual_claims' => [[
+                                'type' => 'product', 'product_id' => $product->id, 'amount' => null,
+                                'quantity' => null, 'reference' => null,
+                            ]],
+                        ]),
+                    ]],
+                ]],
+            ]);
+        });
+
+        $this->postJson("/demo/{$agent->slug}/message", ['message' => "Do you have {$product->name}?"])
+            ->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('products.0.id', $product->id)
+            ->assertJsonPath('tools_used.0', 'search_products');
+    }
+
     public function test_responses_api_failure_never_falls_back_to_an_unverified_answer(): void
     {
         $this->seed();

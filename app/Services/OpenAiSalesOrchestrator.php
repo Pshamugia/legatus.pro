@@ -31,12 +31,21 @@ class OpenAiSalesOrchestrator
             $pendingSuggestion = '';
         }
         $moderation = $this->moderationStatus($message, $deadline);
-        if ($moderation !== 'clear') {
-            $reason = $moderation === 'flagged' ? 'The customer message was blocked by the safety moderation layer.' : 'The moderation service was unavailable, so automatic processing stopped safely.';
+        if ($moderation === 'unavailable') {
+            // A transient moderation endpoint outage must not disable ordinary
+            // catalog search for every customer. The Responses API still
+            // applies its own platform safeguards, while all commercial facts
+            // remain constrained by the server-side tools and verifier below.
+            Log::warning('Moderation was unavailable; continuing with grounded sales orchestration.', [
+                'conversation_id' => $conversation->id,
+            ]);
+        }
+        if ($moderation === 'flagged') {
+            $reason = 'The customer message was blocked by the safety moderation layer.';
             if ($agent->humanHandoffEnabled()) {
                 $this->forceHandoff($conversation, $reason, 'Review the moderated request before continuing.');
             }
-            AgentRun::create(['agent_id' => $agent->id, 'conversation_id' => $conversation->id, 'model' => config('services.openai.model'), 'status' => $moderation === 'flagged' ? 'moderated' : 'failed', 'tools_used' => [['name' => 'moderation']], 'error' => $moderation === 'unavailable' ? $reason : null, 'latency_ms' => (int) ((microtime(true) - $started) * 1000)]);
+            AgentRun::create(['agent_id' => $agent->id, 'conversation_id' => $conversation->id, 'model' => config('services.openai.model'), 'status' => 'moderated', 'tools_used' => [['name' => 'moderation']], 'error' => null, 'latency_ms' => (int) ((microtime(true) - $started) * 1000)]);
 
             return $agent->humanHandoffEnabled()
                 ? $this->handoffReply('ამ მოთხოვნაზე ავტომატურად ვერ დაგეხმარებით. საუბარს უსაფრთხოდ გადავცემ ოპერატორს.', $reason, ['moderation'])
