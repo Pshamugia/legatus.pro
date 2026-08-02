@@ -42,6 +42,25 @@ class OpenAiSalesOrchestrator
 
         $used = [];
         $orchestrationMessage = $message;
+        $budgetConstraint = $this->explicitBudgetConstraint($message);
+        if ($budgetConstraint !== null && $this->isBudgetRecommendationRequest($message)) {
+            $arguments = [
+                // Budget is the only server-verifiable constraint at this
+                // stage. Natural-language preferences are applied by the
+                // orchestrator only within this bounded candidate set.
+                'query' => '',
+                'budget' => $budgetConstraint,
+                'category' => null,
+                'mood' => null,
+                'occasion' => null,
+                'limit' => 5,
+            ];
+            $result = $this->tools->execute('recommend_products', $arguments, $agent, $conversation);
+            $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
+            $orchestrationMessage .= "\n\n[Server-verified budget recommendation result: "
+                .json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                .'. Use only these results. Never present a product above the verified budget.]';
+        }
         if ($pendingSuggestion !== '' && $this->isShortAffirmation($message)) {
             $arguments = ['query' => $pendingSuggestion, 'category' => null, 'max_price' => null];
             $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
@@ -101,6 +120,37 @@ class OpenAiSalesOrchestrator
         }
         $data = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
         $usedCollection = collect($used);
+        $budgetRecommendations = $budgetConstraint !== null
+            ? $usedCollection
+                ->where('name', 'recommend_products')
+                ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
+                ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
+                ->filter(fn ($product): bool => is_array($product)
+                    && (int) ($product['id'] ?? 0) > 0
+                    && is_numeric($product['price'] ?? null)
+                    && (float) $product['price'] <= $budgetConstraint)
+                ->unique(fn (array $product): int => (int) $product['id'])
+                ->values()
+            : collect();
+        if ($budgetConstraint !== null && $this->isBudgetRecommendationRequest($message)) {
+            $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
+            $data['text'] = $budgetRecommendations->isNotEmpty()
+                ? ($georgian
+                    ? 'თქვენი ბიუჯეტის ფარგლებში შესაბამისი ხელმისაწვდომი ვარიანტები შევარჩიე. შეგიძლიათ ქვემოთ შეადაროთ.'
+                    : 'I found verified available options within your budget. You can compare them below.')
+                : ($georgian
+                    ? 'ამ ბიუჯეტის ფარგლებში შესაბამისი ხელმისაწვდომი პროდუქტი ვერ ვიპოვე.'
+                    : 'I could not find a matching available product within this budget.');
+            $data['intent'] = 'recommendation';
+            $data['confidence'] = 1;
+            $data['handoff'] = false;
+            $data['escalation_reason'] = null;
+            $data['product_ids'] = $budgetRecommendations->pluck('id')->all();
+            $data['factual_claims'] = $budgetRecommendations->map(fn (array $product): array => [
+                'type' => 'product', 'product_id' => (int) $product['id'],
+                'amount' => null, 'quantity' => null, 'reference' => null,
+            ])->all();
+        }
         $confirmedSuggestionProducts = $pendingSuggestion !== '' && $this->isShortAffirmation($message)
             ? $usedCollection
                 ->where('name', 'search_products')
@@ -1015,6 +1065,23 @@ class OpenAiSalesOrchestrator
     private function isShortAffirmation(string $message): bool
     {
         return preg_match('/^(?:yes|yeah|yep|correct|confirm|კი|დიახ|სწორია|დასტური)[.!?\s]*$/iu', trim($message)) === 1;
+    }
+
+    private function explicitBudgetConstraint(string $message): ?float
+    {
+        if (! preg_match('/(?:(?:₾|GEL|USD|EUR|\$|€)\s*(\d+(?:[.,]\d{1,2})?))|(?:(\d+(?:[.,]\d{1,2})?)\s*(?:₾|GEL|USD|EUR|\$|€|ლარ(?:ი|ის|ამდე)?))/iu', $message, $matches)) {
+            return null;
+        }
+
+        $value = ($matches[1] ?? '') !== '' ? $matches[1] : ($matches[2] ?? '');
+        $budget = (float) str_replace(',', '.', $value);
+
+        return $budget > 0 ? $budget : null;
+    }
+
+    private function isBudgetRecommendationRequest(string $message): bool
+    {
+        return preg_match('/(?:მირჩ|შემირჩ|შეარჩ|რეკომენდ|recommend|suggest|choose|pick)/iu', Str::lower($message)) === 1;
     }
 
     private function isShortRejection(string $message): bool
