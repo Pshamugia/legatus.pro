@@ -21,6 +21,12 @@ class OpenAiSalesOrchestrator
         $started = microtime(true);
         $deadline = $started + max(10, (int) config('services.openai.total_timeout'));
         $pendingSuggestion = trim((string) data_get($conversation->context, 'pending_catalog_suggestion', ''));
+        if ($pendingSuggestion !== '' && $this->isRejectionTurn($message)) {
+            $context = $conversation->context ?? [];
+            data_forget($context, 'pending_catalog_suggestion');
+            $conversation->update(['context' => $context]);
+            $pendingSuggestion = '';
+        }
         $moderation = $this->moderationStatus($message, $deadline);
         if ($moderation !== 'clear') {
             $reason = $moderation === 'flagged' ? 'The customer message was blocked by the safety moderation layer.' : 'The moderation service was unavailable, so automatic processing stopped safely.';
@@ -1014,6 +1020,11 @@ class OpenAiSalesOrchestrator
     private function isShortRejection(string $message): bool
     {
         return preg_match('/^(?:no|nope|incorrect|არა|არასწორია)[.!?\s]*$/iu', trim($message)) === 1;
+    }
+
+    private function isRejectionTurn(string $message): bool
+    {
+        return preg_match('/^(?:არა|არასწორია|no|incorrect)(?:[\s,.:;!?-]|$)/iu', trim($message)) === 1;
     }
 
     private function isAvailabilityCorrectionMessage(string $message): bool

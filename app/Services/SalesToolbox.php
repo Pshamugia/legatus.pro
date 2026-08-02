@@ -163,10 +163,10 @@ class SalesToolbox
         if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
             $didYouMean = $this->validatedSearchSuggestion(
                 (string) $a['query'],
-                $publicSearch['did_you_mean'] ?? data_get($remoteSearch, 'meta.did_you_mean'),
+                $this->nearestCatalogSuggestion($agent, $termGroups),
             ) ?? $this->validatedSearchSuggestion(
                 (string) $a['query'],
-                $this->nearestCatalogSuggestion($agent, $termGroups),
+                $publicSearch['did_you_mean'] ?? data_get($remoteSearch, 'meta.did_you_mean'),
             );
         }
 

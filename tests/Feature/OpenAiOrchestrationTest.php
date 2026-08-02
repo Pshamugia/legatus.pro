@@ -328,6 +328,29 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('discovery', $reply['intent']);
     }
 
+    public function test_explicit_correction_clears_a_rejected_pending_suggestion(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'rejected-suggestion-customer', 'status' => 'ai', 'channel' => 'widget',
+            'context' => ['pending_catalog_suggestion' => 'არასწორი ძველი სათაური'],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'correction-final', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'გასაგებია, ახალ შესწორებას გამოვიყენებ.', 'intent' => 'clarification', 'confidence' => .99,
+                    'handoff' => false, 'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        app(SalesAgentService::class)->reply($agent, 'არა, ვეფხისტყაოსანი ვიგულისხმე', $conversation);
+
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
+    }
+
     public function test_a_catalog_answer_blocked_by_the_verifier_is_rewritten_instead_of_repeating_a_fallback(): void
     {
         $this->seed();

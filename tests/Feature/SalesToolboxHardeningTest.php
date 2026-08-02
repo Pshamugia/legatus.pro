@@ -309,6 +309,13 @@ class SalesToolboxHardeningTest extends TestCase
             'search_text' => 'ვეფხისტყაოსანი შოთა რუსთაველი',
             'metadata' => ['author' => 'შოთა რუსთაველი'],
         ]);
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/search/suggest')) {
+                return Http::response(['items' => [], 'didYouMean' => 'ვეფხისტყაოსნის საკითხები']);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
 
         $result = app(SalesToolbox::class)->execute('search_products', [
             'query' => 'ვეფხვისტყაოსანი გაქვთ?',
