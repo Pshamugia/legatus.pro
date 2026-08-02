@@ -15,6 +15,8 @@ class PaddleBillingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutVite();
+        config()->set('paddle.billing_enforced', true);
         config()->set('paddle.environment', 'sandbox');
         config()->set('paddle.client_token', 'test_client_token');
         config()->set('paddle.webhook_secret', 'pdl_ntfset_secret');

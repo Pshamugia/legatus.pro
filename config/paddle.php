@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'billing_enforced' => (bool) env('PADDLE_BILLING_ENFORCED', false),
     'environment' => env('PADDLE_ENV', 'sandbox'),
     'client_token' => env('PADDLE_CLIENT_TOKEN'),
     'api_key' => env('PADDLE_API_KEY'),

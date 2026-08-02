@@ -52,7 +52,8 @@ class AuthController extends Controller
         });
         $r->session()->regenerate();
 
-        $billingConfigured = filled(config('paddle.client_token'))
+        $billingConfigured = config('paddle.billing_enforced')
+            && filled(config('paddle.client_token'))
             && collect(config('paddle.prices'))->filter()->count() === 3;
 
         return redirect()->route($billingConfigured ? 'billing.index' : 'onboarding');

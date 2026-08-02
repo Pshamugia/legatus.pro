@@ -23,6 +23,8 @@ class RequireActiveSubscription
 
     private function billingConfigured(): bool
     {
-        return filled(config('paddle.client_token')) && collect(config('paddle.prices'))->filter()->count() === 3;
+        return config('paddle.billing_enforced')
+            && filled(config('paddle.client_token'))
+            && collect(config('paddle.prices'))->filter()->count() === 3;
     }
 }
