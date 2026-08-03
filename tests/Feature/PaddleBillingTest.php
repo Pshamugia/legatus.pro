@@ -38,7 +38,11 @@ class PaddleBillingTest extends TestCase
         ]);
 
         $response->assertRedirect(route('billing.index'));
-        $this->get('/billing')->assertOk()->assertSee('$162')->assertSee('2-day free trial');
+        $billing = $this->get('/billing')->assertOk()->assertSee('$162')->assertSee('2-day free trial');
+        $csp = (string) $billing->headers->get('Content-Security-Policy');
+        $this->assertStringContainsString('https://cdn.paddle.com', $csp);
+        $this->assertStringContainsString('frame-src', $csp);
+        $this->assertMatchesRegularExpression('/<script nonce="[^"]+" src="https:\/\/cdn\.paddle\.com/', $billing->getContent());
         $this->get('/app')->assertRedirect(route('billing.index'));
     }
 
