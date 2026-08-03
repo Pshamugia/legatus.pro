@@ -55,7 +55,11 @@ class WebsiteWidgetAvailabilityTest extends TestCase
             ->assertOk()
             ->assertSee('legatus-widget-root');
         $this->assertStringContainsString('no-store', (string) $enabledScript->headers->get('Cache-Control'));
-        $this->get(route('widget.frame', $agent))->assertOk();
+        $this->get(route('widget.frame', $agent))
+            ->assertOk()
+            ->assertSee('Was this useful?')
+            ->assertSee('feedbackBase')
+            ->assertDontSee("if (role === 'ai') addTrace", false);
         $this->get(route('chat.show', $agent))->assertOk();
     }
 

@@ -45,6 +45,7 @@
     document.querySelector('#close-widget').addEventListener('click', () => parent.postMessage('legatus:close', '*'));
     const messageUrl = @json(route('chat.message', $agent));
     const historyUrl = @json(route('chat.history', $agent));
+    const feedbackBase = @json(url('/demo/'.$agent->slug.'/messages'));
     const storageKey = 'legatus_widget_visitor_token_{{ $agent->slug }}';
     const requestDeadlineMs = 90000;
     let visitorToken = readToken();
@@ -151,6 +152,33 @@
         bubble.append(trace);
     }
 
+    function addFeedback(bubble, messageId) {
+        if (!messageId) return;
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:5px;margin-top:9px;padding-top:7px;border-top:1px solid #edf1ee;color:#71817a;font-size:10px';
+        const label = document.createElement('span');
+        label.textContent = 'Was this useful?';
+        row.append(label);
+        [['👍', 'helpful'], ['👎', 'unhelpful']].forEach(([icon, value]) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = icon;
+            button.setAttribute('aria-label', value === 'helpful' ? 'Helpful response' : 'Unhelpful response');
+            button.style.cssText = 'border:1px solid #dfe7e1;background:white;border-radius:8px;padding:3px 7px;cursor:pointer';
+            button.addEventListener('click', async () => {
+                if (!visitorToken) return;
+                const response = await fetch(`${feedbackBase}/${encodeURIComponent(messageId)}/feedback`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: JSON.stringify({feedback: value, visitor_token: visitorToken}),
+                });
+                if (response.ok) row.textContent = 'Thanks · feedback saved ✓';
+            });
+            row.append(button);
+        });
+        bubble.append(row);
+    }
+
     function add(text, role, products = [], meta = {}) {
         const bubble = document.createElement('div');
         bubble.className = `bubble ${role}`;
@@ -195,7 +223,7 @@
             bubble.append(row);
         }
 
-        if (role === 'ai') addTrace(bubble, meta);
+        if (role === 'ai') addFeedback(bubble, meta.messageId || null);
         box.append(bubble);
         box.scrollTop = box.scrollHeight;
     }
@@ -232,10 +260,7 @@
         seen.add(message.id);
         const role = message.role === 'customer' ? 'user' : message.role === 'human' ? 'human' : 'ai';
         add(message.text, role, message.products || [], {
-            confidence: message.confidence,
-            sources: message.sources || [],
-            tools: message.tools_used || [],
-            reason: message.escalation_reason || null,
+            messageId: role === 'ai' ? message.id : null,
         });
     }
 
@@ -317,10 +342,7 @@
             if (data.customer_message_id) seen.add(data.customer_message_id);
             if (data.message_id) seen.add(data.message_id);
             add(data.text, 'ai', data.products || [], {
-                confidence: data.confidence,
-                sources: data.sources || [],
-                tools: data.tools_used || [],
-                reason: data.escalation_reason || null,
+                messageId: data.message_id || null,
             });
         } catch (error) {
             add(error.name === 'AbortError' ? 'პასუხმა დროის ლიმიტს გადააჭარბა. გთხოვთ ხელახლა სცადოთ.' : 'კავშირი შეფერხდა. გთხოვთ ხელახლა სცადოთ.', 'ai');
