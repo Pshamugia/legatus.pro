@@ -448,6 +448,16 @@ class OpenAiOrchestrationTest extends TestCase
                 return Http::response(['results' => [['flagged' => false]]]);
             }
             if (str_ends_with($request->url(), '/responses')) {
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'budget-tool', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'budget-call',
+                        'arguments' => json_encode([
+                            'query' => '', 'budget' => 17, 'quantity' => null,
+                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 5,
+                        ]),
+                    ]], 'usage' => []]);
+                }
+
                 return Http::response(['id' => 'budget-final', 'output' => [[
                     'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
                         'text' => 'I am not sure.', 'intent' => 'recommendation', 'confidence' => .99,
@@ -574,6 +584,16 @@ class OpenAiOrchestrationTest extends TestCase
                 return Http::response(['results' => [['flagged' => false]]]);
             }
             if (str_ends_with($request->url(), '/responses')) {
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'corrected-bundle-tool', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'corrected-bundle-call',
+                        'arguments' => json_encode([
+                            'query' => '', 'budget' => 60, 'quantity' => 3,
+                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 3,
+                        ]),
+                    ]], 'usage' => []]);
+                }
+
                 return Http::response(['id' => 'corrected-bundle-final', 'output' => [[
                     'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
                         'text' => 'Searching.', 'intent' => 'recommendation', 'confidence' => .99,

@@ -68,7 +68,6 @@ class OpenAiSalesOrchestrator
         }
         $budgetConstraint = $this->explicitBudgetConstraint($message);
         $quantityConstraint = $this->explicitQuantityConstraint($message);
-        $quantityAdjustedOnFollowUp = false;
         // An explicit amount plus an explicit item count is already a bundle
         // request (for example, "can I buy 5 books for 60 GEL?"). It must not
         // depend on the customer using a particular recommendation verb.
@@ -82,36 +81,14 @@ class OpenAiSalesOrchestrator
             $conversation->update(['context' => $context]);
         } elseif ($continuedBudgetRequest) {
             $budgetConstraint = is_numeric($pendingBudgetRequest['budget'] ?? null) ? (float) $pendingBudgetRequest['budget'] : null;
-            $quantityAdjustedOnFollowUp = $quantityConstraint !== null;
             $quantityConstraint ??= is_numeric($pendingBudgetRequest['quantity'] ?? null) ? (int) $pendingBudgetRequest['quantity'] : null;
 
             $context = $conversation->context ?? [];
             data_set($context, 'pending_budget_request', ['budget' => $budgetConstraint, 'quantity' => $quantityConstraint]);
             $conversation->update(['context' => $context]);
         }
-        // Explicit bundle requests and explicit quantity corrections are safe
-        // to calculate immediately. Other short turns are classified by the
-        // model from the full dialogue before any commerce tool is run.
-        $activeBudgetRequest = ($newBudgetRequest || ($continuedBudgetRequest && $quantityAdjustedOnFollowUp))
-            && $budgetConstraint !== null;
-        if ($activeBudgetRequest) {
-            $arguments = [
-                // A quantity-only correction such as "find 3 at that price"
-                // changes the bundle constraint; it is not a catalog keyword.
-                'query' => $continuedBudgetRequest && ! $quantityAdjustedOnFollowUp ? trim($message) : '',
-                'budget' => $budgetConstraint,
-                'quantity' => $quantityConstraint,
-                'category' => null,
-                'mood' => null,
-                'occasion' => null,
-                'limit' => max(1, min(5, $quantityConstraint ?: 5)),
-            ];
-            $result = $this->tools->execute('recommend_products', $arguments, $agent, $conversation);
-            $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
-            $orchestrationMessage .= "\n\n[Server-verified budget recommendation result: "
-                .json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                .'. Use only these results. Never present a product above the verified budget.]';
-        } elseif ($continuedBudgetRequest && $budgetConstraint !== null) {
+        $activeBudgetRequest = false;
+        if (($continuedBudgetRequest || $newBudgetRequest) && $budgetConstraint !== null) {
             $orchestrationMessage .= "\n\n[Unresolved shopping state: total budget {$budgetConstraint}; requested quantity "
                 .($quantityConstraint ?? 'not specified')
                 .'. First classify the current turn semantically. If it refines or continues that shopping request, call recommend_products and preserve these constraints. If it is gratitude, farewell, a reaction, or a new unrelated request, do not treat it as a catalog query or budget refinement.]';
@@ -175,7 +152,7 @@ class OpenAiSalesOrchestrator
         }
         $data = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
         $usedCollection = collect($used);
-        if ($continuedBudgetRequest && ! $activeBudgetRequest) {
+        if (! $activeBudgetRequest) {
             $semanticBudgetCall = $usedCollection
                 ->where('name', 'recommend_products')
                 ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false)
@@ -712,7 +689,7 @@ class OpenAiSalesOrchestrator
             ? ' Human handoff is enabled. Use request_human only under the strict escalation rules.'
             : ' Human handoff is disabled. Never promise, suggest, or attempt a transfer to a person; continue safely with AI assistance, ask a clarification, or honestly state what cannot be verified.';
 
-        $handoff .= ' Use conversation intent for gratitude, farewells, acknowledgements, reactions, and ordinary non-factual small talk; answer those naturally without commerce tools, factual claims, catalog fallbacks, or handoff. An unresolved shopping state does not make every later short message a refinement: continue it only when the meaning of the new turn actually adds, changes, or confirms a shopping constraint.';
+        $handoff .= ' Use conversation intent for gratitude, farewells, acknowledgements, reactions, and ordinary non-factual small talk; answer those naturally without commerce tools, factual claims, catalog fallbacks, or handoff. An unresolved shopping state does not make every later short message a refinement: continue it only when the meaning of the new turn actually adds, changes, or confirms a shopping constraint. Preserve every explicit genre, category, theme, author, and product-type constraint when calling recommendation tools; budget must never replace topical relevance. When the customer asks whether previously displayed products belong to a stated category or corrects that they do not, call compare_products for those recent product IDs, inspect their verified category and attributes, answer directly, and acknowledge any incorrect prior selection.';
 
         return $handoff.' Infer intent semantically from the complete conversation, never from isolated keywords. Resolve follow-ups against prior turns and ask one concise clarification when the reference is genuinely ambiguous. When the assistant asked a choice or refinement question and the customer answers briefly—including “yes”, “no”, “კი”, “არა”, a bare option such as “classic”/“კლასიკური”, or a relational phrase such as “this book”/“ეს წიგნი” and “by this author”/“ამ ავტორის”—treat that answer as a constraint on the unresolved request from the preceding turns. Expand the tool query with that earlier subject and the new constraint; never search only the isolated reply. For example, after asking "classic or modern?" about a product category, the answer "classic" means "classic [that category]", not every catalog item containing the word classic. If the customer challenges the previous availability answer with wording such as “კი მაგრამ წერია რომ ამოწურულია მარაგი”, bind the correction to the previously discussed product, call check_stock for that product, correct the answer from the verified result, and do not search for or offer other products. Preserve every still-active preference until the customer changes it. If exactly one matching product is presented, never ask "which one"; ask whether the customer wants to purchase that product or offer the single most useful next step. If the customer asks how to buy or purchase a product, resolve which recent product they mean, verify its availability, and explain that they can open the verified product card or link, add it to the business website cart, and complete checkout there. Never claim that Legatus itself completed payment or placed the order. Adapt vocabulary to the connected business and its actual catalog attributes; never assume it sells books or mention book-specific fields unless verified tenant data makes them relevant. A question about delivery, shipping, a courier, arrival time, or a delivery fee is always a delivery-policy request, never a product-price request. Call calculate_delivery for the destination and search_knowledge for the business delivery rules; never return product cards for it. If no verified delivery fee is present in either tool result, clearly say that the exact fee could not be verified instead of guessing.';
     }

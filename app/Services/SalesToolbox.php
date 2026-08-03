@@ -391,7 +391,10 @@ class SalesToolbox
     private function recommend(Agent $agent, Conversation $c, array $a): array
     {
         $criteria = trim(implode(' ', array_filter([$a['query'], $a['category'], $a['mood'], $a['occasion']])));
-        $termGroups = $this->searchTermGroups($criteria);
+        $termGroups = array_values(array_filter(
+            $this->searchTermGroups($criteria),
+            fn (array $variants): bool => ! ctype_digit((string) ($variants[0] ?? '')),
+        ));
         $taxonomyProductIds = $this->authoritativeTaxonomyProductIds(
             $agent,
             $termGroups,
@@ -990,7 +993,8 @@ class SalesToolbox
             'წიგნი', 'წიგნები', 'წიგნის', 'წიგნებს', 'პროდუქტი', 'პროდუქტები',
             'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები', 'გამოცემული',
             'ფასი', 'ღირს', 'მარაგი', 'მარაგშია', 'მარაგში', 'ხელმისაწვდომი', 'ხელმისაწვდომია',
-            'რამე', 'საერთოდ',
+            'რამე', 'საერთოდ', 'შემირჩიე', 'შემირჩიეთ', 'შეარჩიე', 'შეარჩიეთ',
+            'ლარი', 'ლარის', 'ლარად', 'ლარში', 'ფარგლებში', 'ბიუჯეტში', 'თანხის', 'მაგ', 'იმავე',
         ];
 
         return collect($tokens)
@@ -1009,6 +1013,11 @@ class SalesToolbox
         }
 
         $variants = [$token];
+        if (Str::endsWith($token, 'ები') && mb_strlen($token) > 5) {
+            $pluralStem = mb_substr($token, 0, -3);
+            $variants[] = $pluralStem;
+            $variants[] = $pluralStem.'ი';
+        }
         // A doubled final -ს is not a Georgian case ending. Keep it as a typo
         // candidate instead of silently stripping one letter and presenting a
         // different catalogue identity as an exact match.

@@ -536,6 +536,44 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertContains('ფილოსოფიური', $result['recommendations'][0]['matched_signals']);
     }
 
+    public function test_same_budget_never_returns_the_same_unrelated_products_for_different_genres(): void
+    {
+        [$agent, $existing, $conversation] = $this->context(stock: 5);
+        $existing->delete();
+        $novel = $agent->products()->create([
+            'name' => 'სატესტო რომანი', 'category' => 'რომანი', 'search_text' => 'სატესტო რომანი მხატვრული ლიტერატურა',
+            'price' => 18, 'stock' => 2, 'is_active' => true,
+        ]);
+        $poetry = $agent->products()->create([
+            'name' => 'სატესტო ლექსები', 'category' => 'პოეზია', 'search_text' => 'სატესტო ლექსები პოეტური კრებული პოეზია',
+            'price' => 16, 'stock' => 2, 'is_active' => true,
+        ]);
+        $detective = $agent->products()->create([
+            'name' => 'სატესტო დეტექტივი', 'category' => 'დეტექტივი', 'search_text' => 'სატესტო დეტექტივი კრიმინალური რომანი',
+            'price' => 20, 'stock' => 2, 'is_active' => true,
+        ]);
+        $manual = $agent->products()->create([
+            'name' => 'ენის სახელმძღვანელო', 'category' => 'სახელმძღვანელო', 'search_text' => 'ენის სახელმძღვანელო გრამატიკა',
+            'price' => 10, 'stock' => 2, 'is_active' => true,
+        ]);
+
+        $recommend = fn (string $query) => app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => $query, 'budget' => 60, 'quantity' => null, 'category' => null,
+            'mood' => null, 'occasion' => null, 'limit' => 5,
+        ], $agent, $conversation);
+
+        $novels = collect($recommend('რომანები შემირჩიე 60 ლარის ფარგლებში')['recommendations'])->pluck('id');
+        $poems = collect($recommend('პოეტური კრებულები შემირჩიე 60 ლარის ფარგლებში')['recommendations'])->pluck('id');
+        $detectives = collect($recommend('დეტექტივები შემირჩიე 60 ლარის ფარგლებში')['recommendations'])->pluck('id');
+
+        $this->assertContains($novel->id, $novels->all());
+        $this->assertNotContains($poetry->id, $novels->all());
+        $this->assertNotContains($manual->id, $novels->all());
+        $this->assertSame([$poetry->id], $poems->all());
+        $this->assertSame([$detective->id], $detectives->all());
+        $this->assertNotContains($manual->id, $novels->merge($poems)->merge($detectives)->all());
+    }
+
     public function test_product_search_relaxes_conversational_words_and_ranks_the_strongest_identity_match(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
