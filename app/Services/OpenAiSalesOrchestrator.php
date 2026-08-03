@@ -54,6 +54,18 @@ class OpenAiSalesOrchestrator
 
         $used = [];
         $orchestrationMessage = $message;
+        $verifiedDelivery = null;
+        if ($this->mentionsDelivery($message)) {
+            $arguments = [
+                'city' => $message,
+                'language' => preg_match('/[\x{10A0}-\x{10FF}]/u', $message) ? 'ka' : 'en',
+            ];
+            $verifiedDelivery = $this->tools->execute('calculate_delivery', $arguments, $agent, $conversation);
+            $used[] = ['name' => 'calculate_delivery', 'arguments' => $arguments, 'result' => $verifiedDelivery];
+            $orchestrationMessage .= "\n\n[Server-verified delivery result: "
+                .json_encode($verifiedDelivery, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                .'. Use this result for the delivery answer and do not guess.]';
+        }
         $budgetConstraint = $this->explicitBudgetConstraint($message);
         if ($budgetConstraint !== null && $this->isBudgetRecommendationRequest($message)) {
             $arguments = [
@@ -132,6 +144,19 @@ class OpenAiSalesOrchestrator
         }
         $data = json_decode($raw, true, flags: JSON_THROW_ON_ERROR);
         $usedCollection = collect($used);
+        if (($verifiedDelivery['ok'] ?? false) === true) {
+            $data['text'] = $verifiedDelivery['customer_message'];
+            $data['intent'] = 'delivery';
+            $data['confidence'] = 1;
+            $data['handoff'] = false;
+            $data['escalation_reason'] = null;
+            $data['product_ids'] = [];
+            $data['sources'] = [$verifiedDelivery['source']];
+            $data['factual_claims'] = [[
+                'type' => 'delivery', 'product_id' => null, 'amount' => null,
+                'quantity' => null, 'reference' => $verifiedDelivery['source']['url'] ?? null,
+            ]];
+        }
         $budgetRecommendations = $budgetConstraint !== null
             ? $usedCollection
                 ->where('name', 'recommend_products')

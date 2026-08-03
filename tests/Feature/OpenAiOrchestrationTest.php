@@ -18,6 +18,45 @@ class OpenAiOrchestrationTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_delivery_question_is_answered_from_manual_knowledge_even_when_model_skips_tools(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Customer information',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Customer information',
+            'content' => 'თბილისის მასშტაბით მომსახურება სრულდება 1-2 სამუშაო დღეში.',
+            'content_hash' => hash('sha256', 'manual-delivery-orchestration'),
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push([
+                'id' => 'delivery-final',
+                'output' => [[
+                    'type' => 'message',
+                    'content' => [[
+                        'type' => 'output_text',
+                        'text' => json_encode([
+                            'text' => 'ვერ გადავამოწმე.', 'intent' => 'clarification', 'confidence' => .99,
+                            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+                            'sources' => [], 'factual_claims' => [],
+                        ], JSON_UNESCAPED_UNICODE),
+                    ]],
+                ]],
+            ]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'სახლში მიწოდება შეიძლება?',
+        ])->assertOk()->assertJsonPath('intent', 'delivery')->assertJsonPath('handoff', false);
+
+        $this->assertStringContainsString('1-2 სამუშაო დღეში', $response->json('text'));
+        $this->assertContains('calculate_delivery', $response->json('tools_used'));
+    }
+
     public function test_recent_product_attributes_are_supplied_for_relational_follow_ups(): void
     {
         $this->seed();
