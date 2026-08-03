@@ -74,6 +74,9 @@ Route::withoutMiddleware([
 });
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/super-admin', [\App\Http\Controllers\SuperAdminController::class, 'index'])
+        ->middleware(\App\Http\Middleware\RequireSuperAdmin::class)
+        ->name('super-admin.index');
     Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
     Route::middleware('subscribed')->group(function () {
         Route::get('/app/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');

@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'super_admin_email' => env('LEGATUS_SUPER_ADMIN_EMAIL', 'pshamugia@gmail.com'),
     'privacy_email' => env('LEGATUS_PRIVACY_EMAIL', 'privacy@legatus.pro'),
     'registration_enabled' => (bool) env('LEGATUS_REGISTRATION_ENABLED', env('APP_ENV', 'production') !== 'production'),
     'demo_login_enabled' => (bool) env('LEGATUS_DEMO_LOGIN_ENABLED', env('APP_ENV', 'production') !== 'production'),

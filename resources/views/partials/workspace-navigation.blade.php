@@ -38,6 +38,7 @@
             <span class="app-business-brand-copy"><strong>{{ $navigationBusinessName }}</strong><small>Workspace on Legatus</small></span>
         </a>
         <a class="app-topbar-link" href="{{ route('dashboard') }}">Dashboard</a>
+        @if($navigationUser?->isSuperAdmin())<a class="app-topbar-link" href="{{ route('super-admin.index') }}">Super Admin</a>@endif
         @if($navigationCanManage)<a class="app-topbar-link" href="{{ route('onboarding') }}">Business setup</a>@endif
         @include('partials.workspace-switcher')
         <a class="app-add-business" href="{{ $navigationAddBusinessUrl }}">+ Add business</a>
@@ -55,6 +56,7 @@
         @include('partials.workspace-switcher')
 
         <nav class="menu app-primary-nav" aria-label="Workspace navigation">
+            @if($navigationUser?->isSuperAdmin())<a href="{{ route('super-admin.index') }}"><span class="app-nav-glyph">SA</span> Super Admin</a>@endif
             <a @class(['active' => $navigationActive === 'dashboard']) href="{{ route('dashboard') }}"><span class="app-nav-glyph">OV</span> Overview</a>
             @if($navigationCanManage)<a @class(['active' => $navigationActive === 'onboarding']) href="{{ route('onboarding') }}"><span class="app-nav-glyph">SU</span> Business setup</a>@endif
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}"><span class="app-nav-glyph">IN</span> Inbox @if($navigationInboxCount)<span class="app-nav-count">{{ $navigationInboxCount }}</span>@endif</a>

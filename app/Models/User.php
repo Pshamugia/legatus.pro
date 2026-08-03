@@ -19,6 +19,11 @@ class User extends Authenticatable
         return $this->belongsToMany(Organization::class)->withPivot('role')->withTimestamps();
     }
 
+    public function isSuperAdmin(): bool
+    {
+        return strcasecmp(trim($this->email), trim((string) config('legatus.super_admin_email'))) === 0;
+    }
+
     /**
      * The attributes that are mass assignable.
      *
