@@ -27,6 +27,16 @@ class Organization extends Model
         return $this->hasMany(PaddleSubscription::class);
     }
 
+    public function billingAccessGrants(): HasMany
+    {
+        return $this->hasMany(BillingAccessGrant::class);
+    }
+
+    public function currentBillingAccessGrant(): ?BillingAccessGrant
+    {
+        return $this->billingAccessGrants()->active()->latest()->first();
+    }
+
     public function currentSubscription(): ?PaddleSubscription
     {
         return $this->paddleSubscriptions()
@@ -37,6 +47,7 @@ class Organization extends Model
 
     public function hasBillingAccess(): bool
     {
-        return $this->currentSubscription()?->grantsAccess() ?? false;
+        return $this->currentBillingAccessGrant() !== null
+            || ($this->currentSubscription()?->grantsAccess() ?? false);
     }
 }

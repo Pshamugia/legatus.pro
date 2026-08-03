@@ -140,4 +140,22 @@ class PaddleBillingTest extends TestCase
         $this->assertDatabaseCount('paddle_webhook_events', 0);
         $this->assertDatabaseCount('paddle_subscriptions', 0);
     }
+
+    public function test_active_complimentary_grant_bypasses_paddle_billing(): void
+    {
+        $user = User::factory()->create();
+        $organization = Organization::create(['name' => 'Complimentary Store', 'slug' => 'complimentary-store']);
+        $organization->users()->attach($user, ['role' => 'owner']);
+        $organization->agents()->create(['name' => 'Gift Assistant', 'slug' => 'complimentary-assistant', 'business_name' => 'Complimentary Store', 'channels' => ['web'], 'settings' => []]);
+        $organization->billingAccessGrants()->create([
+            'kind' => 'complimentary',
+            'reason' => 'Partner gift',
+            'expires_at' => now()->addMonth(),
+        ]);
+
+        $this->actingAs($user)->get('/app')->assertOk();
+
+        $organization->billingAccessGrants()->update(['expires_at' => now()->subMinute()]);
+        $this->actingAs($user)->get('/app')->assertRedirect(route('billing.index'));
+    }
 }

@@ -77,6 +77,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/super-admin', [\App\Http\Controllers\SuperAdminController::class, 'index'])
         ->middleware(\App\Http\Middleware\RequireSuperAdmin::class)
         ->name('super-admin.index');
+    Route::post('/super-admin/businesses/{organization}/complimentary-access', [\App\Http\Controllers\SuperAdminController::class, 'grantAccess'])
+        ->middleware([\App\Http\Middleware\RequireSuperAdmin::class, 'throttle:30,1'])
+        ->name('super-admin.access.grant');
+    Route::delete('/super-admin/businesses/{organization}/complimentary-access', [\App\Http\Controllers\SuperAdminController::class, 'revokeAccess'])
+        ->middleware([\App\Http\Middleware\RequireSuperAdmin::class, 'throttle:30,1'])
+        ->name('super-admin.access.revoke');
     Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
     Route::middleware('subscribed')->group(function () {
         Route::get('/app/workspaces', [WorkspaceController::class, 'index'])->name('workspaces.index');
