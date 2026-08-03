@@ -748,6 +748,7 @@ class VerifiedCatalogResponderTest extends TestCase
             'handoff_reason' => 'Technical verification failed.',
             'assigned_to' => $operator->id,
         ]);
+        $conversation->messages()->create(['role' => 'human', 'content' => 'I am reviewing this request.']);
 
         $assigned = app(ConversationEngine::class)->handle(
             $agent,
@@ -770,6 +771,37 @@ class VerifiedCatalogResponderTest extends TestCase
         );
         $this->assertTrue($explicit['handoff']);
         $this->assertSame(['human_queue'], $explicit['tools_used']);
+    }
+
+    public function test_claimed_technical_handoff_without_an_operator_reply_does_not_trap_new_requests(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $operator = User::factory()->create();
+        $product = $agent->products()->create([
+            'name' => 'ისტორიული რომანი', 'sku' => 'RECOVER-CLAIMED-1',
+            'search_text' => 'ისტორიული რომანი ისტორია', 'price' => 22,
+            'stock' => 2, 'is_active' => true,
+        ]);
+        $conversation->update([
+            'status' => 'human',
+            'handoff_reason' => 'Technical verification failed.',
+            'assigned_to' => $operator->id,
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(ConversationEngine::class)->handle(
+            $agent,
+            'ისტორიული რომანი გაქვთ?',
+            'widget',
+            $conversation->visitor_id,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertNull($conversation->fresh()->assigned_to);
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        Http::assertNothingSent();
     }
 
     /** @return array{Agent, Conversation} */

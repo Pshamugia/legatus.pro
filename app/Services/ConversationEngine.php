@@ -235,20 +235,13 @@ class ConversationEngine
 
     private function canResumeAi(Conversation $conversation, string $newMessage): bool
     {
-        if ($conversation->assigned_to !== null) {
-            return false;
-        }
-
         if ($this->customerRequestsHuman($newMessage)) {
             return false;
         }
 
         $reason = Str::lower((string) $conversation->handoff_reason);
 
-        // An unassigned safety escalation must not permanently disable the AI
-        // for every later customer question. Only deliberate human ownership
-        // and approval workflows remain sticky.
-        return ! Str::contains($reason, [
+        $stickyReason = Str::contains($reason, [
             'customer requested a human',
             'manual operator takeover',
             'manager approval',
@@ -259,6 +252,22 @@ class ConversationEngine
             'მენეჯერის დადასტურება',
             'ფასდაკლებას მენეჯერის',
         ]);
+        if ($stickyReason) {
+            return false;
+        }
+
+        // Merely claiming a technical escalation must not trap every later
+        // customer message in the human queue. Keep real operator ownership
+        // sticky once an operator has actually replied; otherwise a fresh,
+        // ordinary request may return to the AI automatically.
+        if ($conversation->assigned_to !== null && $conversation->messages()->where('role', 'human')->exists()) {
+            return false;
+        }
+
+        // An unassigned safety escalation must not permanently disable the AI
+        // for every later customer question. Only deliberate human ownership
+        // and approval workflows remain sticky.
+        return true;
     }
 
     private function customerRequestsHuman(string $message): bool
