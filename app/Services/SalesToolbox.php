@@ -625,6 +625,13 @@ class SalesToolbox
             }
         }
 
+        // A synchronized public website is the business's authoritative policy
+        // source. Prefer its published delivery wording over a manually seeded
+        // estimate so we never manufacture calendar dates from stale defaults.
+        if ($publishedPolicy = $this->publishedDeliveryPolicy($agent, (string) $a['city'], (string) ($a['language'] ?? 'ka'))) {
+            return $publishedPolicy;
+        }
+
         $policy = $agent->settings['delivery_policy'] ?? null;
         if (! is_array($policy) || empty($policy['timezone']) || empty($policy['cutoff']) || empty($policy['local_cities'])) {
             return ['ok' => false, 'error' => 'A verified delivery policy is not configured for this business.'];
@@ -664,6 +671,68 @@ class SalesToolbox
             'indicative' => true,
             'customer_message' => $customerMessage,
             'source' => ['label' => $policy['source_label'] ?? 'Verified delivery policy', 'type' => 'policy'],
+        ];
+    }
+
+    private function publishedDeliveryPolicy(Agent $agent, string $city, string $language): ?array
+    {
+        $websiteSourceIds = $agent->knowledgeSources()
+            ->where('type', 'url')
+            ->where('status', 'ready')
+            ->pluck('id');
+        if ($websiteSourceIds->isEmpty()) {
+            return null;
+        }
+
+        $chunks = KnowledgeChunk::where('agent_id', $agent->id)
+            ->whereIn('knowledge_source_id', $websiteSourceIds)
+            ->where('kind', 'policy')
+            ->where(function ($query): void {
+                $query->where('content', 'like', '%მიწოდ%')
+                    ->orWhere('content', 'like', '%კურიერ%')
+                    ->orWhere('content', 'like', '%ტრანსპორტ%')
+                    ->orWhereRaw('LOWER(content) LIKE ?', ['%delivery%'])
+                    ->orWhereRaw('LOWER(content) LIKE ?', ['%shipping%'])
+                    ->orWhereRaw('LOWER(title) LIKE ?', ['%delivery%'])
+                    ->orWhereRaw('LOWER(title) LIKE ?', ['%shipping%']);
+            })
+            ->latest('updated_at')
+            ->limit(20)
+            ->get(['title', 'content', 'metadata', 'updated_at']);
+        if ($chunks->isEmpty()) {
+            return null;
+        }
+
+        $normalizedCity = Str::lower(trim($city));
+        $chunk = $chunks->sortByDesc(function (KnowledgeChunk $candidate) use ($normalizedCity): int {
+            $text = Str::lower($candidate->title.' '.$candidate->content);
+
+            return ($normalizedCity !== '' && Str::contains($text, $normalizedCity) ? 100 : 0)
+                + (Str::contains($text, ['მიწოდ', 'delivery', 'shipping']) ? 20 : 0);
+        })->first();
+        $excerpt = Str::limit(Str::squish(strip_tags((string) $chunk->content)), 900, '…');
+        if ($excerpt === '') {
+            return null;
+        }
+
+        $customerMessage = $language === 'en'
+            ? "According to the delivery information published on the business website: {$excerpt}"
+            : "ბიზნესის საიტზე გამოქვეყნებული მიწოდების პირობების მიხედვით: {$excerpt}";
+        $url = data_get($chunk->metadata, 'url')
+            ?? data_get($chunk->metadata, 'source_url')
+            ?? data_get($chunk->metadata, 'canonical_url');
+
+        return [
+            'ok' => true,
+            'city' => $city,
+            'indicative' => false,
+            'customer_message' => $customerMessage,
+            'source' => array_filter([
+                'label' => $chunk->title ?: 'Published delivery policy',
+                'type' => 'website_policy',
+                'url' => is_string($url) ? $url : null,
+                'checked_at' => $chunk->updated_at?->toIso8601String(),
+            ]),
         ];
     }
 

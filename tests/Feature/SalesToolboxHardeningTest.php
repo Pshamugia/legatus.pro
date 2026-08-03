@@ -44,6 +44,37 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertStringContainsString('not configured', $result['error']);
     }
 
+    public function test_published_website_delivery_policy_overrides_seeded_date_estimates(): void
+    {
+        [$agent, , $conversation] = $this->context();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Store website',
+            'url' => 'https://store.example',
+            'status' => 'ready',
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'policy',
+            'title' => 'მიწოდების პირობები',
+            'content' => 'თბილისში მიწოდება სრულდება 2-3 სამუშაო დღეში. ზუსტ დროს ოპერატორი ადასტურებს.',
+            'content_hash' => hash('sha256', 'published-delivery-policy'),
+            'metadata' => ['url' => 'https://store.example/delivery'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'თბილისი',
+            'language' => 'ka',
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('website_policy', $result['source']['type']);
+        $this->assertSame('https://store.example/delivery', $result['source']['url']);
+        $this->assertStringContainsString('2-3 სამუშაო დღეში', $result['customer_message']);
+        $this->assertArrayNotHasKey('earliest', $result);
+        $this->assertStringNotContainsString('2026-', $result['customer_message']);
+    }
+
     public function test_lead_requires_and_records_server_verified_consent_message(): void
     {
         [$agent, , $conversation] = $this->context();
