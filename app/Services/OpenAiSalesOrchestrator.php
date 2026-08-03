@@ -67,17 +67,28 @@ class OpenAiSalesOrchestrator
                 .'. Use this result for the delivery answer and do not guess.]';
         }
         $budgetConstraint = $this->explicitBudgetConstraint($message);
-        if ($budgetConstraint !== null && $this->isBudgetRecommendationRequest($message)) {
+        $quantityConstraint = $this->explicitQuantityConstraint($message);
+        $newBudgetRequest = $budgetConstraint !== null && $this->isBudgetRecommendationRequest($message);
+        $pendingBudgetRequest = data_get($conversation->context, 'pending_budget_request');
+        $continuedBudgetRequest = ! $newBudgetRequest && is_array($pendingBudgetRequest) && mb_strlen(trim($message)) <= 80;
+        if ($newBudgetRequest) {
+            $context = $conversation->context ?? [];
+            data_set($context, 'pending_budget_request', ['budget' => $budgetConstraint, 'quantity' => $quantityConstraint]);
+            $conversation->update(['context' => $context]);
+        } elseif ($continuedBudgetRequest) {
+            $budgetConstraint = is_numeric($pendingBudgetRequest['budget'] ?? null) ? (float) $pendingBudgetRequest['budget'] : null;
+            $quantityConstraint = is_numeric($pendingBudgetRequest['quantity'] ?? null) ? (int) $pendingBudgetRequest['quantity'] : null;
+        }
+        $activeBudgetRequest = ($newBudgetRequest || $continuedBudgetRequest) && $budgetConstraint !== null;
+        if ($activeBudgetRequest) {
             $arguments = [
-                // Budget is the only server-verifiable constraint at this
-                // stage. Natural-language preferences are applied by the
-                // orchestrator only within this bounded candidate set.
-                'query' => '',
+                'query' => $continuedBudgetRequest ? trim($message) : '',
                 'budget' => $budgetConstraint,
+                'quantity' => $quantityConstraint,
                 'category' => null,
                 'mood' => null,
                 'occasion' => null,
-                'limit' => 5,
+                'limit' => max(1, min(5, $quantityConstraint ?: 5)),
             ];
             $result = $this->tools->execute('recommend_products', $arguments, $agent, $conversation);
             $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
@@ -169,24 +180,35 @@ class OpenAiSalesOrchestrator
                 ->unique(fn (array $product): int => (int) $product['id'])
                 ->values()
             : collect();
-        if ($budgetConstraint !== null && $this->isBudgetRecommendationRequest($message)) {
+        if ($activeBudgetRequest) {
             $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
-            $data['text'] = $budgetRecommendations->isNotEmpty()
-                ? ($georgian
-                    ? 'თქვენი ბიუჯეტის ფარგლებში შესაბამისი ხელმისაწვდომი ვარიანტები შევარჩიე. შეგიძლიათ ქვემოთ შეადაროთ.'
-                    : 'I found verified available options within your budget. You can compare them below.')
-                : ($georgian
-                    ? 'ამ ბიუჯეტის ფარგლებში შესაბამისი ხელმისაწვდომი პროდუქტი ვერ ვიპოვე.'
-                    : 'I could not find a matching available product within this budget.');
+            $bundleCall = $usedCollection->where('name', 'recommend_products')->last();
+            $bundleComplete = (bool) data_get($bundleCall, 'result.bundle_complete', false);
+            $bundleTotal = data_get($bundleCall, 'result.bundle_total');
+            $quantityRequested = $quantityConstraint !== null;
+            $data['text'] = $quantityRequested && $bundleComplete && $budgetRecommendations->isNotEmpty()
+                ? $this->budgetBundleText($budgetRecommendations, (float) $bundleTotal, $budgetConstraint, $georgian)
+                : (! $quantityRequested && $budgetRecommendations->isNotEmpty()
+                    ? ($georgian ? 'თქვენი ბიუჯეტის ფარგლებში შესაბამისი ხელმისაწვდომი ვარიანტები შევარჩიე. შეგიძლიათ ქვემოთ შეადაროთ.' : 'I found verified available options within your budget. You can compare them below.')
+                    : ($georgian
+                    ? 'ამ ბიუჯეტში მოთხოვნილი რაოდენობის შესაბამისი ხელმისაწვდომი პროდუქტების კომბინაცია ვერ ვიპოვე. შეგიძლიათ ჟანრი ან სხვა მახასიათებელი შეცვალოთ.'
+                    : 'I could not find the requested number of matching available products within this total budget. You can change the category or another preference.'));
             $data['intent'] = 'recommendation';
             $data['confidence'] = 1;
             $data['handoff'] = false;
             $data['escalation_reason'] = null;
             $data['product_ids'] = $budgetRecommendations->pluck('id')->all();
-            $data['factual_claims'] = $budgetRecommendations->map(fn (array $product): array => [
-                'type' => 'product', 'product_id' => (int) $product['id'],
-                'amount' => null, 'quantity' => null, 'reference' => null,
-            ])->all();
+            $data['factual_claims'] = $quantityRequested && $bundleComplete ? $budgetRecommendations->map(fn (array $product): array => [
+                'type' => 'price', 'product_id' => (int) $product['id'],
+                'amount' => (float) $product['price'], 'quantity' => null, 'reference' => null,
+            ])->push(['type' => 'offer', 'product_id' => null, 'amount' => (float) $bundleTotal, 'quantity' => $quantityConstraint, 'reference' => null])
+                ->push(['type' => 'budget', 'product_id' => null, 'amount' => $budgetConstraint, 'quantity' => null, 'reference' => null])->all()
+                : $budgetRecommendations->map(fn (array $product): array => ['type' => 'product', 'product_id' => (int) $product['id'], 'amount' => null, 'quantity' => null, 'reference' => null])->all();
+            if (! $quantityRequested || $bundleComplete) {
+                $context = $conversation->context ?? [];
+                data_forget($context, 'pending_budget_request');
+                $conversation->update(['context' => $context]);
+            }
         }
         $confirmedSuggestionProducts = $pendingSuggestion !== '' && $this->isShortAffirmation($message)
             ? $usedCollection
@@ -956,7 +978,7 @@ class OpenAiSalesOrchestrator
             } elseif ($type === 'reservation' && ! $successful->contains('name', 'reserve_product')) {
                 return 'A reservation factual claim was not backed by a successful hold.';
             } elseif ($type === 'offer') {
-                $verified = $successful->where('name', 'build_offer')->flatMap(fn ($call) => $this->moneyValues($call['result'] ?? []));
+                $verified = $successful->whereIn('name', ['build_offer', 'recommend_products'])->flatMap(fn ($call) => $this->moneyValues($call['result'] ?? []));
                 if ($amount !== null && ! $verified->contains(fn ($value) => abs((float) $value - $amount) < 0.011)) {
                     return 'An offer factual claim did not match the server-side calculation.';
                 }
@@ -1140,7 +1162,7 @@ class OpenAiSalesOrchestrator
 
     private function moneyValues(mixed $value, ?string $key = null): array
     {
-        if (is_numeric($value) && in_array($key, ['price', 'unit_price', 'subtotal', 'total', 'budget', 'max_price'], true)) {
+        if (is_numeric($value) && in_array($key, ['price', 'unit_price', 'subtotal', 'total', 'bundle_total', 'budget', 'max_price'], true)) {
             return [(float) $value];
         }
         if (! is_array($value)) {
@@ -1180,6 +1202,32 @@ class OpenAiSalesOrchestrator
         $budget = (float) str_replace(',', '.', $value);
 
         return $budget > 0 ? $budget : null;
+    }
+
+    private function explicitQuantityConstraint(string $message): ?int
+    {
+        if (preg_match('/(?<!\d)([1-5])(?!\d)\s*(?:ცალ|პროდუქტ|წიგნ|item|product|book)/iu', $message, $matches)) {
+            return (int) $matches[1];
+        }
+        $words = ['ერთი' => 1, 'ორი' => 2, 'სამი' => 3, 'ოთხი' => 4, 'ხუთი' => 5, 'one' => 1, 'two' => 2, 'three' => 3, 'four' => 4, 'five' => 5];
+        foreach ($words as $word => $quantity) {
+            if (preg_match('/(?<!\pL)'.preg_quote($word, '/').'(?!\pL)/iu', $message)) {
+                return $quantity;
+            }
+        }
+
+        return null;
+    }
+
+    private function budgetBundleText(Collection $products, float $total, float $budget, bool $georgian): string
+    {
+        $lines = $products->values()->map(fn (array $product, int $index): string => sprintf(
+            '%d. %s — %s ₾', $index + 1, $product['name'], number_format((float) $product['price'], 2),
+        ))->implode("\n");
+
+        return $georgian
+            ? "შევარჩიე მოთხოვნილი კომბინაცია:\n{$lines}\nჯამი: ".number_format($total, 2).' ₾ · ბიუჯეტი: '.number_format($budget, 2).' ₾.'
+            : "I selected the requested bundle:\n{$lines}\nTotal: ".number_format($total, 2).' GEL · Budget: '.number_format($budget, 2).' GEL.';
     }
 
     private function isBudgetRecommendationRequest(string $message): bool

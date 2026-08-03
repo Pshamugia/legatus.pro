@@ -698,6 +698,30 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertFalse($agent->customerProducts()->whereKey($existing->id)->exists());
     }
 
+    public function test_recommendations_build_the_requested_quantity_within_the_total_budget(): void
+    {
+        [$agent, $existing, $conversation] = $this->context(stock: 4);
+        Http::fake(['*' => Http::response('<html><body></body></html>')]);
+        $existing->update(['name' => 'Unrelated item', 'category' => 'Other', 'search_text' => 'unrelated item', 'price' => 5]);
+        foreach ([['პირველი რომანი', 18], ['მეორე რომანი', 16], ['მესამე რომანი', 14], ['ძვირი რომანი', 30]] as [$name, $price]) {
+            $agent->products()->create([
+                'name' => $name, 'sku' => str()->slug($name).'-'.$price, 'category' => 'რომანი',
+                'description' => 'ქართული რომანი', 'search_text' => $name.' ქართული რომანი',
+                'price' => $price, 'stock' => 3, 'is_active' => true, 'metadata' => [],
+            ]);
+        }
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'რომანი', 'budget' => 50, 'quantity' => 3, 'category' => null,
+            'mood' => null, 'occasion' => null, 'limit' => 3,
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['bundle_complete']);
+        $this->assertCount(3, $result['recommendations']);
+        $this->assertEqualsWithDelta(48, $result['bundle_total'], 0.001);
+        $this->assertLessThanOrEqual(50, collect($result['recommendations'])->sum('price'));
+    }
+
     public function test_verified_business_category_index_is_used_before_polluted_general_catalog_text(): void
     {
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);

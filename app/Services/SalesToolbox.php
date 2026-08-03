@@ -30,7 +30,7 @@ class SalesToolbox
             $this->tool('search_products', 'Search the verified product catalog by customer needs. Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
-            $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5]], ['query', 'budget', 'category', 'mood', 'occasion', 'limit']),
+            $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data. When quantity is set, budget is the maximum total for the complete bundle, not a per-item limit.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'quantity' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5]], ['query', 'budget', 'quantity', 'category', 'mood', 'occasion', 'limit']),
             $this->tool('compare_products', 'Compare verified attributes for selected products.', ['product_ids' => ['type' => 'array', 'items' => ['type' => 'integer'], 'minItems' => 2, 'maxItems' => 4]], ['product_ids']),
             $this->tool('check_stock', 'Read current stock and price for one product.', ['product_id' => ['type' => 'integer'], 'quantity' => ['type' => 'integer', 'minimum' => 1]], ['product_id', 'quantity']),
             $this->tool('calculate_delivery', 'Calculate an indicative delivery window from the business policy and server time.', ['city' => ['type' => 'string'], 'language' => ['type' => 'string', 'enum' => ['ka', 'en']]], ['city', 'language']),
@@ -458,19 +458,65 @@ class SalesToolbox
             ->when($termGroups !== [], fn ($products) => $products->filter(
                 fn (array $product): bool => $product['_relevance'] > 0
             ))
-            ->sortByDesc('score')->take($a['limit'])->values()
+            ->sortByDesc('score')->values()
             ->map(function (array $product): array {
                 unset($product['_available_stock'], $product['_relevance']);
 
                 return $product;
             });
+        $requestedQuantity = max(0, min(5, (int) ($a['quantity'] ?? 0)));
+        $bundleTotal = null;
+        $bundleComplete = null;
+        if ($requestedQuantity > 0) {
+            $ranked = $this->selectBudgetBundle($ranked, $requestedQuantity, isset($a['budget']) ? (float) $a['budget'] : null);
+            $bundleComplete = $ranked->count() === $requestedQuantity;
+            $bundleTotal = $bundleComplete ? round((float) $ranked->sum('price'), 2) : null;
+        } else {
+            $ranked = $ranked->take($a['limit'])->values();
+        }
         RecommendationEvent::create(['conversation_id' => $c->id, 'query' => PrivacyRedactor::structured($a), 'ranked_products' => PrivacyRedactor::structured($ranked->all())]);
 
         $didYouMean = $ranked->isEmpty() && $this->typoSuggestionEligible($termGroups)
             ? $this->validatedSearchSuggestion($criteria, $this->nearestCatalogSuggestion($agent, $termGroups))
             : null;
 
-        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'recommendations' => $ranked->all(), 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
+        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'recommendations' => $ranked->all(), 'requested_quantity' => $requestedQuantity ?: null, 'bundle_complete' => $bundleComplete, 'bundle_total' => $bundleTotal, 'budget' => isset($a['budget']) ? (float) $a['budget'] : null, 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
+    }
+
+    private function selectBudgetBundle(Collection $products, int $quantity, ?float $budget): Collection
+    {
+        $candidates = $products->filter(fn (array $product): bool => (float) ($product['price'] ?? 0) > 0)->take(50)->values();
+        if ($candidates->count() < $quantity) {
+            return collect();
+        }
+        if (! $budget) {
+            return $candidates->take($quantity)->values();
+        }
+
+        $cheapest = $candidates->sortBy('price')->take($quantity);
+        if ((float) $cheapest->sum('price') > $budget + 0.001) {
+            return collect();
+        }
+
+        $selected = collect();
+        $total = 0.0;
+        foreach ($candidates as $candidate) {
+            if ($selected->count() >= $quantity) {
+                break;
+            }
+            $slotsAfter = $quantity - $selected->count() - 1;
+            $selectedIds = $selected->pluck('id')->push($candidate['id']);
+            $fillers = $candidates->reject(fn (array $item): bool => $selectedIds->contains($item['id']))->sortBy('price')->take($slotsAfter);
+            if ($fillers->count() !== $slotsAfter) {
+                continue;
+            }
+            if ($total + (float) $candidate['price'] + (float) $fillers->sum('price') <= $budget + 0.001) {
+                $selected->push($candidate);
+                $total += (float) $candidate['price'];
+            }
+        }
+
+        return $selected->count() === $quantity ? $selected->values() : $cheapest->values();
     }
 
     private function compare(Agent $agent, Conversation $conversation, array $a): array
