@@ -30,6 +30,9 @@ class OperatorInboxTest extends TestCase
         $this->assertDatabaseHas('conversations', ['id' => $c->id, 'assigned_to' => 'Demo Owner']);
         $this->post("/app/inbox/{$c->id}/reply", ['message' => 'I can prepare a custom offer.'])->assertRedirect();
         $this->assertDatabaseHas('messages', ['conversation_id' => $c->id, 'role' => 'human']);
+        $humanMessage = $c->messages()->where('role', 'human')->latest()->firstOrFail();
+        $this->assertSame('Human operator', $humanMessage->metadata['operator_label']);
+        $this->assertArrayNotHasKey('operator', $humanMessage->metadata);
         $this->post("/app/inbox/{$c->id}/release")->assertRedirect();
         $this->assertDatabaseHas('conversations', ['id' => $c->id, 'status' => 'ai', 'assigned_to' => null]);
     }
@@ -39,5 +42,13 @@ class OperatorInboxTest extends TestCase
         $c = $this->conversation();
         $this->post("/app/inbox/{$c->id}/close")->assertRedirect();
         $this->assertDatabaseHas('conversations', ['id' => $c->id, 'status' => 'closed']);
+    }
+
+    public function test_reply_composer_is_rendered_immediately_after_the_message_list(): void
+    {
+        $c = $this->conversation();
+        $content = $this->get('/app/inbox?conversation='.$c->id)->assertOk()->getContent();
+
+        $this->assertGreaterThan(strpos($content, 'id="operator-message-list"'), strpos($content, 'id="operator-composer"'));
     }
 }

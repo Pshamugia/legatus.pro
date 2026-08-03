@@ -42,7 +42,11 @@ class InboxController extends Controller
         $this->own($conversation, $tenant);
         $tenant->authorize(['owner', 'admin', 'agent']);
         $data = $request->validate(['message' => 'required|string|max:2000']);
-        $message = $conversation->messages()->create(['role' => 'human', 'content' => $data['message'], 'metadata' => ['operator' => auth()->user()->name]]);
+        $message = $conversation->messages()->create([
+            'role' => 'human',
+            'content' => $data['message'],
+            'metadata' => ['operator_label' => 'Human operator'],
+        ]);
         $conversation->update(['status' => 'human', 'assigned_to' => auth()->user()->name, 'last_message_at' => now()]);
         $delivery = $dispatcher->dispatch($message)?->fresh();
 
