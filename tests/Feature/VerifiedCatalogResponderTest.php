@@ -22,6 +22,24 @@ class VerifiedCatalogResponderTest extends TestCase
         config(['legatus.semantic_orchestration_enabled' => false]);
     }
 
+    public function test_gratitude_is_answered_naturally_without_catalog_search_or_handoff(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $conversation->update(['context' => ['pending_budget_request' => ['budget' => 40, 'quantity' => null]]]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'უდიდესი მადლობა <3', $conversation);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('conversation', $reply['intent']);
+        $this->assertSame(['social_reply'], $reply['tools_used']);
+        $this->assertStringContainsString('მადლობა თქვენ', $reply['text']);
+        $this->assertSame([], $reply['products']);
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
+        Http::assertNothingSent();
+    }
+
     public function test_confusion_about_the_previous_reply_is_treated_as_conversation_repair_not_product_search(): void
     {
         [$agent, $conversation] = $this->context();

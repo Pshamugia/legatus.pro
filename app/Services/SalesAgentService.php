@@ -18,6 +18,10 @@ class SalesAgentService
 
     public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
     {
+        if ($socialReply = $this->socialReply($message, $conversation)) {
+            return $socialReply;
+        }
+
         $semanticOrchestration = $conversation
             && config('services.openai.key')
             && config('legatus.semantic_orchestration_enabled', true);
@@ -121,6 +125,44 @@ class SalesAgentService
 
         return (int) (clone $runs)->sum('input_tokens') + (int) (clone $runs)->sum('output_tokens')
             >= max(1000, (int) config('legatus.daily_ai_token_limit'));
+    }
+
+    private function socialReply(string $message, ?Conversation $conversation): ?array
+    {
+        $text = Str::of($message)
+            ->lower()
+            ->replaceMatches('/[^\pL\s]/u', ' ')
+            ->squish()
+            ->toString();
+
+        $gratitude = preg_match('/^(?:(?:ძალიან|დიდი|უდიდესი)\s+)*(?:მადლობა(?:\s+(?:თქვენ|შენ|დახმარებისთვის|ყველაფრისთვის))?|გმადლობ(?:თ)?|thank\s+you(?:\s+(?:so\s+much|very\s+much))?|thanks?(?:\s+(?:a\s+lot|so\s+much))?)$/iu', $text) === 1;
+        $farewell = preg_match('/^(?:ნახვამდის|კარგად\s+ბრძანდებოდეთ|bye|goodbye|see\s+you)$/iu', $text) === 1;
+        if (! $gratitude && ! $farewell) {
+            return null;
+        }
+
+        if ($conversation) {
+            $context = $conversation->context ?? [];
+            data_forget($context, 'pending_budget_request');
+            data_forget($context, 'pending_catalog_suggestion');
+            $conversation->update(['context' => $context]);
+        }
+
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+        $reply = $farewell
+            ? ($georgian ? 'ნახვამდის! 💚 სასიამოვნო დღე გისურვებთ.' : 'Goodbye! Have a lovely day. 💚')
+            : ($georgian ? 'დიდი მადლობა თქვენ! 💚 თუ კიდევ რამე დაგჭირდებათ, აქ ვარ.' : 'Thank you! 💚 I am here if you need anything else.');
+
+        return [
+            'text' => $reply,
+            'intent' => 'conversation',
+            'confidence' => 1.0,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'products' => [],
+            'sources' => [],
+            'tools_used' => ['social_reply'],
+        ];
     }
 
     private function failClosed(Agent $agent, ?Conversation $conversation, string $customerMessage, string $reason, ?\Throwable $error = null): array
