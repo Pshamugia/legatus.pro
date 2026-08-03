@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Tests\TestCase;
 
 class TenantAuthTest extends TestCase
@@ -14,6 +15,18 @@ class TenantAuthTest extends TestCase
     public function test_dashboard_requires_authentication(): void
     {
         $this->get('/app')->assertRedirect('/login');
+    }
+
+    public function test_logout_with_an_expired_csrf_token_still_signs_the_user_out(): void
+    {
+        $user = User::factory()->create();
+
+        $this->withMiddleware(ValidateCsrfToken::class)
+            ->actingAs($user)
+            ->post(route('logout'), ['_token' => 'expired-token'])
+            ->assertRedirect(route('landing'));
+
+        $this->assertGuest();
     }
 
     public function test_registration_creates_isolated_workspace_and_owner(): void
