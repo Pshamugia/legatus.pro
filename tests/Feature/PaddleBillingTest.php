@@ -91,7 +91,25 @@ class PaddleBillingTest extends TestCase
             'status' => 'trialing',
         ]);
 
+        $this->actingAs($user)->get('/billing')
+            ->assertOk()
+            ->assertSee('Free trial active')
+            ->assertSee('Go to admin dashboard')
+            ->assertDontSee('Start free trial')
+            ->assertDontSee('$162');
         $this->actingAs($user)->get('/app')->assertOk();
+    }
+
+    public function test_completed_checkout_waits_for_webhook_and_refreshes_automatically(): void
+    {
+        $user = User::factory()->create();
+        $organization = Organization::create(['name' => 'Pending Store', 'slug' => 'pending-store']);
+        $organization->users()->attach($user, ['role' => 'owner']);
+
+        $this->actingAs($user)->get('/billing?checkout=complete')
+            ->assertOk()
+            ->assertSee('Payment details received. Activating your workspace')
+            ->assertSee("window.setTimeout(() => window.location.reload(), 2000)", false);
     }
 
     public function test_invalid_webhook_signature_is_rejected_without_persisting(): void
