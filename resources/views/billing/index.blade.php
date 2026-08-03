@@ -15,8 +15,8 @@
 </main></div>
 <div id="paddle-config" data-token="{{ $paddleClientToken }}" data-environment="{{ $paddleEnvironment }}" data-email="{{ auth()->user()->email }}" data-billing-reference="{{ $billingReference }}" data-success-url="{{ route('billing.index', ['checkout' => 'complete']) }}"></div>
 <style>@media(max-width:800px){.billing-grid{grid-template-columns:1fr!important}}</style>
-<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
-<script>
+<script nonce="{{ request()->attributes->get('csp_nonce') }}" src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+<script nonce="{{ request()->attributes->get('csp_nonce') }}">
 (() => {
     const config = document.getElementById('paddle-config');
     const message = document.getElementById('paddle-message');
