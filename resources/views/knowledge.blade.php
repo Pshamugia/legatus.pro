@@ -68,8 +68,6 @@
     </form>
 </section>
 <style>.policy-grid textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;resize:vertical}@media(max-width:800px){.policy-grid{grid-template-columns:1fr!important}}</style>
-<div class="content-grid" style="margin-top:24px"><section class="panel"><h3>Upload a catalog or policy</h3><form method="post" enctype="multipart/form-data" action="{{ route('knowledge.store') }}">@csrf<label>Source type</label><div style="display:flex;gap:9px"><label class="tag"><input style="width:auto" type="radio" name="type" value="csv" checked> CSV catalog</label><label class="tag"><input style="width:auto" type="radio" name="type" value="pdf"> PDF / policy</label></div><label>Display name <span style="color:var(--muted);font-weight:400">(optional)</span></label><input name="name" placeholder="Summer catalog or Delivery policy"><div id="file-field"><label>Choose CSV or TXT · max 10 MB</label><input type="file" name="file" accept=".csv,.txt"></div><button class="btn lime" style="margin-top:22px;width:100%">Teach Legatus →</button></form></section>
-<aside class="agent-card"><span class="tag" style="background:#ffffff12;border-color:#ffffff20;color:white">How it works</span><h2 style="font-size:24px">From raw data to trusted answers.</h2><p>1. Content is fetched and validated.<br><br>2. Products are normalized and deduplicated.<br><br>3. Policies are split into searchable chunks.<br><br>4. Legatus cites the exact source used.</p><div style="padding-top:15px;border-top:1px solid #ffffff20;font-size:12px;color:#bcd0c9">Private network URLs are blocked. Catalog text is treated as data, never as AI instructions.</div></aside></div>
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
     <div class="knowledge-heading">
         <h3>Connected knowledge</h3>
@@ -117,7 +115,7 @@
             </div>
         </div>
     @empty
-        <div style="text-align:center;padding:45px;color:var(--muted)"><div style="font-size:34px">◇</div><b>No knowledge sources yet</b><p>Add a URL, CSV catalog, or PDF policy above.</p></div>
+        <div style="text-align:center;padding:45px;color:var(--muted)"><div style="font-size:34px">◇</div><b>No knowledge sources yet</b><p>Add your catalog URL, delivery information, and terms above.</p></div>
     @endforelse
 </section></main></div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">

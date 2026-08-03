@@ -702,14 +702,17 @@ class SalesToolbox
         $chunks = KnowledgeChunk::where('agent_id', $agent->id)
             ->whereIn('knowledge_source_id', $deliverySourceIds)
             ->where('kind', 'policy')
-            ->where(function ($query): void {
-                $query->where('content', 'like', '%მიწოდ%')
-                    ->orWhere('content', 'like', '%კურიერ%')
-                    ->orWhere('content', 'like', '%ტრანსპორტ%')
-                    ->orWhereRaw('LOWER(content) LIKE ?', ['%delivery%'])
-                    ->orWhereRaw('LOWER(content) LIKE ?', ['%shipping%'])
-                    ->orWhereRaw('LOWER(title) LIKE ?', ['%delivery%'])
-                    ->orWhereRaw('LOWER(title) LIKE ?', ['%shipping%']);
+            ->where(function ($query) use ($manualDeliverySourceIds): void {
+                $query->whereIn('knowledge_source_id', $manualDeliverySourceIds)
+                    ->orWhere(function ($websitePolicy): void {
+                        $websitePolicy->where('content', 'like', '%მიწოდ%')
+                            ->orWhere('content', 'like', '%კურიერ%')
+                            ->orWhere('content', 'like', '%ტრანსპორტ%')
+                            ->orWhereRaw('LOWER(content) LIKE ?', ['%delivery%'])
+                            ->orWhereRaw('LOWER(content) LIKE ?', ['%shipping%'])
+                            ->orWhereRaw('LOWER(title) LIKE ?', ['%delivery%'])
+                            ->orWhereRaw('LOWER(title) LIKE ?', ['%shipping%']);
+                    });
             })
             ->latest('updated_at')
             ->limit(20)
@@ -731,9 +734,10 @@ class SalesToolbox
             return null;
         }
 
+        $isManual = $manualDeliverySourceIds->contains($chunk->knowledge_source_id);
         $customerMessage = $language === 'en'
-            ? "According to the delivery information published on the business website: {$excerpt}"
-            : "ბიზნესის საიტზე გამოქვეყნებული მიწოდების პირობების მიხედვით: {$excerpt}";
+            ? ($isManual ? "According to the business delivery information: {$excerpt}" : "According to the delivery information published on the business website: {$excerpt}")
+            : ($isManual ? "ბიზნესის მიერ მითითებული მიწოდების პირობების მიხედვით: {$excerpt}" : "ბიზნესის საიტზე გამოქვეყნებული მიწოდების პირობების მიხედვით: {$excerpt}");
         $url = data_get($chunk->metadata, 'url')
             ?? data_get($chunk->metadata, 'source_url')
             ?? data_get($chunk->metadata, 'canonical_url');
@@ -745,7 +749,7 @@ class SalesToolbox
             'customer_message' => $customerMessage,
             'source' => array_filter([
                 'label' => $chunk->title ?: 'Published delivery policy',
-                'type' => 'website_policy',
+                'type' => $isManual ? 'manual_policy' : 'website_policy',
                 'url' => is_string($url) ? $url : null,
                 'checked_at' => $chunk->updated_at?->toIso8601String(),
             ]),

@@ -89,8 +89,8 @@ class SalesToolboxHardeningTest extends TestCase
             'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery information', 'status' => 'ready',
         ]);
         $manual->chunks()->create([
-            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'მიწოდება',
-            'content' => 'თბილისში მიწოდება უფასოა და სრულდება 1-2 სამუშაო დღეში.',
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'ინფორმაცია მომხმარებლისთვის',
+            'content' => 'თბილისის მასშტაბით მომსახურება უფასოა და სრულდება 1-2 სამუშაო დღეში.',
             'content_hash' => hash('sha256', 'manual-delivery'),
         ]);
 
@@ -99,6 +99,7 @@ class SalesToolboxHardeningTest extends TestCase
         ], $agent, $conversation);
 
         $this->assertTrue($result['ok']);
+        $this->assertSame('manual_policy', $result['source']['type']);
         $this->assertStringContainsString('1-2 სამუშაო დღეში', $result['customer_message']);
         $this->assertStringNotContainsString('9 days', $result['customer_message']);
         $this->assertArrayNotHasKey('earliest', $result);
