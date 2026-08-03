@@ -22,6 +22,8 @@ class KnowledgeController extends Controller
             ->get();
         $catalogSource = $sources->firstWhere('source_scope', 'catalog');
         $sitemapSource = $sources->firstWhere('source_scope', 'sitemap');
+        $deliverySource = $sources->firstWhere('source_scope', 'delivery');
+        $termsSource = $sources->firstWhere('source_scope', 'terms');
         $categorySources = $sources
             ->map(function (KnowledgeSource $source) use ($ingestion): ?array {
                 $taxonomy = $ingestion->taxonomyForSource($source);
@@ -37,7 +39,9 @@ class KnowledgeController extends Controller
             ->filter()
             ->values();
 
-        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources'));
+        $deliveryText = $deliverySource?->chunks()->where('kind', 'policy')->value('content');
+
+        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources', 'deliverySource', 'deliveryText', 'termsSource'));
     }
 
     public function status(TenantContext $tenant)
@@ -68,6 +72,9 @@ class KnowledgeController extends Controller
         $tenant->authorize(['owner', 'admin']);
         if ($r->input('mode') === 'website_structure') {
             return $this->storeWebsiteStructure($r, $tenant, $ingestion);
+        }
+        if ($r->input('mode') === 'business_policies') {
+            return $this->storeBusinessPolicies($r, $tenant);
         }
 
         $data = $r->validate([
@@ -100,6 +107,62 @@ class KnowledgeController extends Controller
         } catch (\Throwable) {
             return back()->with('error', $source->fresh()->error);
         }
+    }
+
+    private function storeBusinessPolicies(Request $request, TenantContext $tenant)
+    {
+        $data = $request->validate([
+            'delivery_title' => 'required|string|max:150',
+            'delivery_text' => 'required|string|max:10000',
+            'terms_title' => 'required|string|max:150',
+            'terms_url' => 'required|url|max:2000',
+        ]);
+        $agent = $tenant->agent();
+        [$deliveryId, $termsId] = DB::transaction(function () use ($agent, $data): array {
+            $delivery = $agent->knowledgeSources()->firstOrNew(['source_scope' => 'delivery']);
+            $delivery->fill([
+                'type' => 'text',
+                'name' => trim($data['delivery_title']),
+                'url' => null,
+                'file_path' => null,
+                'status' => 'ready',
+                'progress' => 100,
+                'items_found' => 1,
+                'items_created' => $delivery->exists ? 0 : 1,
+                'items_updated' => $delivery->exists ? 1 : 0,
+                'error' => null,
+                'last_synced_at' => now(),
+            ]);
+            $delivery->save();
+            $delivery->chunks()->delete();
+            $delivery->chunks()->create([
+                'agent_id' => $agent->id,
+                'kind' => 'policy',
+                'title' => trim($data['delivery_title']),
+                'content' => trim($data['delivery_text']),
+                'content_hash' => hash('sha256', trim($data['delivery_text'])),
+                'metadata' => ['source_scope' => 'delivery', 'manual' => true],
+            ]);
+
+            $terms = $agent->knowledgeSources()->firstOrNew(['source_scope' => 'terms']);
+            $urlChanged = ! $terms->exists || $terms->url !== trim($data['terms_url']);
+            $terms->fill([
+                'type' => 'url',
+                'name' => trim($data['terms_title']),
+                'url' => trim($data['terms_url']),
+                'file_path' => null,
+                'status' => $urlChanged ? 'processing' : $terms->status,
+                'progress' => $urlChanged ? 1 : $terms->progress,
+                'error' => null,
+            ]);
+            $terms->save();
+
+            return [$delivery->id, $terms->id];
+        });
+
+        CrawlPublicWebsite::dispatch($termsId);
+
+        return back()->with('success', 'Delivery text was saved and Terms & Policies synchronization was queued.');
     }
 
     private function storeWebsiteStructure(Request $request, TenantContext $tenant, KnowledgeIngestionService $ingestion)

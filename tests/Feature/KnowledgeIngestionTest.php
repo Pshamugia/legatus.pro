@@ -640,6 +640,39 @@ HTML;
         Queue::assertNothingPushed();
     }
 
+    public function test_business_can_save_manual_delivery_text_and_terms_url(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+
+        $this->actingAs($user)->post(route('knowledge.store'), [
+            'mode' => 'business_policies',
+            'delivery_title' => 'Delivery information',
+            'delivery_text' => 'თბილისში მიწოდება უფასოა და სრულდება 1-2 სამუშაო დღეში.',
+            'terms_title' => 'Terms and conditions',
+            'terms_url' => 'https://shop.example/terms',
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $delivery = $agent->knowledgeSources()->where('source_scope', 'delivery')->sole();
+        $terms = $agent->knowledgeSources()->where('source_scope', 'terms')->sole();
+        $this->assertSame('text', $delivery->type);
+        $this->assertSame('ready', $delivery->status);
+        $this->assertSame('თბილისში მიწოდება უფასოა და სრულდება 1-2 სამუშაო დღეში.', $delivery->chunks()->sole()->content);
+        $this->assertSame('url', $terms->type);
+        $this->assertSame('https://shop.example/terms', $terms->url);
+        $this->assertSame('processing', $terms->status);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $terms->id);
+
+        $this->actingAs($user)->get(route('knowledge.index'))
+            ->assertOk()
+            ->assertSee('Delivery information')
+            ->assertSee('თბილისში მიწოდება უფასოა')
+            ->assertSee('https://shop.example/terms')
+            ->assertSee('Manual policy');
+    }
+
     public function test_saving_website_structure_updates_single_catalog_and_existing_category(): void
     {
         Queue::fake();

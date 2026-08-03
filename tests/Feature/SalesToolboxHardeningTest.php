@@ -75,6 +75,35 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertStringNotContainsString('2026-', $result['customer_message']);
     }
 
+    public function test_manual_delivery_knowledge_has_priority_over_website_policy(): void
+    {
+        [$agent, , $conversation] = $this->context();
+        $website = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Website', 'url' => 'https://store.example', 'status' => 'ready',
+        ]);
+        $website->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery',
+            'content' => 'Delivery takes 9 days.', 'content_hash' => hash('sha256', 'website-delivery'),
+        ]);
+        $manual = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery information', 'status' => 'ready',
+        ]);
+        $manual->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'მიწოდება',
+            'content' => 'თბილისში მიწოდება უფასოა და სრულდება 1-2 სამუშაო დღეში.',
+            'content_hash' => hash('sha256', 'manual-delivery'),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'თბილისი', 'language' => 'ka',
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('1-2 სამუშაო დღეში', $result['customer_message']);
+        $this->assertStringNotContainsString('9 days', $result['customer_message']);
+        $this->assertArrayNotHasKey('earliest', $result);
+    }
+
     public function test_lead_requires_and_records_server_verified_consent_message(): void
     {
         [$agent, , $conversation] = $this->context();

@@ -41,6 +41,33 @@
         <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>
     </form>
 </section>
+<section class="panel" style="margin-top:24px">
+    <h3>Delivery and business policies</h3>
+    <p class="channel">Give the assistant one authoritative delivery text and one public page for your terms, returns, payments, and other business rules.</p>
+    <form method="post" action="{{ route('knowledge.store') }}">
+        @csrf
+        <input type="hidden" name="mode" value="business_policies">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px" class="policy-grid">
+            <div>
+                <span class="eyebrow">Delivery</span>
+                <label>Title</label>
+                <input name="delivery_title" required maxlength="150" value="{{ old('delivery_title', $deliverySource?->name ?? 'Delivery policy') }}" placeholder="Delivery policy">
+                <label>Delivery information</label>
+                <textarea name="delivery_text" required maxlength="10000" rows="8" placeholder="Write delivery areas, price, timing, working days, and exceptions.">{{ old('delivery_text', $deliveryText) }}</textarea>
+            </div>
+            <div>
+                <span class="eyebrow">Terms &amp; Policies</span>
+                <label>Title</label>
+                <input name="terms_title" required maxlength="150" value="{{ old('terms_title', $termsSource?->name ?? 'Terms and policies') }}" placeholder="Terms and policies">
+                <label>Public URL</label>
+                <input type="url" name="terms_url" required maxlength="2000" value="{{ old('terms_url', $termsSource?->url) }}" placeholder="https://store.example/terms">
+                <p class="channel">Used for terms, returns, refunds, payments, and related policy questions.</p>
+            </div>
+        </div>
+        <button class="btn lime" style="margin-top:22px">Save policies →</button>
+    </form>
+</section>
+<style>.policy-grid textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;resize:vertical}@media(max-width:800px){.policy-grid{grid-template-columns:1fr!important}}</style>
 <div class="content-grid" style="margin-top:24px"><section class="panel"><h3>Upload a catalog or policy</h3><form method="post" enctype="multipart/form-data" action="{{ route('knowledge.store') }}">@csrf<label>Source type</label><div style="display:flex;gap:9px"><label class="tag"><input style="width:auto" type="radio" name="type" value="csv" checked> CSV catalog</label><label class="tag"><input style="width:auto" type="radio" name="type" value="pdf"> PDF / policy</label></div><label>Display name <span style="color:var(--muted);font-weight:400">(optional)</span></label><input name="name" placeholder="Summer catalog or Delivery policy"><div id="file-field"><label>Choose CSV or TXT · max 10 MB</label><input type="file" name="file" accept=".csv,.txt"></div><button class="btn lime" style="margin-top:22px;width:100%">Teach Legatus →</button></form></section>
 <aside class="agent-card"><span class="tag" style="background:#ffffff12;border-color:#ffffff20;color:white">How it works</span><h2 style="font-size:24px">From raw data to trusted answers.</h2><p>1. Content is fetched and validated.<br><br>2. Products are normalized and deduplicated.<br><br>3. Policies are split into searchable chunks.<br><br>4. Legatus cites the exact source used.</p><div style="padding-top:15px;border-top:1px solid #ffffff20;font-size:12px;color:#bcd0c9">Private network URLs are blocked. Catalog text is treated as data, never as AI instructions.</div></aside></div>
 <section class="panel" id="connected-knowledge" style="margin-top:18px">
@@ -49,7 +76,7 @@
         <span class="channel" id="knowledge-live-summary">Live catalog search enabled · synchronization runs in the background</span>
     </div>
     @forelse($sources as $source)
-        @php($fixture = ! $source->isRefreshable())
+        @php($fixture = ! $source->isRefreshable() && $source->type !== 'text')
         <div class="conversation knowledge-source-row" data-source-row="{{ $source->id }}">
             <span class="avatar" style="width:40px;height:40px;background:{{ $source->status==='ready'?'#e8f7d8':'#f3eee1' }};color:var(--ink)">{{ strtoupper(substr($source->type,0,1)) }}</span>
             <div class="copy knowledge-source-copy">
@@ -81,6 +108,8 @@
                 <span class="channel">{{ $fixture ? 'Static fixture · no source payload' : ($source->last_synced_at?->diffForHumans() ?? 'Not synced') }}</span>
                 @if($source->isRefreshable())
                     <form class="async-source-action" data-action="sync" method="post" action="{{ route('knowledge.sync',$source) }}">@csrf<button class="btn ghost" style="padding:8px 11px">↻ Sync</button></form>
+                @elseif($source->type === 'text')
+                    <span class="tag">Manual policy</span>
                 @else
                     <span class="tag">Not refreshable</span>
                 @endif

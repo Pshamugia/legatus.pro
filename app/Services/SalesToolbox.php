@@ -306,8 +306,15 @@ class SalesToolbox
             return ['ok' => false, 'error' => 'A specific knowledge question is required.'];
         }
 
+        $targetScope = preg_match('/(?:მიწოდ|კურიერ|delivery|shipping|courier)/iu', $queryText) === 1
+            ? 'delivery'
+            : (preg_match('/(?:წეს|პირობ|დაბრუნ|refund|return|გადახდ|payment|privacy|კონფიდენციალ|terms|warranty|გარანტ)/iu', $queryText) === 1 ? 'terms' : null);
+        $targetSourceIds = $targetScope
+            ? $agent->knowledgeSources()->where('source_scope', $targetScope)->pluck('id')
+            : collect();
+
         try {
-            $semantic = $this->embeddings->semanticSearch($agent, $queryText);
+            $semantic = $targetSourceIds->isEmpty() ? $this->embeddings->semanticSearch($agent, $queryText) : null;
             if ($semantic) {
                 return ['ok' => true, 'method' => 'semantic', 'results' => $semantic];
             }
@@ -329,6 +336,9 @@ class SalesToolbox
         }
 
         $q = KnowledgeChunk::where('agent_id', $agent->id);
+        if ($targetSourceIds->isNotEmpty()) {
+            $q->whereIn('knowledge_source_id', $targetSourceIds);
+        }
         $q->where(function ($query) use ($terms) {
             foreach ($terms as $term) {
                 $pattern = '%'.Str::lower($term).'%';
@@ -676,16 +686,21 @@ class SalesToolbox
 
     private function publishedDeliveryPolicy(Agent $agent, string $city, string $language): ?array
     {
+        $manualDeliverySourceIds = $agent->knowledgeSources()
+            ->where('source_scope', 'delivery')
+            ->where('status', 'ready')
+            ->pluck('id');
         $websiteSourceIds = $agent->knowledgeSources()
             ->where('type', 'url')
             ->where('status', 'ready')
             ->pluck('id');
-        if ($websiteSourceIds->isEmpty()) {
+        $deliverySourceIds = $manualDeliverySourceIds->merge($websiteSourceIds)->unique()->values();
+        if ($deliverySourceIds->isEmpty()) {
             return null;
         }
 
         $chunks = KnowledgeChunk::where('agent_id', $agent->id)
-            ->whereIn('knowledge_source_id', $websiteSourceIds)
+            ->whereIn('knowledge_source_id', $deliverySourceIds)
             ->where('kind', 'policy')
             ->where(function ($query): void {
                 $query->where('content', 'like', '%მიწოდ%')
@@ -698,16 +713,17 @@ class SalesToolbox
             })
             ->latest('updated_at')
             ->limit(20)
-            ->get(['title', 'content', 'metadata', 'updated_at']);
+            ->get(['knowledge_source_id', 'title', 'content', 'metadata', 'updated_at']);
         if ($chunks->isEmpty()) {
             return null;
         }
 
         $normalizedCity = Str::lower(trim($city));
-        $chunk = $chunks->sortByDesc(function (KnowledgeChunk $candidate) use ($normalizedCity): int {
+        $chunk = $chunks->sortByDesc(function (KnowledgeChunk $candidate) use ($normalizedCity, $manualDeliverySourceIds): int {
             $text = Str::lower($candidate->title.' '.$candidate->content);
 
-            return ($normalizedCity !== '' && Str::contains($text, $normalizedCity) ? 100 : 0)
+            return ($manualDeliverySourceIds->contains($candidate->knowledge_source_id) ? 1000 : 0)
+                + ($normalizedCity !== '' && Str::contains($text, $normalizedCity) ? 100 : 0)
                 + (Str::contains($text, ['მიწოდ', 'delivery', 'shipping']) ? 20 : 0);
         })->first();
         $excerpt = Str::limit(Str::squish(strip_tags((string) $chunk->content)), 900, '…');
