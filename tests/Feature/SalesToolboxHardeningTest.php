@@ -361,6 +361,29 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertTrue($result['suggestion_requires_confirmation']);
     }
 
+    public function test_product_search_never_suggests_an_unrelated_title_from_one_similar_first_name(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'იოანე ბატონიშვილი',
+            'description' => 'საქართველოს ისტორიის შესახებ',
+            'search_text' => 'იოანე ბატონიშვილი საქართველოს ისტორია',
+        ]);
+
+        foreach ([
+            'კაზიმერ ვალიშევსკის ივანე მრისხანე გაქვთ?',
+            'რუსეთის მოსკოვის მეფეების ბიოგრაფიები და ისტორია მინდა',
+        ] as $query) {
+            $result = app(SalesToolbox::class)->execute('search_products', [
+                'query' => $query, 'category' => null, 'max_price' => null,
+            ], $agent, $conversation);
+
+            $this->assertSame([], $result['products']);
+            $this->assertNull($result['did_you_mean'], $query);
+            $this->assertFalse($result['suggestion_requires_confirmation']);
+        }
+    }
+
     public function test_product_search_suggests_a_long_georgian_title_with_one_inserted_letter(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

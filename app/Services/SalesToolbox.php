@@ -12,6 +12,7 @@ use App\Models\Reservation;
 use App\Models\ShoppingProfile;
 use App\Support\PrivacyRedactor;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -160,7 +161,9 @@ class SalesToolbox
             $unavailableProducts = $remoteMatches->where('available', false)->values();
         }
         $didYouMean = null;
-        if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
+        if ($products->isEmpty()
+            && $unavailableProducts->isEmpty()
+            && $this->typoSuggestionEligible($termGroups)) {
             $didYouMean = $this->validatedSearchSuggestion(
                 (string) $a['query'],
                 $this->nearestCatalogSuggestion($agent, $termGroups),
@@ -284,8 +287,12 @@ class SalesToolbox
             });
         if ($termGroups !== []) {
             $maximumMatches = (int) $presented->max('_matched_groups');
+            $requiredMatches = count($termGroups) <= 2
+                ? 1
+                : max(2, (int) ceil(count($termGroups) * .4));
             $presented = $presented->filter(fn (array $product): bool => $product['_search_score'] > 0
-                && $product['_matched_groups'] === $maximumMatches);
+                && $product['_matched_groups'] === $maximumMatches
+                && $product['_matched_groups'] >= $requiredMatches);
         }
 
         return $presented
@@ -459,7 +466,7 @@ class SalesToolbox
             });
         RecommendationEvent::create(['conversation_id' => $c->id, 'query' => PrivacyRedactor::structured($a), 'ranked_products' => PrivacyRedactor::structured($ranked->all())]);
 
-        $didYouMean = $ranked->isEmpty()
+        $didYouMean = $ranked->isEmpty() && $this->typoSuggestionEligible($termGroups)
             ? $this->validatedSearchSuggestion($criteria, $this->nearestCatalogSuggestion($agent, $termGroups))
             : null;
 
@@ -931,11 +938,11 @@ class SalesToolbox
             'a', 'an', 'any', 'are', 'available', 'by', 'can', 'cost', 'could', 'do', 'does', 'find', 'for', 'got',
             'has', 'have', 'i', 'is', 'looking', 'me', 'need', 'of', 'please', 'show', 'the',
             'to', 'want', 'what', 'which', 'would', 'you', 'price', 'stock',
-            'ან', 'არის', 'გაქვთ', 'გაქვს', 'გთხოვ', 'გთხოვთ', 'და', 'თუ', 'იქნებ', 'მაჩვენე',
+            'ან', 'არის', 'აქვს', 'გაქვთ', 'გაქვს', 'გთხოვ', 'გთხოვთ', 'და', 'თუ', 'იქნებ', 'მაჩვენე',
             'მაჩვენეთ', 'მინდა', 'მირჩიე', 'მირჩიეთ', 'მომიძებნე', 'მომიძებნეთ', 'რა', 'რას',
             'რომელი', 'რამდენი', 'შეგიძლიათ', 'შეიძლება', 'თქვენ', 'თქვენთან', 'ხომ', 'ეს', 'მარტო',
             'წიგნი', 'წიგნები', 'წიგნის', 'წიგნებს', 'პროდუქტი', 'პროდუქტები',
-            'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები',
+            'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები', 'გამოცემული',
             'ფასი', 'ღირს', 'მარაგი', 'მარაგშია', 'მარაგში', 'ხელმისაწვდომი', 'ხელმისაწვდომია',
             'რამე', 'საერთოდ',
         ];
@@ -1140,18 +1147,30 @@ class SalesToolbox
         // Accept the suggestion only when at least one unmatched token is a
         // close UTF-8 edit; unrelated suggestions remain rejected.
         foreach ($queryTokens as $queryToken) {
-            foreach ($suggestionTokens as $suggestionToken) {
+            foreach ($suggestionTokens as $suggestionIndex => $suggestionToken) {
                 $distance = $this->utf8Distance($queryToken, $suggestionToken);
                 $length = max(mb_strlen($queryToken), mb_strlen($suggestionToken));
                 $maximumDistance = min(3, max(1, (int) floor($length * 0.25)));
 
-                if ($distance <= $maximumDistance) {
+                if ($distance <= $maximumDistance
+                    && $this->sameSuggestionPrefix($queryToken, $suggestionToken)
+                    && ($suggestionTokens->count() === 1
+                        || $suggestionIndex === $suggestionTokens->count() - 1
+                        || $this->alignedSuggestionTokenCount($queryTokens, $suggestionTokens) >= 2)) {
                     return $suggestion;
                 }
             }
         }
 
         return null;
+    }
+
+    private function typoSuggestionEligible(array $termGroups): bool
+    {
+        // "Did you mean?" is spelling correction, not semantic discovery.
+        // Broad thematic requests must receive grounded matches or an honest
+        // no-result answer, never a loosely similar catalogue title.
+        return count($termGroups) >= 1 && count($termGroups) <= 4;
     }
 
     private function nearestCatalogSuggestion(Agent $agent, array $termGroups): ?string
@@ -1176,8 +1195,8 @@ class SalesToolbox
         foreach ($products as $product) {
             $author = trim((string) data_get($product->metadata, 'author', ''));
             foreach ([
-                ['label' => $author, 'value' => $author],
-                ['label' => (string) $product->name, 'value' => (string) $product->name],
+                ['label' => $author, 'value' => $author, 'kind' => 'author'],
+                ['label' => (string) $product->name, 'value' => (string) $product->name, 'kind' => 'title'],
             ] as $candidate) {
                 if ($candidate['value'] === '') {
                     continue;
@@ -1189,14 +1208,22 @@ class SalesToolbox
                     PREG_SPLIT_NO_EMPTY,
                 ) ?: [];
                 foreach ($queryTokens as $queryToken) {
-                    foreach ($candidateTokens as $candidateToken) {
+                    foreach ($candidateTokens as $candidateIndex => $candidateToken) {
                         if (mb_strlen($candidateToken) < 4) {
                             continue;
                         }
                         $distance = $this->utf8Distance($queryToken, $candidateToken);
                         $length = max(mb_strlen($queryToken), mb_strlen($candidateToken));
                         $maximumDistance = min(2, max(1, (int) floor($length * .25)));
-                        if ($distance < 1 || $distance > $maximumDistance || $distance >= $bestDistance) {
+                        $candidateCollection = collect($candidateTokens)->values();
+                        $safeMultiTokenMatch = count($candidateTokens) === 1
+                            || ($candidate['kind'] === 'author' && $candidateIndex === count($candidateTokens) - 1)
+                            || $this->alignedSuggestionTokenCount($queryTokens, $candidateCollection) >= 2;
+                        if ($distance < 1
+                            || $distance > $maximumDistance
+                            || $distance >= $bestDistance
+                            || ! $this->sameSuggestionPrefix($queryToken, $candidateToken)
+                            || ! $safeMultiTokenMatch) {
                             continue;
                         }
 
@@ -1208,6 +1235,26 @@ class SalesToolbox
         }
 
         return is_string($best) && $best !== '' ? $best : null;
+    }
+
+    private function sameSuggestionPrefix(string $queryToken, string $candidateToken): bool
+    {
+        return mb_substr($queryToken, 0, 2) === mb_substr($candidateToken, 0, 2);
+    }
+
+    private function alignedSuggestionTokenCount(Collection $queryTokens, Collection $suggestionTokens): int
+    {
+        return $suggestionTokens->filter(function (string $suggestionToken) use ($queryTokens): bool {
+            return $queryTokens->contains(function (string $queryToken) use ($suggestionToken): bool {
+                if (! $this->sameSuggestionPrefix($queryToken, $suggestionToken)) {
+                    return false;
+                }
+                $distance = $this->utf8Distance($queryToken, $suggestionToken);
+                $length = max(mb_strlen($queryToken), mb_strlen($suggestionToken));
+
+                return $distance <= min(2, max(1, (int) floor($length * .25)));
+            });
+        })->count();
     }
 
     private function productSearchScore($product, array $termGroups): int
