@@ -50,5 +50,7 @@ class OperatorInboxTest extends TestCase
         $content = $this->get('/app/inbox?conversation='.$c->id)->assertOk()->getContent();
 
         $this->assertGreaterThan(strpos($content, 'id="operator-message-list"'), strpos($content, 'id="operator-composer"'));
+        $this->assertStringContainsString('id="operator-messages" style="flex:1;min-height:0;overflow:auto', $content);
+        $this->assertStringContainsString('id="operator-composer" style="flex:0 0 auto', $content);
     }
 }
