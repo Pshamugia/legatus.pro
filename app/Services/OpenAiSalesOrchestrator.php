@@ -68,7 +68,12 @@ class OpenAiSalesOrchestrator
         }
         $budgetConstraint = $this->explicitBudgetConstraint($message);
         $quantityConstraint = $this->explicitQuantityConstraint($message);
-        $newBudgetRequest = $budgetConstraint !== null && $this->isBudgetRecommendationRequest($message);
+        $quantityAdjustedOnFollowUp = false;
+        // An explicit amount plus an explicit item count is already a bundle
+        // request (for example, "can I buy 5 books for 60 GEL?"). It must not
+        // depend on the customer using a particular recommendation verb.
+        $newBudgetRequest = $budgetConstraint !== null
+            && ($quantityConstraint !== null || $this->isBudgetRecommendationRequest($message));
         $pendingBudgetRequest = data_get($conversation->context, 'pending_budget_request');
         $continuedBudgetRequest = ! $newBudgetRequest && is_array($pendingBudgetRequest) && mb_strlen(trim($message)) <= 80;
         if ($newBudgetRequest) {
@@ -77,12 +82,19 @@ class OpenAiSalesOrchestrator
             $conversation->update(['context' => $context]);
         } elseif ($continuedBudgetRequest) {
             $budgetConstraint = is_numeric($pendingBudgetRequest['budget'] ?? null) ? (float) $pendingBudgetRequest['budget'] : null;
-            $quantityConstraint = is_numeric($pendingBudgetRequest['quantity'] ?? null) ? (int) $pendingBudgetRequest['quantity'] : null;
+            $quantityAdjustedOnFollowUp = $quantityConstraint !== null;
+            $quantityConstraint ??= is_numeric($pendingBudgetRequest['quantity'] ?? null) ? (int) $pendingBudgetRequest['quantity'] : null;
+
+            $context = $conversation->context ?? [];
+            data_set($context, 'pending_budget_request', ['budget' => $budgetConstraint, 'quantity' => $quantityConstraint]);
+            $conversation->update(['context' => $context]);
         }
         $activeBudgetRequest = ($newBudgetRequest || $continuedBudgetRequest) && $budgetConstraint !== null;
         if ($activeBudgetRequest) {
             $arguments = [
-                'query' => $continuedBudgetRequest ? trim($message) : '',
+                // A quantity-only correction such as "find 3 at that price"
+                // changes the bundle constraint; it is not a catalog keyword.
+                'query' => $continuedBudgetRequest && ! $quantityAdjustedOnFollowUp ? trim($message) : '',
                 'budget' => $budgetConstraint,
                 'quantity' => $quantityConstraint,
                 'category' => null,

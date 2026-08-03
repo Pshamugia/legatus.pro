@@ -509,6 +509,61 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
     }
 
+    public function test_quantity_correction_reuses_the_budget_and_replaces_the_failed_bundle_size(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create(['type' => 'url', 'name' => 'Budget catalog', 'url' => 'https://shop.example/books', 'status' => 'ready']);
+        foreach ([['პირველი წიგნი', 18], ['მეორე წიგნი', 16], ['მესამე წიგნი', 14], ['ძვირი წიგნი', 70]] as [$name, $price]) {
+            $agent->products()->create([
+                'name' => $name, 'sku' => str()->slug($name).'-'.$price, 'category' => 'წიგნები',
+                'search_text' => $name.' წიგნები', 'price' => $price, 'stock' => 2, 'is_active' => true,
+                'metadata' => ['source_id' => $source->id],
+            ]);
+        }
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'corrected-bundle-customer', 'status' => 'ai', 'channel' => 'widget',
+            'context' => ['pending_budget_request' => ['budget' => 60, 'quantity' => 5]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                return Http::response(['id' => 'corrected-bundle-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'Searching.', 'intent' => 'recommendation', 'confidence' => .99,
+                        'handoff' => false, 'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $message = 'კარგი, მაგ ფასში 3 წიგნი მომიძიე';
+        $conversation->messages()->create(['role' => 'customer', 'content' => $message]);
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $message);
+
+        $this->assertCount(3, $reply['products']);
+        $this->assertEqualsWithDelta(48, $reply['products']->sum('price'), 0.001);
+        $this->assertStringContainsString('ჯამი: 48.00 ₾', $reply['text']);
+        $this->assertStringContainsString('ბიუჯეტი: 60.00 ₾', $reply['text']);
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
+
+        $directConversation = $agent->conversations()->create([
+            'visitor_id' => 'direct-bundle-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $directMessage = '60 ლარად 3 წიგნს შევიძენ თქვენს საიტზე?';
+        $directConversation->messages()->create(['role' => 'customer', 'content' => $directMessage]);
+        $directReply = app(OpenAiSalesOrchestrator::class)->respond($agent, $directConversation, $directMessage);
+
+        $this->assertCount(3, $directReply['products']);
+        $this->assertEqualsWithDelta(48, $directReply['products']->sum('price'), 0.001);
+        $this->assertStringContainsString('ჯამი: 48.00 ₾', $directReply['text']);
+    }
+
     public function test_a_catalog_answer_blocked_by_the_verifier_is_rewritten_instead_of_repeating_a_fallback(): void
     {
         $this->seed();
