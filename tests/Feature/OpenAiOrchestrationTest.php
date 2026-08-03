@@ -489,6 +489,16 @@ class OpenAiOrchestrationTest extends TestCase
                 return Http::response(['results' => [['flagged' => false]]]);
             }
             if (str_ends_with($request->url(), '/responses')) {
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'bundle-tool', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'bundle-call',
+                        'arguments' => json_encode([
+                            'query' => 'რომანი', 'budget' => 50, 'quantity' => 3,
+                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 3,
+                        ], JSON_UNESCAPED_UNICODE),
+                    ]], 'usage' => []]);
+                }
+
                 return Http::response(['id' => 'bundle-final', 'output' => [[
                     'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
                         'text' => 'Searching.', 'intent' => 'recommendation', 'confidence' => .99,
@@ -506,6 +516,39 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertEqualsWithDelta(48, $reply['products']->sum('price'), 0.001);
         $this->assertStringContainsString('ჯამი: 48.00 ₾', $reply['text']);
         $this->assertStringContainsString('ბიუჯეტი: 50.00 ₾', $reply['text']);
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
+    }
+
+    public function test_semantic_social_turn_closes_pending_commerce_state_without_catalog_tools(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'semantic-social-customer', 'status' => 'ai', 'channel' => 'widget',
+            'context' => ['pending_budget_request' => ['budget' => 40, 'quantity' => 3]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+
+            return Http::response(['id' => 'social-final', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'ძალიან მიხარია, რომ დაგეხმარეთ! 💚', 'intent' => 'conversation', 'confidence' => .99,
+                    'handoff' => false, 'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+        });
+
+        $message = 'მართლა ძალიან დამეხმარეთ <3';
+        $conversation->messages()->create(['role' => 'customer', 'content' => $message]);
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $message);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('conversation', $reply['intent']);
+        $this->assertSame([], $reply['products']->all());
+        $this->assertNotContains('recommend_products', $reply['tools_used']);
         $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
     }
 
