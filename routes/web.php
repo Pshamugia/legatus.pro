@@ -25,6 +25,7 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 Route::get('/', [AgentController::class, 'landing'])->name('landing');
 Route::view('/privacy', 'privacy')->name('privacy');
 Route::view('/terms', 'terms')->name('terms');
+Route::view('/refund-policy', 'refund-policy')->name('refund-policy');
 Route::view('/data-deletion', 'data-deletion')->name('data-deletion');
 Route::withoutMiddleware([
     EncryptCookies::class,

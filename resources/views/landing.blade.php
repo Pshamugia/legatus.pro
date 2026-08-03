@@ -25,6 +25,8 @@
         <div class="navlinks">
             <a href="#product">პროდუქტი</a>
             <a href="#trust">ნდობა</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#contact">Contact</a>
             @auth
                 <a href="{{ route('dashboard') }}">Live dashboard</a>
             @else
@@ -85,5 +87,24 @@
         <div class="metric"><b>Observable</b><span>წყარო, confidence, tools, latency და escalation reason თითოეულ flow-ში</span></div>
         <div class="metric"><b>Human-led</b><span>პოლიტიკის გამონაკლისები და დაბალი confidence ადამიანთან გადადის</span></div>
     </section>
+
+    <section id="pricing" style="padding:70px 0">
+        <div style="text-align:center;max-width:680px;margin:0 auto 30px">
+            <span class="eyebrow">Simple pricing</span>
+            <h2 style="font-size:38px;margin:10px 0">One product, three billing options</h2>
+            <p style="color:var(--muted)">Every plan includes a 2-day free trial, full admin access, and AI sales employee setup.</p>
+        </div>
+        <div class="billing-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
+            <article class="panel" style="padding:28px"><span class="eyebrow">Monthly</span><h3 style="font-size:38px;margin:16px 0 4px">$30</h3><p style="color:var(--muted)">billed every month</p></article>
+            <article class="panel" style="padding:28px"><span class="eyebrow">6 months</span><h3 style="font-size:38px;margin:16px 0 4px">$162</h3><p style="color:var(--muted)">billed every 6 months · save $18</p></article>
+            <article class="panel" style="padding:28px;border:2px solid var(--green)"><span class="eyebrow">Annual</span><h3 style="font-size:38px;margin:16px 0 4px">$288</h3><p style="color:var(--muted)">billed every year · save $72</p></article>
+        </div>
+    </section>
+
+    <footer id="contact" class="panel" style="margin:0 0 40px;padding:28px;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap">
+        <div><strong>Questions or support?</strong><p style="color:var(--muted);margin:7px 0 0"><a href="mailto:{{ config('legatus.privacy_email') }}">{{ config('legatus.privacy_email') }}</a></p></div>
+        <div style="display:flex;gap:18px;flex-wrap:wrap"><a href="{{ route('terms') }}">Terms of Service</a><a href="{{ route('privacy') }}">Privacy Policy</a><a href="{{ route('refund-policy') }}">Refund Policy</a></div>
+    </footer>
 </div>
+<style>@media(max-width:800px){.billing-grid{grid-template-columns:1fr!important}}</style>
 @endsection

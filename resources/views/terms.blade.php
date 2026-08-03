@@ -23,6 +23,9 @@
         <h2>Third-party services</h2>
         <p>OpenAI, Meta, hosting, and commerce systems are independent services with their own availability and terms. Their outages, permission reviews, or platform changes can affect Legatus channels.</p>
 
+        <h2>Subscriptions and billing</h2>
+        <p>Paid plans renew automatically for the billing period selected at checkout until canceled. Prices, trial terms, billing frequency, and taxes are shown before purchase. Payments are processed by Paddle as merchant of record. See our <a href="{{ route('refund-policy') }}">Refund Policy</a> for cancellation and refund information.</p>
+
         <h2>Availability and liability</h2>
         <p>The service is provided without a guarantee of uninterrupted or error-free operation. To the extent permitted by law, Legatus is not liable for indirect or consequential loss. Nothing here excludes rights or liability that cannot lawfully be excluded.</p>
 
