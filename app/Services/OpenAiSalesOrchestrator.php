@@ -265,6 +265,13 @@ class OpenAiSalesOrchestrator
         }
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
+        if (($verifiedDelivery['ok'] ?? false) === true) {
+            // This reply was assembled from the server-owned delivery result,
+            // not drafted from model knowledge. Delivery fees and day ranges
+            // are already authorized by that tool and must not be mistaken for
+            // unverified product prices or stock quantities by generic checks.
+            $escalationReason = null;
+        }
         if (is_string($verifiedSuggestion) && ($data['intent'] ?? null) === 'clarification') {
             // did_you_mean is already tenant-scoped and edit-distance validated
             // by the server. Mentioning it as a question is not a product claim.

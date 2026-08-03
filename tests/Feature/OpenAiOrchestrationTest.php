@@ -28,7 +28,7 @@ class OpenAiOrchestrationTest extends TestCase
         ]);
         $source->chunks()->create([
             'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Customer information',
-            'content' => 'თბილისის მასშტაბით მომსახურება სრულდება 1-2 სამუშაო დღეში.',
+            'content' => 'თბილისის მასშტაბით მომსახურება ღირს 5 ლარი და სრულდება 1-2 სამუშაო დღეში.',
             'content_hash' => hash('sha256', 'manual-delivery-orchestration'),
         ]);
         config(['services.openai.key' => 'test-key']);
@@ -55,6 +55,7 @@ class OpenAiOrchestrationTest extends TestCase
 
         $this->assertStringContainsString('1-2 სამუშაო დღეში', $response->json('text'));
         $this->assertContains('calculate_delivery', $response->json('tools_used'));
+        $this->assertNotContains('server_guardrail', $response->json('tools_used'));
     }
 
     public function test_recent_product_attributes_are_supplied_for_relational_follow_ups(): void
