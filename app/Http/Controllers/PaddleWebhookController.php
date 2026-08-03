@@ -88,6 +88,7 @@ class PaddleWebhookController extends Controller
             ['paddle_subscription_id' => $subscriptionId],
             [
                 'organization_id' => $organizationId,
+                'environment' => config('paddle.environment'),
                 'paddle_customer_id' => $data['customer_id'] ?? null,
                 'paddle_price_id' => $item['price']['id'] ?? $item['price_id'] ?? null,
                 'status' => $data['status'] ?? 'unknown',

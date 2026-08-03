@@ -87,6 +87,7 @@ class PaddleBillingTest extends TestCase
         $this->assertDatabaseCount('paddle_webhook_events', 1);
         $this->assertDatabaseHas('paddle_subscriptions', [
             'organization_id' => $organization->id,
+            'environment' => 'sandbox',
             'paddle_subscription_id' => 'sub_test_1',
             'status' => 'trialing',
         ]);
@@ -98,6 +99,24 @@ class PaddleBillingTest extends TestCase
             ->assertDontSee('Start free trial')
             ->assertDontSee('$162');
         $this->actingAs($user)->get('/app')->assertOk();
+    }
+
+    public function test_sandbox_subscription_does_not_grant_access_in_live_environment(): void
+    {
+        $user = User::factory()->create();
+        $organization = Organization::create(['name' => 'Environment Store', 'slug' => 'environment-store']);
+        $organization->users()->attach($user, ['role' => 'owner']);
+        $organization->paddleSubscriptions()->create([
+            'environment' => 'sandbox',
+            'paddle_subscription_id' => 'sub_sandbox_only',
+            'status' => 'active',
+            'paddle_occurred_at' => now(),
+        ]);
+
+        config()->set('paddle.environment', 'production');
+
+        $this->actingAs($user)->get('/app')->assertRedirect(route('billing.index'));
+        $this->get('/billing')->assertOk()->assertSee('Start free trial');
     }
 
     public function test_completed_checkout_waits_for_webhook_and_refreshes_automatically(): void

@@ -29,7 +29,10 @@ class Organization extends Model
 
     public function currentSubscription(): ?PaddleSubscription
     {
-        return $this->paddleSubscriptions()->latest('paddle_occurred_at')->first();
+        return $this->paddleSubscriptions()
+            ->where('environment', config('paddle.environment'))
+            ->latest('paddle_occurred_at')
+            ->first();
     }
 
     public function hasBillingAccess(): bool
