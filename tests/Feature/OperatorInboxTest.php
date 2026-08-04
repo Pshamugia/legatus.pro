@@ -56,4 +56,29 @@ class OperatorInboxTest extends TestCase
         $this->assertStringContainsString('id="conversation-workspace"', $content);
         $this->assertStringContainsString('style="min-width:0;min-height:0;overflow:hidden', $content);
     }
+
+    public function test_operator_inbox_exposes_the_exact_products_linked_by_an_assistant_reply(): void
+    {
+        $c = $this->conversation();
+        $message = $c->messages()->create([
+            'role' => 'assistant',
+            'content' => 'I selected this product.',
+            'metadata' => ['products' => [[
+                'id' => 77,
+                'name' => 'Verified novel',
+                'price' => 19.5,
+                'url' => 'https://shop.example/products/verified-novel',
+            ]]],
+        ]);
+
+        $response = $this->getJson("/app/inbox/{$c->id}/poll")->assertOk();
+        $product = collect($response->json('messages'))->firstWhere('id', $message->id)['products'][0];
+
+        $this->assertSame('Verified novel', $product['name']);
+        $this->assertSame(19.5, $product['price']);
+        $this->assertSame('https://shop.example/products/verified-novel', $product['url']);
+        $this->get('/app/inbox?conversation='.$c->id)
+            ->assertOk()
+            ->assertSee('Open product ↗');
+    }
 }

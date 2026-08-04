@@ -29,6 +29,42 @@
     const pollUrl = @json(route('inbox.poll', $selected));
     const deliveryLabels = {queued: 'Queued', sending: 'Sending', retrying: 'Retry scheduled', sent: 'Sent', delivered: 'Delivered', read: 'Read', failed: 'Not delivered', delivery_unknown: 'Delivery uncertain'};
 
+    const updateProducts = (bubble, message) => {
+        bubble.querySelector('.linked-products')?.remove();
+        if (message.role !== 'assistant' || !Array.isArray(message.products) || !message.products.length) return;
+        const products = document.createElement('div');
+        products.className = 'linked-products';
+        products.style.cssText = 'display:grid;gap:6px;margin-top:10px';
+        message.products.forEach((product) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:white';
+            const name = document.createElement('strong');
+            name.style.display = 'block';
+            name.textContent = product.name || 'Product';
+            card.append(name);
+            if (Number.isFinite(Number(product.price))) {
+                const price = document.createElement('span');
+                price.style.cssText = 'font-size:12px;color:var(--muted)';
+                price.textContent = `${Number(product.price).toFixed(2)} ₾`;
+                card.append(price);
+            }
+            try {
+                const url = new URL(product.url);
+                if (url.protocol === 'https:' || url.protocol === 'http:') {
+                    const link = document.createElement('a');
+                    link.href = url.href;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.textContent = 'Open product ↗';
+                    link.style.cssText = 'display:inline-block;margin-left:8px;font-size:12px;color:var(--green);font-weight:700';
+                    card.append(link);
+                }
+            } catch (_) {}
+            products.append(card);
+        });
+        bubble.append(products);
+    };
+
     const updateDelivery = (bubble, message) => {
         let state = bubble.querySelector('.delivery-state');
         let warning = bubble.querySelector('.delivery-warning');
@@ -61,6 +97,7 @@
     const addMessage = (message) => {
         const existing = messageList.querySelector(`[data-message-id="${message.id}"]`);
         if (existing) {
+            updateProducts(existing, message);
             updateDelivery(existing, message);
             return false;
         }
@@ -74,6 +111,7 @@
         const role = message.role === 'human' ? 'Human operator' : message.role.charAt(0).toUpperCase() + message.role.slice(1);
         byline.textContent = role + (message.confidence ? ` · ${Math.round(message.confidence * 100)}% confidence` : '');
         bubble.append(byline, document.createTextNode(message.content));
+        updateProducts(bubble, message);
 
         if (message.role === 'assistant' && Array.isArray(message.sources) && message.sources.length) {
             const sources = document.createElement('div');
@@ -113,6 +151,7 @@
     };
 
     messagePane.scrollTop = messagePane.scrollHeight;
+    pollConversation();
     setInterval(pollConversation, 5000);
 </script>
 @endif

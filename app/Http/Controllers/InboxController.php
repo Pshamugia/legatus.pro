@@ -102,6 +102,7 @@ class InboxController extends Controller
                 'content' => $message->content,
                 'confidence' => $message->confidence,
                 'sources' => $message->role === 'assistant' ? ($message->metadata['sources'] ?? []) : [],
+                'products' => $message->role === 'assistant' ? ($message->metadata['products'] ?? []) : [],
                 'delivery_status' => $this->deliveryStatus($message),
                 'delivery_warning' => $this->deliveryWarning($message),
                 'created_at' => $message->created_at?->toIso8601String(),
