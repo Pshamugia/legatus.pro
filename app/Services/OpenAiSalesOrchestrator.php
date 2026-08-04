@@ -268,6 +268,27 @@ class OpenAiSalesOrchestrator
             $data['product_ids'] = [];
             $data['factual_claims'] = [];
         }
+        $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
+            && $budgetConstraint === null
+            && $usedCollection->where('name', 'search_products')
+                ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
+                ->contains(fn (array $call): bool => collect(array_merge(
+                    data_get($call, 'result.products', []),
+                    data_get($call, 'result.unavailable_products', []),
+                ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')))
+            && $usedCollection->where('name', 'recommend_products')->isNotEmpty();
+        if ($exactLookupMiss) {
+            $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
+            $data['text'] = $georgian
+                ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე. სხვა პროდუქტს მის ნაცვლად არ გაჩვენებთ, რადგან შესაბამისობა ვერ დადასტურდა.'
+                : 'I could not find the exact requested product in the catalog. I will not substitute another product because its relevance was not verified.';
+            $data['intent'] = 'discovery';
+            $data['confidence'] = 1;
+            $data['handoff'] = false;
+            $data['escalation_reason'] = null;
+            $data['product_ids'] = [];
+            $data['factual_claims'] = [];
+        }
         $verifiedSuggestion = $usedCollection
             ->filter(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true))
             ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))

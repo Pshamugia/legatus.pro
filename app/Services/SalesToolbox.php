@@ -436,7 +436,7 @@ class SalesToolbox
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }
-        $ranked = $query->get()->map(function ($p) use ($termGroups, $a, $c, $liveProductIds) {
+        $ranked = $query->get()->map(function ($p) use ($termGroups, $a, $c) {
             $matched = collect($termGroups)
                 ->filter(fn (array $variants): bool => $this->productMatchesTermGroup($p, $variants))
                 ->map(fn (array $variants): string => (string) ($variants[0] ?? ''))
@@ -444,26 +444,34 @@ class SalesToolbox
                 ->values();
             $within = ! $a['budget'] || (float) $p->price <= (float) $a['budget'];
             $available = $this->availableStock($p, $c);
-            $relevance = max(
-                $this->productSearchScore($p, $termGroups),
-                $liveProductIds->contains((int) $p->id) ? 80 : 0,
-            );
+            // A storefront search result is only a candidate, never proof of
+            // topical relevance. Some storefronts return popular or merely
+            // recent products for weak/no matches, so every recommendation
+            // must still match the customer's actual words in verified data.
+            $relevance = $this->productSearchScore($p, $termGroups);
             $score = $relevance + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
 
-            $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'taxonomy' => array_values(array_filter((array) data_get($p->metadata, 'taxonomy', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance];
+            $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'taxonomy' => array_values(array_filter((array) data_get($p->metadata, 'taxonomy', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance, '_matched_groups' => $matched->count()];
             if ($result['stock_precision'] === 'exact') {
                 $result['stock'] = $available;
                 $result['available_stock'] = $available;
             }
 
             return $result;
-        })->filter(fn (array $product) => $product['_available_stock'] > 0)
-            ->when($termGroups !== [], fn ($products) => $products->filter(
-                fn (array $product): bool => $product['_relevance'] > 0
-            ))
+        })->filter(fn (array $product) => $product['_available_stock'] > 0);
+        if ($termGroups !== []) {
+            $maximumMatches = (int) $ranked->max('_matched_groups');
+            $requiredMatches = count($termGroups) <= 2
+                ? 1
+                : max(2, (int) ceil(count($termGroups) * .4));
+            $ranked = $ranked->filter(fn (array $product): bool => $product['_relevance'] > 0
+                && $product['_matched_groups'] === $maximumMatches
+                && $product['_matched_groups'] >= $requiredMatches);
+        }
+        $ranked = $ranked
             ->sortByDesc('score')->values()
             ->map(function (array $product): array {
-                unset($product['_available_stock'], $product['_relevance']);
+                unset($product['_available_stock'], $product['_relevance'], $product['_matched_groups']);
 
                 return $product;
             });
