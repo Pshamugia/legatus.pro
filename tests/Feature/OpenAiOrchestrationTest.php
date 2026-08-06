@@ -224,6 +224,40 @@ class OpenAiOrchestrationTest extends TestCase
         ];
     }
 
+    public function test_low_confidence_social_turn_is_not_rejected_by_commercial_verification(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'natural-gratitude-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'social-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'ძალიან მიხარია! მადლობა თქვენც 💚',
+                    'intent' => 'conversation',
+                    'confidence' => .55,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'მშვენიერია. დიდი მადლობა <3', $conversation);
+
+        $this->assertSame('conversation', $reply['intent']);
+        $this->assertSame('ძალიან მიხარია! მადლობა თქვენც 💚', $reply['text']);
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([], $reply['tools_used']);
+    }
+
     public function test_empty_business_catalog_recommendation_cannot_be_replaced_with_general_model_knowledge(): void
     {
         $this->seed();

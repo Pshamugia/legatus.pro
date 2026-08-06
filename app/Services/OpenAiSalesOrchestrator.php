@@ -1160,7 +1160,10 @@ class OpenAiSalesOrchestrator
         $successful = $used->filter(fn ($call) => ($call['result']['ok'] ?? false) === true);
         $successfulNames = $successful->pluck('name')->unique()->values();
         $threshold = (float) ($agent->settings['handoff_threshold'] ?? 0.72);
-        if ((float) ($data['confidence'] ?? 0) < $threshold) {
+        $nonCommercialDialogue = in_array($data['intent'] ?? null, ['conversation', 'clarification'], true)
+            && collect($data['product_ids'] ?? [])->isEmpty()
+            && collect($data['factual_claims'] ?? [])->isEmpty();
+        if (! $nonCommercialDialogue && (float) ($data['confidence'] ?? 0) < $threshold) {
             return 'Model confidence is below the configured '.number_format($threshold * 100).'% handoff threshold.';
         }
 
