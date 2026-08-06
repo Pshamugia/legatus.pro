@@ -619,6 +619,7 @@ HTML;
         $response = $this->actingAs($user)->postJson(route('knowledge.store'), [
             'mode' => 'website_structure',
             'catalog_url' => 'https://shop.example/products',
+            'search_url' => 'https://shop.example/find',
             'categories' => [
                 ['name' => 'Thriller', 'url' => 'https://shop.example/category/thriller'],
                 ['name' => 'Denim trousers', 'url' => 'https://shop.example/category/denim'],
@@ -637,6 +638,8 @@ HTML;
         $this->assertDatabaseHas('knowledge_sources', [
             'agent_id' => $agent->id, 'source_scope' => 'sitemap', 'url' => 'https://shop.example/sitemap.xml',
         ]);
+        $this->assertSame('https://shop.example/find', data_get($agent->fresh()->settings, 'catalog_search_url'));
+        $this->assertNull(data_get($agent->fresh()->settings, 'catalog_suggest_url'));
         Queue::assertNothingPushed();
     }
 

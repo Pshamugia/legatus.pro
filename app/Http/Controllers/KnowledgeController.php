@@ -169,6 +169,7 @@ class KnowledgeController extends Controller
     {
         $data = $request->validate([
             'catalog_url' => 'required|url|max:2000',
+            'search_url' => 'nullable|url|max:2000',
             'sitemap_url' => 'nullable|url|max:2000',
             'categories' => 'nullable|array',
             'categories.*.name' => 'required_with:categories.*.url|nullable|string|max:150',
@@ -181,6 +182,10 @@ class KnowledgeController extends Controller
         $agent = $tenant->agent();
         $sourceIds = DB::transaction(function () use ($agent, $data, $categories, $ingestion): array {
             $sources = [];
+            $settings = $agent->settings ?? [];
+            $settings['catalog_search_url'] = filled($data['search_url'] ?? null) ? trim($data['search_url']) : null;
+            $settings['catalog_suggest_url'] = null;
+            $agent->update(['settings' => $settings]);
             $catalog = $agent->knowledgeSources()->firstOrNew(['source_scope' => 'catalog']);
             $catalog->fill(
                 ['type' => 'url', 'name' => 'Site catalog', 'url' => $data['catalog_url']],

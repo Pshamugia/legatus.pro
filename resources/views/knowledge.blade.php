@@ -32,10 +32,13 @@
         <input type="hidden" name="mode" value="website_structure">
         <label>1. Site catalog URL <span style="color:var(--muted);font-weight:400">(all products)</span></label>
         <input type="url" name="catalog_url" required value="{{ $catalogSource?->url }}" placeholder="https://store.example/products">
-        <label>2. Categories</label>
+        <label>2. Site search URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <input type="url" name="search_url" value="{{ old('search_url', data_get($agent->settings, 'catalog_search_url')) }}" placeholder="https://store.example/search">
+        <p class="channel">For Bukinistebi enter https://bukinistebi.ge/search. Legatus searches this page directly and reads matching products and availability from its results.</p>
+        <label>3. Categories</label>
         <div id="category-fields"></div>
         <button type="button" class="btn ghost" id="add-category" style="margin-top:10px">＋ Add category</button>
-        <label>3. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <label>4. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
         <input type="url" name="sitemap_url" value="{{ $sitemapSource?->url }}" placeholder="https://store.example/sitemap.xml">
         <button class="btn lime" style="margin-top:22px">Save structure →</button>
         <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>

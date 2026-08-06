@@ -427,37 +427,37 @@ class PublicStorefrontCatalogTest extends TestCase
         ]);
     }
 
-    public function test_promoted_search_cards_do_not_hide_an_exact_sold_out_suggestion(): void
+    public function test_configured_search_page_finds_exact_sold_out_product_without_suggestions(): void
     {
         [$agent, $conversation] = $this->context();
-        Http::fake(function ($request) {
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://bukinistebi.ge/custom-search',
+        ])]);
+        $exactSoldOut = str_replace(
+            [
+                'საიუბილეო საარქივო გამოცემა',
+                'პაოლო იაშვილი',
+                'https://bukinistebi.ge/books/paolo-iashvili/42',
+                'toggle-cart-btn',
+            ],
+            [
+                'იოანე მინჩხის პოეზია',
+                'იოანე მინჩხი',
+                'https://bukinistebi.ge/books/ioane-minchkhis-poezia/1560',
+                'sold-product',
+            ],
+            $this->searchCardsHtml(),
+        );
+        Http::fake(function ($request) use ($exactSoldOut) {
             $path = (string) parse_url($request->url(), PHP_URL_PATH);
 
-            if ($path === '/search') {
+            if ($path === '/custom-search') {
                 // The real storefront can place unrelated fallback cards in
                 // the same search-results container.
                 return Http::response(
-                    '<div id="search-results">'.$this->searchCardsHtml().'</div>',
+                    '<div id="search-results">'.$exactSoldOut.$this->searchCardsHtml().'</div>',
                     200,
                     ['Content-Type' => 'text/html'],
-                );
-            }
-            if ($path === '/search/suggest') {
-                return Http::response(['items' => [[
-                    'title' => 'იოანე მინჩხის პოეზია',
-                    'author' => 'იოანე მინჩხი',
-                    'url' => 'https://bukinistebi.ge/books/ioane-minchkhis-poezia/1560',
-                    'sold' => true,
-                ]], 'didYouMean' => null]);
-            }
-            if ($path === '/books/ioane-minchkhis-poezia/1560') {
-                return Http::response(
-                    '<script type="application/ld+json">'.json_encode([
-                        '@context' => 'https://schema.org',
-                        '@type' => 'Product',
-                        'name' => 'იოანე მინჩხის პოეზია',
-                        'offers' => ['@type' => 'Offer', 'price' => '12.00', 'availability' => 'https://schema.org/InStock'],
-                    ], JSON_UNESCAPED_UNICODE).'</script>',
                 );
             }
 
@@ -474,6 +474,8 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertSame('იოანე მინჩხის პოეზია', data_get($result, 'unavailable_products.0.name'));
         $this->assertFalse(data_get($result, 'unavailable_products.0.available'));
         $this->assertNotContains('საიუბილეო საარქივო გამოცემა', collect($result['products'])->pluck('name')->all());
+        Http::assertSent(fn ($request): bool => str_starts_with($request->url(), 'https://bukinistebi.ge/custom-search?title='));
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/suggest'));
     }
 
     /** @return array{Agent, Conversation} */

@@ -78,7 +78,7 @@ class PublicStorefrontCatalog
         foreach ($this->queryCandidates($query, $alternatives) as $candidate) {
             try {
                 $searchPage = $this->ingestion->fetchPublicUrl(
-                    $origin.'/search?title='.rawurlencode($candidate),
+                    $this->storefrontEndpointUrl($agent, $origin, 'catalog_search_url', '/search', 'title', $candidate),
                     ['Accept' => 'text/html'],
                     5,
                     1,
@@ -115,11 +115,18 @@ class PublicStorefrontCatalog
             }
         }
 
+        // A configured search page is authoritative on its own. Do not make
+        // the business configure or depend on a separate autocomplete API.
+        if (filled(data_get($agent->settings, 'catalog_search_url'))
+            && blank(data_get($agent->settings, 'catalog_suggest_url'))) {
+            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => $this->sourceEvidence((string) $source->url)];
+        }
+
         $payload = null;
         foreach ($this->queryCandidates($query, $alternatives) as $candidate) {
             try {
                 $response = $this->ingestion->fetchPublicUrl(
-                    $origin.'/search/suggest?q='.rawurlencode($candidate),
+                    $this->storefrontEndpointUrl($agent, $origin, 'catalog_suggest_url', '/search/suggest', 'q', $candidate),
                     ['Accept' => 'application/json', 'X-Requested-With' => 'XMLHttpRequest'],
                     5,
                     1,
@@ -234,6 +241,38 @@ class PublicStorefrontCatalog
             ->whereNotNull('url')
             ->orderByDesc('id')
             ->first();
+    }
+
+    private function storefrontEndpointUrl(
+        Agent $agent,
+        string $origin,
+        string $setting,
+        string $defaultPath,
+        string $queryParameter,
+        string $query,
+    ): string {
+        $configured = trim((string) data_get($agent->settings, $setting, ''));
+        $base = $configured !== '' ? $configured : $origin.$defaultPath;
+        $parts = parse_url($base);
+        $originParts = parse_url($origin);
+
+        // Admin-configured discovery endpoints may change the path, but they
+        // must remain on the catalog's own origin so customer queries are not
+        // leaked to an unrelated host.
+        if (! is_array($parts)
+            || ! is_array($originParts)
+            || Str::lower((string) ($parts['scheme'] ?? '')) !== Str::lower((string) ($originParts['scheme'] ?? ''))
+            || Str::lower((string) ($parts['host'] ?? '')) !== Str::lower((string) ($originParts['host'] ?? ''))) {
+            $base = $origin.$defaultPath;
+            $parts = parse_url($base);
+        }
+
+        parse_str((string) ($parts['query'] ?? ''), $parameters);
+        $parameters[$queryParameter] = $query;
+        $path = (string) ($parts['path'] ?? $defaultPath);
+        $port = isset($parts['port']) ? ':'.(int) $parts['port'] : '';
+
+        return (string) ($parts['scheme'] ?? 'https').'://'.(string) ($parts['host'] ?? '').$port.$path.'?'.http_build_query($parameters, '', '&', PHP_QUERY_RFC3986);
     }
 
     private function validQuery(string $query): bool
