@@ -145,6 +145,12 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNotContains($previous->id, collect($reply['products'])->pluck('id')->all());
         $this->assertContains('resolve_catalog_context', $reply['tools_used']);
         $this->assertContains('search_products', $reply['tools_used']);
+        $contextRequest = Http::recorded()
+            ->map(fn ($pair) => $pair[0])
+            ->first(fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up');
+        $this->assertNotNull($contextRequest);
+        $this->assertSame('Anything else?', data_get(collect($contextRequest->data()['input'])->last(), 'content'));
+        $this->assertStringContainsString('structured records', (string) $contextRequest->data()['instructions']);
     }
 
     #[DataProvider('crossIndustryMessages')]
@@ -737,10 +743,10 @@ class OpenAiOrchestrationTest extends TestCase
             'message' => 'Do you have another item like this?',
         ])->assertOk()
             ->assertJsonPath('handoff', false)
-            ->assertJsonPath('tools_used.0', 'search_products')
-            ->assertJsonPath('tools_used.1', 'guardrail_repair');
+            ->assertJsonPath('tools_used.0', 'search_products');
 
         $this->assertStringContainsString($product->name, $response->json('text'));
+        $this->assertContains('guardrail_repair', $response->json('tools_used'));
         $this->assertDatabaseHas('conversations', ['status' => 'ai']);
     }
 
