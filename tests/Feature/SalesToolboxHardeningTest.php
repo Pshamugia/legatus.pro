@@ -842,6 +842,33 @@ class SalesToolboxHardeningTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_semantically_selected_previous_products_are_excluded_from_catalog_results(): void
+    {
+        [$agent, $previous, $conversation] = $this->context(stock: 3);
+        $previous->update([
+            'name' => 'Acme First',
+            'search_text' => 'Acme First',
+        ]);
+        $next = $agent->products()->create([
+            'name' => 'Acme Second',
+            'search_text' => 'Acme Second',
+            'price' => 25,
+            'stock' => 0,
+            'is_active' => true,
+        ]);
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Acme',
+            'category' => null,
+            'max_price' => null,
+            'exclude_product_ids' => [$previous->id],
+        ], $agent, $conversation);
+
+        $this->assertSame([], collect($result['products'])->pluck('id')->all());
+        $this->assertSame([$next->id], collect($result['unavailable_products'])->pluck('id')->all());
+    }
+
     private function context(int $stock = 10): array
     {
         $agent = Agent::create([

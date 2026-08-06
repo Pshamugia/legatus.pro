@@ -27,10 +27,10 @@ class SalesToolbox
     public function definitions(?Agent $agent = null): array
     {
         $definitions = [
-            $this->tool('search_products', 'Search the verified product catalog by customer needs. Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
+            $this->tool('search_products', 'Search the verified product catalog by customer needs. Resolve the complete dialogue semantically. Set exclude_product_ids to previously shown products that no longer satisfy the customer’s current request, including when they ask for additional or different results; otherwise use an empty array. Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']], 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']]], ['query', 'category', 'max_price', 'exclude_product_ids']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
-            $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data. When quantity is set, budget is the maximum total for the complete bundle, not a per-item limit.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'quantity' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5]], ['query', 'budget', 'quantity', 'category', 'mood', 'occasion', 'limit']),
+            $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data. Resolve the complete dialogue semantically. Set exclude_product_ids to previously shown products that no longer satisfy the current request; otherwise use an empty array. When quantity is set, budget is the maximum total for the complete bundle, not a per-item limit.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'quantity' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5], 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']]], ['query', 'budget', 'quantity', 'category', 'mood', 'occasion', 'limit', 'exclude_product_ids']),
             $this->tool('compare_products', 'Compare verified attributes for selected products.', ['product_ids' => ['type' => 'array', 'items' => ['type' => 'integer'], 'minItems' => 2, 'maxItems' => 4]], ['product_ids']),
             $this->tool('check_stock', 'Read current stock and price for one product.', ['product_id' => ['type' => 'integer'], 'quantity' => ['type' => 'integer', 'minimum' => 1]], ['product_id', 'quantity']),
             $this->tool('calculate_delivery', 'Calculate an indicative delivery window from the business policy and server time.', ['city' => ['type' => 'string'], 'language' => ['type' => 'string', 'enum' => ['ka', 'en']]], ['city', 'language']),
@@ -159,6 +159,12 @@ class SalesToolbox
             $remoteMatches = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
             $products = $remoteMatches->where('available', true)->values();
             $unavailableProducts = $remoteMatches->where('available', false)->values();
+        }
+        $excludedProductIds = collect($a['exclude_product_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)->filter()->unique();
+        if ($excludedProductIds->isNotEmpty()) {
+            $products = $products->reject(fn (array $product): bool => $excludedProductIds->contains((int) ($product['id'] ?? 0)))->values();
+            $unavailableProducts = $unavailableProducts->reject(fn (array $product): bool => $excludedProductIds->contains((int) ($product['id'] ?? 0)))->values();
         }
         $didYouMean = null;
         if ($products->isEmpty()
@@ -425,6 +431,11 @@ class SalesToolbox
             : $taxonomyProductIds;
 
         $query = $agent->customerProducts()->where('is_active', true);
+        $excludedProductIds = collect($a['exclude_product_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
+        if ($excludedProductIds !== []) {
+            $query->whereNotIn('products.id', $excludedProductIds);
+        }
         if ($candidateProductIds !== null) {
             $query->whereIn('products.id', $candidateProductIds);
         }
