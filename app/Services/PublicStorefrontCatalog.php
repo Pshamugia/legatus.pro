@@ -84,13 +84,20 @@ class PublicStorefrontCatalog
                     1,
                 );
                 $dedicatedResults = $this->ingestion->hasDedicatedStorefrontSearchResults($searchPage->body());
-                $products = $this->ingestion->storefrontProductsFromHtml(
+                $parsedProducts = $this->ingestion->storefrontProductsFromHtml(
                     $searchPage->body(),
                     $origin,
                     $dedicatedResults,
                 );
-                if (! $dedicatedResults) {
-                    $products = $this->relevantProducts($products, $candidate);
+                // Some storefront "search results" containers also include
+                // promoted or fallback cards. A dedicated container tells us
+                // where to parse, not that every card matches the query.
+                $products = $this->relevantProducts($parsedProducts, $candidate);
+                if ($dedicatedResults && $parsedProducts !== [] && $products === []) {
+                    // Keep the storefront snapshot fresh, but continue to the
+                    // exact suggestion endpoint instead of treating promoted
+                    // cards as the answer to this query.
+                    $this->ingestion->importDiscoveredUrlProducts($source, $parsedProducts);
                 }
                 if ($products !== []) {
                     $products = $this->enrichOriginalPrices($products, $parts);

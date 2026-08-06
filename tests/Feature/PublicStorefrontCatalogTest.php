@@ -203,6 +203,7 @@ class PublicStorefrontCatalogTest extends TestCase
             $this->searchCardsHtml(),
         );
         Http::fake([
+            'https://bukinistebi.ge/search/suggest*' => Http::response(['items' => [], 'didYouMean' => null]),
             'https://bukinistebi.ge/search?title=*' => Http::response(
                 '<div id="search-results">'.$actualResult.'</div>'
                 .'<section class="recommendations">'.$unrelatedRecommendation.'</section>',
@@ -424,6 +425,55 @@ class PublicStorefrontCatalogTest extends TestCase
             'provider' => 'local',
             'model' => 'verified-catalog-responder',
         ]);
+    }
+
+    public function test_promoted_search_cards_do_not_hide_an_exact_sold_out_suggestion(): void
+    {
+        [$agent, $conversation] = $this->context();
+        Http::fake(function ($request) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+            if ($path === '/search') {
+                // The real storefront can place unrelated fallback cards in
+                // the same search-results container.
+                return Http::response(
+                    '<div id="search-results">'.$this->searchCardsHtml().'</div>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+            if ($path === '/search/suggest') {
+                return Http::response(['items' => [[
+                    'title' => 'იოანე მინჩხის პოეზია',
+                    'author' => 'იოანე მინჩხი',
+                    'url' => 'https://bukinistebi.ge/books/ioane-minchkhis-poezia/1560',
+                    'sold' => true,
+                ]], 'didYouMean' => null]);
+            }
+            if ($path === '/books/ioane-minchkhis-poezia/1560') {
+                return Http::response(
+                    '<script type="application/ld+json">'.json_encode([
+                        '@context' => 'https://schema.org',
+                        '@type' => 'Product',
+                        'name' => 'იოანე მინჩხის პოეზია',
+                        'offers' => ['@type' => 'Offer', 'price' => '12.00', 'availability' => 'https://schema.org/InStock'],
+                    ], JSON_UNESCAPED_UNICODE).'</script>',
+                );
+            }
+
+            return Http::response([], 404);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'იოანე მინჩხის პოეზია გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame('იოანე მინჩხის პოეზია', data_get($result, 'unavailable_products.0.name'));
+        $this->assertFalse(data_get($result, 'unavailable_products.0.available'));
+        $this->assertNotContains('საიუბილეო საარქივო გამოცემა', collect($result['products'])->pluck('name')->all());
     }
 
     /** @return array{Agent, Conversation} */
