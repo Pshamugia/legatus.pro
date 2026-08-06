@@ -1224,7 +1224,11 @@ class SalesToolbox
             foreach ($suggestionTokens as $suggestionIndex => $suggestionToken) {
                 $distance = $this->utf8Distance($queryToken, $suggestionToken);
                 $length = max(mb_strlen($queryToken), mb_strlen($suggestionToken));
-                $maximumDistance = min(3, max(1, (int) floor($length * 0.25)));
+                // Long customer typos often contain several insertions or
+                // transpositions. A shared prefix plus a bounded proportional
+                // distance accepts the storefront's close correction while
+                // still rejecting unrelated names from a noisy suggest API.
+                $maximumDistance = min(6, max(1, (int) floor($length * 0.35)));
 
                 if ($distance <= $maximumDistance
                     && $this->sameSuggestionPrefix($queryToken, $suggestionToken)

@@ -869,6 +869,19 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([$next->id], collect($result['unavailable_products'])->pluck('id')->all());
     }
 
+    public function test_long_storefront_typo_suggestion_is_accepted_but_unrelated_names_are_rejected(): void
+    {
+        $method = new \ReflectionMethod(SalesToolbox::class, 'validatedSearchSuggestion');
+        $toolbox = app(SalesToolbox::class);
+
+        $this->assertSame(
+            'ვეფხისტყაოსანი',
+            $method->invoke($toolbox, 'ვეფგხვისტყნაოისანი', 'ვეფხისტყაოსანი'),
+        );
+        $this->assertNull($method->invoke($toolbox, 'ჭნტურიასი', 'არტურ მილნი'));
+        $this->assertNull($method->invoke($toolbox, 'ჭანტურიასი', 'ფანტომასი'));
+    }
+
     private function context(int $stock = 10): array
     {
         $agent = Agent::create([
