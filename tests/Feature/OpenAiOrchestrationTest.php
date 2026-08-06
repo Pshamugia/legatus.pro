@@ -152,6 +152,8 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNotNull($contextRequest);
         $this->assertSame('Anything else?', data_get(collect($contextRequest->data()['input'])->last(), 'content'));
         $this->assertStringContainsString('structured records', (string) $contextRequest->data()['instructions']);
+        $this->assertStringContainsString('open-ended request for advice or recommendations', (string) $contextRequest->data()['instructions']);
+        $this->assertStringContainsString('is not a direct lookup', (string) $contextRequest->data()['instructions']);
     }
 
     #[DataProvider('crossIndustryMessages')]
