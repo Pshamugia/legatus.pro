@@ -289,6 +289,17 @@ class PublicStorefrontCatalog
     {
         $query = preg_replace('/\s+/u', ' ', trim($query)) ?? '';
         $tokens = preg_split('/[^\pL\pN%_+\-.]+/u', Str::lower($query), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $alternativeTokens = collect($alternatives)
+            ->flatMap(fn (string $alternative): array => preg_split(
+                '/[^\pL\pN%_+\-.]+/u',
+                Str::lower($alternative),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [])
+            ->reject(fn (string $token): bool => in_array($token, $tokens, true))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 3)
+            ->sortByDesc(fn (string $token): int => mb_strlen($token))
+            ->values();
 
         $phrases = [];
         foreach (array_filter([3, 2], fn (int $size): bool => count($tokens) >= $size) as $size) {
@@ -304,11 +315,12 @@ class PublicStorefrontCatalog
 
         return collect([$query])
             ->merge($alternatives)
+            ->merge($alternativeTokens)
             ->merge(collect($phrases)->pluck('text'))
             ->merge(collect($tokens)->sortByDesc(fn (string $token): int => mb_strlen($token)))
             ->filter(fn (string $candidate): bool => mb_strlen($candidate) >= 3)
             ->unique()
-            ->take(3)
+            ->take(8)
             ->values()
             ->all();
     }

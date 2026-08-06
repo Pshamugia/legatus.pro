@@ -114,6 +114,7 @@ class OpenAiOrchestrationTest extends TestCase
                     'is_catalog_follow_up' => true,
                     'resolved_query' => 'Acme',
                     'exclude_product_ids' => [$previous->id],
+                    'expects_complete_set' => true,
                 ])]],
             ]], 'usage' => []])
             ->push(['id' => 'follow-up-stock-call', 'output' => [[
@@ -413,6 +414,7 @@ class OpenAiOrchestrationTest extends TestCase
                     'is_catalog_follow_up' => false,
                     'resolved_query' => null,
                     'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
                 ])]],
             ]], 'usage' => []])
             ->push(['id' => 'purchase-stock', 'output' => [[
