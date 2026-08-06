@@ -85,6 +85,68 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('Do not return a product whose corresponding attribute differs', $instructions);
     }
 
+    public function test_semantic_follow_up_resolution_searches_the_prior_entity_without_repeating_the_prior_product(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $previous = $agent->products()->firstOrFail();
+        $previous->update(['search_text' => 'Acme First', 'metadata' => ['brand' => 'Acme']]);
+        $next = $agent->products()->create([
+            'name' => 'Acme Second',
+            'search_text' => 'Acme Second',
+            'price' => 12,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => ['brand' => 'Acme'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'semantic-follow-up-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => ['last_catalog_product_ids' => [$previous->id]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'context-resolution', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_catalog_follow_up' => true,
+                    'resolved_query' => 'Acme',
+                    'exclude_product_ids' => [$previous->id],
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'follow-up-stock-call', 'output' => [[
+                'type' => 'function_call',
+                'name' => 'check_stock',
+                'call_id' => 'follow-up-stock',
+                'arguments' => json_encode(['product_id' => $next->id, 'quantity' => 1]),
+            ]], 'usage' => []])
+            ->push(['id' => 'follow-up-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'The additional verified catalog match is Acme Second.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [$next->id],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $next->id, 'amount' => null,
+                        'quantity' => null, 'reference' => null,
+                    ]],
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'Anything else?', $conversation);
+
+        $this->assertSame([$next->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertNotContains($previous->id, collect($reply['products'])->pluck('id')->all());
+        $this->assertContains('resolve_catalog_context', $reply['tools_used']);
+        $this->assertContains('search_products', $reply['tools_used']);
+    }
+
     #[DataProvider('crossIndustryMessages')]
     public function test_production_messages_use_semantic_orchestration_regardless_of_industry(string $message): void
     {
@@ -339,6 +401,14 @@ class OpenAiOrchestrationTest extends TestCase
         config(['services.openai.key' => 'test-key']);
         Http::fakeSequence()
             ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'purchase-context', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_catalog_follow_up' => false,
+                    'resolved_query' => null,
+                    'exclude_product_ids' => [],
+                ])]],
+            ]], 'usage' => []])
             ->push(['id' => 'purchase-stock', 'output' => [[
                 'type' => 'function_call',
                 'name' => 'check_stock',

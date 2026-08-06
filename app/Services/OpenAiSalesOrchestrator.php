@@ -54,6 +54,34 @@ class OpenAiSalesOrchestrator
 
         $used = [];
         $orchestrationMessage = $message;
+        $inputTokens = 0;
+        $outputTokens = 0;
+        $catalogContext = $this->resolveCatalogFollowUp($agent, $conversation, $message, $deadline, $inputTokens, $outputTokens);
+        if (is_array($catalogContext) && ($catalogContext['is_catalog_follow_up'] ?? false) === true) {
+            $recentIds = collect(data_get($conversation->context, 'last_catalog_product_ids', []))
+                ->map(fn ($id): int => (int) $id)->filter()->unique();
+            $excludedIds = collect($catalogContext['exclude_product_ids'] ?? [])
+                ->map(fn ($id): int => (int) $id)->intersect($recentIds)->unique()->values();
+            $resolvedQuery = trim((string) ($catalogContext['resolved_query'] ?? ''));
+            if ($resolvedQuery !== '') {
+                $arguments = [
+                    'query' => $resolvedQuery,
+                    'category' => null,
+                    'max_price' => null,
+                    'exclude_product_ids' => $excludedIds->all(),
+                ];
+                $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
+                $used[] = ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
+                    'ok' => true,
+                    'resolved_query' => $resolvedQuery,
+                    'exclude_product_ids' => $excludedIds->all(),
+                ]];
+                $used[] = ['name' => 'search_products', 'arguments' => $arguments, 'result' => $result];
+                $orchestrationMessage .= "\n\n[Server-resolved semantic catalog follow-up: "
+                    .json_encode(['resolution' => $catalogContext, 'verified_search' => $result], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                    .'. Answer from this resolved request and verified result. Never repeat an excluded product.]';
+            }
+        }
         $verifiedDelivery = null;
         if ($this->mentionsDelivery($message)) {
             $arguments = [
@@ -101,8 +129,6 @@ class OpenAiSalesOrchestrator
                 .json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
                 .'. Answer this confirmed lookup directly. Do not reinterpret the isolated affirmation.]';
         }
-        $inputTokens = 0;
-        $outputTokens = 0;
         $response = $this->postJson('/responses', [
             'model' => config('services.openai.model'),
             'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
@@ -124,6 +150,11 @@ class OpenAiSalesOrchestrator
             $outputs = [];
             foreach ($calls as $call) {
                 $args = json_decode($call['arguments'] ?? '{}', true) ?: [];
+                $semanticResolution = collect($used)->firstWhere('name', 'resolve_catalog_context');
+                if (is_array($semanticResolution) && in_array($call['name'], ['search_products', 'recommend_products'], true)) {
+                    $args['query'] = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
+                    $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
+                }
                 $result = $this->tools->execute($call['name'], $args, $agent, $conversation);
                 $used[] = ['name' => $call['name'], 'arguments' => $args, 'result' => $result];
                 $outputs[] = ['type' => 'function_call_output', 'call_id' => $call['call_id'], 'output' => json_encode($result, JSON_UNESCAPED_UNICODE)];
@@ -732,6 +763,70 @@ class OpenAiSalesOrchestrator
         }
     }
 
+    private function resolveCatalogFollowUp(
+        Agent $agent,
+        Conversation $conversation,
+        string $message,
+        float $deadline,
+        int &$inputTokens,
+        int &$outputTokens,
+    ): ?array {
+        $recentIds = collect(data_get($conversation->context, 'last_catalog_product_ids', []))
+            ->map(fn ($id): int => (int) $id)->filter()->unique()->take(3);
+        if ($recentIds->isEmpty()) {
+            return null;
+        }
+
+        $records = $agent->customerProducts()->whereIn('id', $recentIds)->get()
+            ->map(fn ($product): array => [
+                'product_id' => (int) $product->id,
+                'name' => (string) $product->name,
+                'category' => $product->category,
+                'attributes' => $product->metadata ?? [],
+            ])->values()->all();
+        if ($records === []) {
+            return null;
+        }
+
+        try {
+            $response = $this->postJson('/responses', [
+                'model' => config('services.openai.model'),
+                'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
+                'instructions' => 'Resolve whether the latest customer turn semantically continues the preceding catalog discussion. Use the complete dialogue, not isolated keywords. If it does, rewrite it as a self-contained catalog query preserving the referenced verified attribute (for example author, brand, maker, category, or product family). When the customer seeks alternatives, additions, or asks whether the prior result is the only one, exclude the already shown product IDs. Do not assume a book business or any fixed industry. Return only the required structured result.',
+                'input' => array_merge($this->history($conversation, $message), [[
+                    'role' => 'user',
+                    'content' => '[Structured records for recently shown products: '.json_encode($records, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).']',
+                ]]),
+                'max_output_tokens' => 500,
+                'text' => ['format' => $this->catalogFollowUpFormat()],
+            ], 'responses.catalog_context', $deadline, 30);
+            $this->accumulateUsage($response, $inputTokens, $outputTokens);
+
+            return $this->structuredOutput($response);
+        } catch (\Throwable $exception) {
+            Log::warning('Semantic catalog context resolution failed; continuing with normal orchestration.', [
+                'conversation_id' => $conversation->id,
+                'exception' => $exception::class,
+            ]);
+
+            return null;
+        }
+    }
+
+    private function catalogFollowUpFormat(): array
+    {
+        return ['type' => 'json_schema', 'name' => 'catalog_follow_up', 'strict' => true, 'schema' => [
+            'type' => 'object',
+            'properties' => [
+                'is_catalog_follow_up' => ['type' => 'boolean'],
+                'resolved_query' => ['type' => ['string', 'null']],
+                'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
+            ],
+            'required' => ['is_catalog_follow_up', 'resolved_query', 'exclude_product_ids'],
+            'additionalProperties' => false,
+        ]];
+    }
+
     private function history(Conversation $conversation, string $currentInput): array
     {
         $messages = $conversation->messages()->latest('id')->limit(16)->get()->reverse()->values();
@@ -881,6 +976,13 @@ class OpenAiSalesOrchestrator
             return 'Required verification tool was not called for the '.$data['intent'].' intent.';
         }
         $claimedProductIds = collect($data['product_ids'] ?? [])->map(fn ($id) => (int) $id)->unique();
+        $semanticExcludedIds = $successful
+            ->where('name', 'resolve_catalog_context')
+            ->flatMap(fn (array $call) => data_get($call, 'result.exclude_product_ids', []))
+            ->map(fn ($id): int => (int) $id)->filter()->unique();
+        if ($claimedProductIds->intersect($semanticExcludedIds)->isNotEmpty()) {
+            return 'The response repeated a product excluded by the semantic conversation resolution.';
+        }
         if ($claimedProductIds->diff($this->verifiedProductIds($successful))->isNotEmpty()) {
             return 'The response selected a product that was not returned by a successful verification tool.';
         }
