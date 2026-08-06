@@ -484,11 +484,6 @@ class OpenAiSalesOrchestrator
 
     private function verifiedAvailabilityReply(string $customerMessage, Collection $used, array $draft): ?array
     {
-        if (! in_array($draft['intent'] ?? null, ['stock', 'price'], true)
-            && ! $this->isAvailabilityCorrectionMessage($customerMessage)) {
-            return null;
-        }
-
         $searchResults = $used
             ->where('name', 'search_products')
             ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
@@ -513,6 +508,16 @@ class OpenAiSalesOrchestrator
 
         $productId = (int) $confirmed['product_id'];
         $product = $searchResults->get($productId, []);
+        $confirmedWasReturnedSoldOut = $used
+            ->where('name', 'search_products')
+            ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
+            ->flatMap(fn (array $call) => data_get($call, 'result.unavailable_products', []))
+            ->contains(fn ($item): bool => is_array($item) && (int) ($item['id'] ?? 0) === $productId);
+        if (! in_array($draft['intent'] ?? null, ['stock', 'price'], true)
+            && ! $this->isAvailabilityCorrectionMessage($customerMessage)
+            && ! ($confirmedWasReturnedSoldOut && ($confirmed['available'] ?? null) === false)) {
+            return null;
+        }
         $name = trim((string) ($product['name'] ?? $confirmed['name'] ?? ''));
         if ($name === '') {
             return null;
@@ -578,17 +583,75 @@ class OpenAiSalesOrchestrator
             return null;
         }
 
-        $products = $successfulCatalogCalls
-            ->flatMap(fn (array $call) => array_merge(
-                data_get($call, 'result.products', []),
-                data_get($call, 'result.recommendations', []),
-            ))
+        $successfulSearches = $successfulCatalogCalls->where('name', 'search_products');
+        $unavailableProducts = $successfulSearches
+            ->flatMap(fn (array $call) => data_get($call, 'result.unavailable_products', []))
+            ->filter(fn ($product): bool => is_array($product)
+                && (int) ($product['id'] ?? 0) > 0
+                && ($product['available'] ?? false) === false)
+            ->unique(fn (array $product): int => (int) $product['id'])
+            ->values();
+
+        // An exact sold-out search result is stronger evidence than any later
+        // broad recommendation. Never let an unrelated available alternative
+        // replace the item the customer actually named.
+        if ($unavailableProducts->isNotEmpty()) {
+            $confirmedUnavailableIds = $used
+                ->where('name', 'check_stock')
+                ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false)
+                    && data_get($call, 'result.available') === false)
+                ->map(fn (array $call): int => (int) data_get($call, 'result.product_id'))
+                ->filter()
+                ->unique();
+            $soldOut = $unavailableProducts
+                ->filter(fn (array $product): bool => $confirmedUnavailableIds->contains((int) $product['id']))
+                ->first();
+
+            if (is_array($soldOut)) {
+                $productId = (int) $soldOut['id'];
+                $name = trim((string) ($soldOut['name'] ?? ''));
+                $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
+
+                return [
+                    'text' => $georgian
+                        ? "„{$name}“ კატალოგში არის, მაგრამ ამჟამად მარაგი ამოწურულია."
+                        : "{$name} is listed in the catalog, but it is currently out of stock.",
+                    'intent' => 'stock',
+                    'confidence' => 1,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [$productId],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product',
+                        'product_id' => $productId,
+                        'amount' => null,
+                        'quantity' => null,
+                        'reference' => null,
+                    ]],
+                ];
+            }
+        }
+
+        $products = $successfulSearches
+            ->flatMap(fn (array $call) => data_get($call, 'result.products', []))
             ->filter(fn ($product): bool => is_array($product)
                 && (int) ($product['id'] ?? 0) > 0
                 && ($product['available'] ?? true) === true)
             ->unique(fn (array $product): int => (int) $product['id'])
             ->take(5)
             ->values();
+        if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
+            $products = $successfulCatalogCalls
+                ->where('name', 'recommend_products')
+                ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
+                ->filter(fn ($product): bool => is_array($product)
+                    && (int) ($product['id'] ?? 0) > 0
+                    && ($product['available'] ?? true) === true)
+                ->unique(fn (array $product): int => (int) $product['id'])
+                ->take(5)
+                ->values();
+        }
         $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
 
         return [

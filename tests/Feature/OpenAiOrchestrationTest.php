@@ -725,6 +725,56 @@ class OpenAiOrchestrationTest extends TestCase
         Http::assertSentCount(4);
     }
 
+    public function test_a_sold_out_exact_match_cannot_be_replaced_by_an_unrelated_recommendation(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $soldOut = $agent->products()->firstOrFail();
+        $soldOut->update(['stock' => 0]);
+        $unrelated = $agent->products()->whereKeyNot($soldOut->id)->where('stock', '>', 0)->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'exact-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'exact-search-call',
+                'arguments' => json_encode(['query' => $soldOut->name, 'category' => null, 'max_price' => null]),
+            ]]])
+            ->push(['id' => 'stock-check', 'output' => [[
+                'type' => 'function_call', 'name' => 'check_stock', 'call_id' => 'stock-check-call',
+                'arguments' => json_encode(['product_id' => $soldOut->id, 'quantity' => 1]),
+            ]]])
+            ->push(['id' => 'bad-recommendation', 'output' => [[
+                'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'bad-recommendation-call',
+                'arguments' => json_encode([
+                    'query' => $unrelated->name, 'budget' => null, 'quantity' => null,
+                    'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 1,
+                ]),
+            ]]])
+            ->push(['id' => 'wrong-final-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "I found {$unrelated->name}.",
+                    'intent' => 'discovery', 'confidence' => .99, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [$unrelated->id], 'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $unrelated->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null,
+                    ]],
+                ])]],
+            ]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => "Do you have {$soldOut->name}?",
+        ])->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('intent', 'stock');
+
+        $this->assertStringContainsString($soldOut->name, $response->json('text'));
+        $this->assertStringContainsString('out of stock', $response->json('text'));
+        $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
+        $this->assertSame([$soldOut->id], collect($response->json('products'))->pluck('id')->all());
+    }
+
     public function test_a_verified_available_product_is_never_hidden_by_a_generic_model_answer(): void
     {
         $this->seed();
