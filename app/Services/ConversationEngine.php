@@ -123,6 +123,7 @@ class ConversationEngine
             $context = is_array($conversation->context) ? $conversation->context : [];
             $context['last_catalog_product_ids'] = collect($reply['products'])->pluck('id')->filter()->values()->all();
             $conversation->context = $context;
+            $conversation->save();
         }
 
         $assistant = $conversation->messages()->create([
