@@ -115,13 +115,6 @@ class PublicStorefrontCatalog
             }
         }
 
-        // A configured search page is authoritative on its own. Do not make
-        // the business configure or depend on a separate autocomplete API.
-        if (filled(data_get($agent->settings, 'catalog_search_url'))
-            && blank(data_get($agent->settings, 'catalog_suggest_url'))) {
-            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => $this->sourceEvidence((string) $source->url)];
-        }
-
         $payload = null;
         foreach ($this->queryCandidates($query, $alternatives) as $candidate) {
             try {
