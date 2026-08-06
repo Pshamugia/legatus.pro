@@ -478,6 +478,60 @@ class PublicStorefrontCatalogTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/suggest'));
     }
 
+    public function test_natural_language_entity_inflection_reaches_the_business_configured_search(): void
+    {
+        [$agent, $conversation] = $this->context();
+        config(['legatus.semantic_orchestration_enabled' => false, 'services.openai.key' => null]);
+
+        Http::fake(function ($request) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+
+            if ($path === '/search') {
+                return Http::response('<div id="search-results"></div>', 200, ['Content-Type' => 'text/html']);
+            }
+            if ($path === '/search/suggest') {
+                return Http::response([
+                    'items' => ($parameters['q'] ?? '') === 'შამუგია' ? [[
+                        'title' => 'არგადარჩენა',
+                        'author' => 'პაატა შამუგია',
+                        'url' => 'https://bukinistebi.ge/books/argadarchena/612',
+                        'sold' => false,
+                    ], [
+                        'title' => 'დაუჯდომელი',
+                        'author' => 'პაატა შამუგია',
+                        'url' => 'https://bukinistebi.ge/books/daujdomeli/308',
+                        'sold' => false,
+                    ]] : [],
+                    'didYouMean' => null,
+                ]);
+            }
+            if (in_array($path, ['/books/argadarchena/612', '/books/daujdomeli/308'], true)) {
+                $name = $path === '/books/argadarchena/612' ? 'არგადარჩენა' : 'დაუჯდომელი';
+
+                return Http::response('<script type="application/ld+json">'.json_encode([
+                    '@context' => 'https://schema.org',
+                    '@type' => 'Product',
+                    'name' => $name,
+                    'description' => 'პაატა შამუგიას პოეზია',
+                    'offers' => ['@type' => 'Offer', 'price' => '15.00', 'availability' => 'https://schema.org/InStock'],
+                ], JSON_UNESCAPED_UNICODE).'</script>');
+            }
+
+            return Http::response([], 404);
+        });
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'შამუგიას პოეზია გაქვთ?', $conversation);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertEqualsCanonicalizing(
+            ['არგადარჩენა', 'დაუჯდომელი'],
+            collect($reply['products'])->pluck('name')->all(),
+        );
+        $this->assertSame(['პაატა შამუგია'], collect($reply['products'])->pluck('metadata.author')->filter()->unique()->values()->all());
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/search/suggest?q=%E1%83%A8%E1%83%90%E1%83%9B%E1%83%A3%E1%83%92%E1%83%98%E1%83%90'));
+    }
+
     /** @return array{Agent, Conversation} */
     private function context(): array
     {

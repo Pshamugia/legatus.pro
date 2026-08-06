@@ -115,13 +115,6 @@ class PublicStorefrontCatalog
             }
         }
 
-        // A configured search page is authoritative on its own. Do not make
-        // the business configure or depend on a separate autocomplete API.
-        if (filled(data_get($agent->settings, 'catalog_search_url'))
-            && blank(data_get($agent->settings, 'catalog_suggest_url'))) {
-            return ['imported' => 0, 'product_ids' => [], 'did_you_mean' => null, 'source' => $this->sourceEvidence((string) $source->url)];
-        }
-
         $payload = null;
         foreach ($this->queryCandidates($query, $alternatives) as $candidate) {
             try {
@@ -289,6 +282,20 @@ class PublicStorefrontCatalog
     {
         $query = preg_replace('/\s+/u', ' ', trim($query)) ?? '';
         $tokens = preg_split('/[^\pL\pN%_+\-.]+/u', Str::lower($query), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $alternativeTokens = collect($alternatives)
+            ->flatMap(fn (string $alternative): array => preg_split(
+                '/[^\pL\pN%_+\-.]+/u',
+                Str::lower($alternative),
+                -1,
+                PREG_SPLIT_NO_EMPTY,
+            ) ?: [])
+            // Inflection recovery may produce the exact business entity token
+            // that the storefront understands. Try that recovered identity
+            // before generic phrase relaxation.
+            ->reject(fn (string $token): bool => in_array($token, $tokens, true))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 3)
+            ->sortByDesc(fn (string $token): int => mb_strlen($token))
+            ->values();
 
         $phrases = [];
         foreach (array_filter([3, 2], fn (int $size): bool => count($tokens) >= $size) as $size) {
@@ -304,11 +311,12 @@ class PublicStorefrontCatalog
 
         return collect([$query])
             ->merge($alternatives)
+            ->merge($alternativeTokens)
             ->merge(collect($phrases)->pluck('text'))
             ->merge(collect($tokens)->sortByDesc(fn (string $token): int => mb_strlen($token)))
             ->filter(fn (string $candidate): bool => mb_strlen($candidate) >= 3)
             ->unique()
-            ->take(3)
+            ->take(6)
             ->values()
             ->all();
     }

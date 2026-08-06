@@ -26,8 +26,22 @@ class SalesToolbox
 
     public function definitions(?Agent $agent = null): array
     {
+        $configuredCategories = $agent
+            ? $agent->knowledgeSources()
+                ->where('source_scope', 'category')
+                ->whereNotNull('taxonomy_label')
+                ->pluck('taxonomy_label')
+                ->map(fn ($label): string => trim((string) $label))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all()
+            : [];
+        $categoryGuidance = $configuredCategories === []
+            ? 'No business-defined category list is available; leave category null.'
+            : 'category must be null or one exact business-defined label from: '.implode(', ', $configuredCategories).'. Never invent a category.';
         $definitions = [
-            $this->tool('search_products', 'Search the verified product catalog by customer needs. Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
+            $this->tool('search_products', 'Search the business-provided verified catalog and configured storefront search. Understand the complete customer request before forming query. '.$categoryGuidance.' Available matches are returned in products and matched but sold-out items in unavailable_products. If both are empty and did_you_mean is present, ask the customer to confirm that spelling; never treat the suggestion as a product fact.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'max_price' => ['type' => ['number', 'null']]], ['query', 'category', 'max_price']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
             $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data. When quantity is set, budget is the maximum total for the complete bundle, not a per-item limit.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'quantity' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5]], ['query', 'budget', 'quantity', 'category', 'mood', 'occasion', 'limit']),
@@ -66,6 +80,7 @@ class SalesToolbox
 
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
+        $a['category'] = $this->configuredCategory($agent, $a['category'] ?? null);
         $termGroups = $this->searchTermGroups((string) $a['query']);
         if ($termGroups === []) {
             return [
@@ -183,6 +198,21 @@ class SalesToolbox
             'suggestion_requires_confirmation' => $didYouMean !== null,
             'category_index_pending' => $categoryIndexPending && $products->isEmpty() && $unavailableProducts->isEmpty(),
         ];
+    }
+
+    private function configuredCategory(Agent $agent, mixed $requested): ?string
+    {
+        $requested = is_string($requested) ? trim($requested) : '';
+        if ($requested === '') {
+            return null;
+        }
+
+        return $agent->knowledgeSources()
+            ->where('source_scope', 'category')
+            ->whereNotNull('taxonomy_label')
+            ->pluck('taxonomy_label')
+            ->map(fn ($label): string => trim((string) $label))
+            ->first(fn (string $label): bool => mb_strtolower($label) === mb_strtolower($requested));
     }
 
     private function authoritativeTaxonomyProductIds(Agent $agent, array $termGroups, ?string $category, string $rawQuery): ?array
