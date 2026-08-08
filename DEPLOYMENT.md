@@ -121,6 +121,7 @@ Legatus schedules recurring knowledge synchronization, anonymization of expired 
 Confirm these baseline scheduled commands run under the same release and environment as the web process:
 
 - `legatus:expire-reservations` — every minute;
+- `legatus:dispatch-social-posts` — every minute;
 - `legatus:sync-knowledge` — daily at 03:15 application time;
 - `legatus:purge-expired-data` — daily at 03:45 application time.
 
@@ -131,7 +132,7 @@ The current release also schedules commerce reconciliation and recovery of eligi
 Run the database queue continuously under Supervisor, systemd, or the host's persistent-process manager:
 
 ```bash
-php artisan queue:work database --queue=default --sleep=2 --tries=3 --timeout=80 --max-time=3600
+php artisan queue:work database --queue=channels,default --sleep=2 --tries=3 --timeout=80 --max-time=3600
 ```
 
 The worker timeout must remain lower than `DB_QUEUE_RETRY_AFTER` (recommended: 80 versus 180 seconds). Monitor `jobs` and `failed_jobs`; a healthy webhook returning HTTP 200 does not prove a reply was processed. If shared hosting cannot run a persistent process, use a provider-supported worker service before enabling Meta traffic—cron-starting short workers is a degraded fallback, not the production target.
