@@ -63,6 +63,7 @@
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}"><span class="app-nav-glyph">KN</span> Knowledge</a>
             <a @class(['active' => $navigationActive === 'products']) href="{{ route('dashboard') }}#products"><span class="app-nav-glyph">PR</span> Products @if($navigationProductCount)<span class="app-nav-count">{{ $navigationProductCount }}</span>@endif</a>
             <a @class(['active' => $navigationActive === 'channels']) href="{{ route('channels.index') }}"><span class="app-nav-glyph">CH</span> Channels</a>
+            <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}"><span class="app-nav-glyph">SM</span> Social media</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}"><span class="app-nav-glyph">AN</span> Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}"><span class="app-nav-glyph">ST</span> Settings</a>
         </nav>
@@ -100,6 +101,7 @@
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}">Knowledge</a>
             <a @class(['active' => $navigationActive === 'products']) href="{{ route('dashboard') }}#products">Products</a>
             <a @class(['active' => $navigationActive === 'channels']) href="{{ route('channels.index') }}">Channels</a>
+            <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}">Social media</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}">Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}">Settings</a>
         </nav>

@@ -106,6 +106,16 @@ class Agent extends Model
         return $this->hasMany(ChannelConnection::class);
     }
 
+    public function socialMediaSchedules(): HasMany
+    {
+        return $this->hasMany(SocialMediaSchedule::class);
+    }
+
+    public function socialMediaPosts(): HasMany
+    {
+        return $this->hasMany(SocialMediaPost::class);
+    }
+
     public function knowledgeSources(): HasMany
     {
         return $this->hasMany(KnowledgeSource::class);

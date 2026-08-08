@@ -13,6 +13,7 @@ use App\Http\Controllers\MetaConnectionController;
 use App\Http\Controllers\MetaWebhookController;
 use App\Http\Controllers\PaddleWebhookController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\SocialMediaController;
 use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\WorkspaceController;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -142,6 +143,13 @@ Route::middleware('auth')->group(function () {
             ->name('channels.meta.select');
         Route::delete('/app/channels/meta/{connection}', [MetaConnectionController::class, 'disconnect'])
             ->name('channels.meta.disconnect');
+        Route::get('/app/social-media', [SocialMediaController::class, 'index'])->name('social-media.index');
+        Route::post('/app/social-media/schedules', [SocialMediaController::class, 'store'])
+            ->middleware('throttle:10,1')->name('social-media.store');
+        Route::patch('/app/social-media/schedules/{schedule}/pause', [SocialMediaController::class, 'pause'])
+            ->name('social-media.pause');
+        Route::delete('/app/social-media/schedules/{schedule}', [SocialMediaController::class, 'destroy'])
+            ->name('social-media.destroy');
         Route::get('/app/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
         Route::get('/app/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/app/settings', [SettingsController::class, 'update'])->name('settings.update');

@@ -144,6 +144,36 @@ class MetaGraphClient
             ->json();
     }
 
+    public function publishFacebookPost(ChannelConnection $connection, string $message, string $link): array
+    {
+        throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
+
+        return $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/feed'), [
+                'message' => Str::limit($message, 6000, ''),
+                'link' => $link,
+            ])->throw()->json();
+    }
+
+    public function publishInstagramPost(ChannelConnection $connection, string $caption, string $imageUrl): array
+    {
+        throw_unless($connection->provider === 'instagram' && $connection->isActive(), new \RuntimeException('An active Instagram connection is required.'));
+        throw_if($imageUrl === '', new \RuntimeException('Instagram publishing requires a public product image.'));
+
+        $container = $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/media'), [
+                'image_url' => $imageUrl,
+                'caption' => Str::limit($caption, 2200, ''),
+            ])->throw()->json();
+        $creationId = (string) ($container['id'] ?? '');
+        throw_if($creationId === '', new \RuntimeException('Meta did not create an Instagram media container.'));
+
+        return $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/media_publish'), [
+                'creation_id' => $creationId,
+            ])->throw()->json();
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function recentFacebookMessages(ChannelConnection $connection): array
     {

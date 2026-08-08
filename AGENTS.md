@@ -63,12 +63,13 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 - production deploy-ის შემდეგ გადაამოწმე სერვერის `git rev-parse --short HEAD`; მხოლოდ სწორი SHA-ის შემდეგ მიიჩნიე ახალი კოდი ონლაინ ვერსიად.
 - რეალური live ტესტის ჩავარდნა წარმატებად არ აღწერო. აჩვენე ზუსტი შედეგი და გააგრძელე მიზეზის გასწორება.
 
-## მიმდინარე მდგომარეობა — 2026-08-07
+## მიმდინარე მდგომარეობა — 2026-08-08
 
 - website widget, knowledge ingestion, catalog/category/search discovery, OpenAI orchestration, Meta transport და Paddle webhook subscription flow განხორციელებულია და ტესტებით არის დაფარული.
 - Paddle production credentials/configuration და Meta public launch acceptance გარემოს გარე ნაბიჯებია; repository-ში არ შეინახო production secrets და არ განაცხადო გარე acceptance მტკიცებულების გარეშე.
 - ბოლო სამუშაო შეეხო მრავალინდუსტრიულ სემანტიკურ კატალოგურ დიალოგს: typo normalization, ავტორის/სუბიექტის კონტექსტი, დამატებითი შედეგების გამორიცხვა, სრული ხელმისაწვდომი/ამოწურული სია, ადამიანური fallback და ღია რეკომენდაციის ზუსტი ძიებისგან გამიჯვნა.
-- ბოლო ცნობილი Git commit ამ ფაილის შექმნამდე: `162f9e0` (`Route open-ended shopping advice as recommendations`). ყოველთვის გადაამოწმე მიმდინარე `HEAD`, რადგან ეს ჩანაწერი დროთა განმავლობაში მოძველდება.
+- Social media scheduler-ის პირველი ვერსია მოიცავს tenant-aware განრიგებს, საჯარო კატალოგიდან პროდუქტების შერჩევას, Facebook/Instagram queue publishing-ს და ადმინის მართვის ეკრანს. რეალური ავტომატური გამოქვეყნება დამოკიდებულია Meta-ს `pages_manage_posts` და `instagram_content_publish` უფლებების დამტკიცებასა და არხების ხელახლა დაკავშირებაზე.
+- ბოლო ცნობილი Git commit ამ ფაილის განახლებამდე: `744fcb4` (`Keep social dialogue out of commercial verification`). ყოველთვის გადაამოწმე მიმდინარე `HEAD`, რადგან ეს ჩანაწერი დროთა განმავლობაში მოძველდება.
 
 ## deployment
 
