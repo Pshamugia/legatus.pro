@@ -12,16 +12,28 @@ use Illuminate\Validation\ValidationException;
 
 class SocialMediaScheduler
 {
+    public function __construct(
+        private readonly SocialMediaTemplateService $templates,
+        private readonly SocialMediaTemplateRenderer $renderer,
+    ) {}
+
     public function create(Agent $agent, array $data): SocialMediaSchedule
     {
-        $products = $this->eligibleProducts($agent, $data['categories'] ?? [], $data['providers']);
-        if ($products->isEmpty()) {
-            throw ValidationException::withMessages([
-                'categories' => 'No public products with usable links and images were found for this selection.',
-            ]);
+        $productsByProvider = collect($data['providers'])->mapWithKeys(fn (string $provider): array => [
+            $provider => $this->eligibleProducts($agent, $data['categories'] ?? [], [$provider]),
+        ]);
+        foreach ($productsByProvider as $provider => $products) {
+            if ($products->isEmpty()) {
+                $requirement = $provider === 'instagram' ? 'public links and images' : 'public links';
+                throw ValidationException::withMessages([
+                    'categories' => 'No products with usable '.$requirement.' were found for '.ucfirst($provider).' in this selection.',
+                ]);
+            }
         }
 
-        return DB::transaction(function () use ($agent, $data, $products): SocialMediaSchedule {
+        $templateSnapshots = $this->templates->snapshots($agent, $data['providers']);
+
+        return DB::transaction(function () use ($agent, $data, $productsByProvider, $templateSnapshots): SocialMediaSchedule {
             $schedule = $agent->socialMediaSchedules()->create([
                 'starts_on' => $data['starts_on'],
                 'ends_on' => $data['ends_on'],
@@ -29,18 +41,28 @@ class SocialMediaScheduler
                 'categories' => array_values($data['categories'] ?? []),
                 'providers' => array_values($data['providers']),
                 'timezone' => $data['timezone'],
+                'template_snapshots' => $templateSnapshots,
                 'status' => 'active',
             ]);
 
             $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
             $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
-            $productIndex = 0;
+            $productIndexes = collect($data['providers'])
+                ->mapWithKeys(fn (string $provider): array => [$provider => 0])
+                ->all();
             for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
                 foreach ($this->dailyTimes($day, (int) $data['posts_per_day']) as $slot) {
-                    $product = $products[$productIndex % $products->count()];
-                    $productIndex++;
                     foreach ($data['providers'] as $provider) {
-                        $schedule->posts()->create($this->postAttributes($agent, $product, $provider, $slot));
+                        $products = $productsByProvider[$provider];
+                        $product = $products[$productIndexes[$provider] % $products->count()];
+                        $productIndexes[$provider]++;
+                        $schedule->posts()->create($this->postAttributes(
+                            $agent,
+                            $product,
+                            $provider,
+                            $slot,
+                            $templateSnapshots[$provider],
+                        ));
                     }
                 }
             }
@@ -106,13 +128,12 @@ class SocialMediaScheduler
         })->all();
     }
 
-    private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot): array
+    private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot, array $template): array
     {
         $url = (string) data_get($product->metadata, 'product_url');
         $image = data_get($product->metadata, 'image');
         $description = trim(strip_tags((string) $product->description));
-        $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 600, '…');
-        $caption = trim($product->name."\n\n".($description !== '' ? $description."\n\n" : '')."შესაძენად გადადით საიტზე:\n{$url}");
+        $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 700, '…');
 
         return [
             'agent_id' => $agent->id,
@@ -124,7 +145,7 @@ class SocialMediaScheduler
             'description' => $description ?: null,
             'product_url' => $url,
             'image_url' => $this->publicHttpUrl($image) ? $image : null,
-            'caption' => $caption,
+            'caption' => $this->renderer->render($provider, $template, $agent, $product),
         ];
     }
 

@@ -116,6 +116,11 @@ class Agent extends Model
         return $this->hasMany(SocialMediaPost::class);
     }
 
+    public function socialMediaTemplates(): HasMany
+    {
+        return $this->hasMany(SocialMediaTemplate::class);
+    }
+
     public function knowledgeSources(): HasMany
     {
         return $this->hasMany(KnowledgeSource::class);

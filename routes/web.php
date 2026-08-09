@@ -14,8 +14,11 @@ use App\Http\Controllers\MetaWebhookController;
 use App\Http\Controllers\PaddleWebhookController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialMediaController;
+use App\Http\Controllers\SocialMediaTemplateController;
+use App\Http\Controllers\SuperAdminController;
 use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\WorkspaceController;
+use App\Http\Middleware\RequireSuperAdmin;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -75,14 +78,14 @@ Route::withoutMiddleware([
 });
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
-    Route::get('/super-admin', [\App\Http\Controllers\SuperAdminController::class, 'index'])
-        ->middleware(\App\Http\Middleware\RequireSuperAdmin::class)
+    Route::get('/super-admin', [SuperAdminController::class, 'index'])
+        ->middleware(RequireSuperAdmin::class)
         ->name('super-admin.index');
-    Route::post('/super-admin/businesses/{organization}/complimentary-access', [\App\Http\Controllers\SuperAdminController::class, 'grantAccess'])
-        ->middleware([\App\Http\Middleware\RequireSuperAdmin::class, 'throttle:30,1'])
+    Route::post('/super-admin/businesses/{organization}/complimentary-access', [SuperAdminController::class, 'grantAccess'])
+        ->middleware([RequireSuperAdmin::class, 'throttle:30,1'])
         ->name('super-admin.access.grant');
-    Route::delete('/super-admin/businesses/{organization}/complimentary-access', [\App\Http\Controllers\SuperAdminController::class, 'revokeAccess'])
-        ->middleware([\App\Http\Middleware\RequireSuperAdmin::class, 'throttle:30,1'])
+    Route::delete('/super-admin/businesses/{organization}/complimentary-access', [SuperAdminController::class, 'revokeAccess'])
+        ->middleware([RequireSuperAdmin::class, 'throttle:30,1'])
         ->name('super-admin.access.revoke');
     Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
     Route::middleware('subscribed')->group(function () {
@@ -144,6 +147,8 @@ Route::middleware('auth')->group(function () {
         Route::delete('/app/channels/meta/{connection}', [MetaConnectionController::class, 'disconnect'])
             ->name('channels.meta.disconnect');
         Route::get('/app/social-media', [SocialMediaController::class, 'index'])->name('social-media.index');
+        Route::put('/app/social-media/templates', [SocialMediaTemplateController::class, 'update'])
+            ->middleware('throttle:30,1')->name('social-media.templates.update');
         Route::post('/app/social-media/schedules', [SocialMediaController::class, 'store'])
             ->middleware('throttle:10,1')->name('social-media.store');
         Route::patch('/app/social-media/schedules/{schedule}/pause', [SocialMediaController::class, 'pause'])
