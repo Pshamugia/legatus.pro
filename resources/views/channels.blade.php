@@ -85,17 +85,24 @@
                 <div class="commerce-setup" id="commerce-connection">
                     <div class="commerce-setup__heading">
                         <div>
-                            <span class="eyebrow">Live product catalog</span>
-                            <h3>დააკავშირეთ თქვენი ონლაინ მაღაზია</h3>
-                            <p>Legatus უსაფრთხოდ ამოწმებს ფასს, მარაგსა და კატალოგს პირდაპირ თქვენს მაღაზიაში. კავშირი მხოლოდ წარმატებული შემოწმების შემდეგ შეინახება.</p>
-                        </div>
-                        <span class="status-badge {{ $commerceConnection?->status === 'active' ? 'status-badge--connected' : '' }}">
-                            @if($commerceConnection?->status === 'active')
-                                ✓ დაკავშირებულია
-                            @elseif($commerceConnection)
-                                ყურადღება სჭირდება
+                            <span class="eyebrow">{{ in_array($catalogConnectionState, ['live', 'attention'], true) ? 'Live product catalog' : 'Product catalog' }}</span>
+                            @if($catalogConnectionState === 'available')
+                                <h3>თქვენი კატალოგი უკვე ხელმისაწვდომია</h3>
+                                <p>Legatus იყენებს თქვენს {{ number_format($productCount) }} აქტიურ პროდუქტს. ცალკე Live API კავშირი მხოლოდ მაშინ არის საჭირო, თუ ფასისა და მარაგის პირდაპირ, რეალურ დროში სინქრონიზაცია გსურთ.</p>
                             @else
-                                არ არის დაკავშირებული
+                                <h3>დააკავშირეთ თქვენი ონლაინ მაღაზია</h3>
+                                <p>Legatus უსაფრთხოდ ამოწმებს ფასს, მარაგსა და კატალოგს პირდაპირ თქვენს მაღაზიაში. კავშირი მხოლოდ წარმატებული შემოწმების შემდეგ შეინახება.</p>
+                            @endif
+                        </div>
+                        <span data-catalog-status="{{ $catalogConnectionState }}" class="status-badge {{ in_array($catalogConnectionState, ['live', 'available'], true) ? 'status-badge--connected' : '' }}">
+                            @if($catalogConnectionState === 'live')
+                                ✓ Live API დაკავშირებულია
+                            @elseif($catalogConnectionState === 'attention')
+                                ყურადღება სჭირდება
+                            @elseif($catalogConnectionState === 'available')
+                                ✓ კატალოგი ხელმისაწვდომია
+                            @else
+                                კატალოგი არ არის დამატებული
                             @endif
                         </span>
                     </div>
@@ -134,10 +141,17 @@
                     @endif
 
                     @if($canManageChannels)
-                        <div class="catalog-onboarding-choice">
-                            <div><b>კატალოგის დამატება კოდის გარეშე</b><p>ატვირთეთ CSV ან მიუთითეთ მხარდაჭერილი სრული პროდუქტის feed.</p></div>
-                            <a class="btn ghost" href="{{ route('onboarding') }}#catalog-url">კატალოგის დამატება →</a>
-                        </div>
+                        @unless($commerceConnection)
+                            <div class="catalog-onboarding-choice">
+                                @if($catalogConnectionState === 'available')
+                                    <div><b>მოქმედი კატალოგი</b><p>პროდუქტების და მათი წყაროების ნახვა ან განახლება ცოდნის გვერდიდან შეგიძლიათ.</p></div>
+                                    <a class="btn ghost" href="{{ route('knowledge.index') }}">კატალოგის მართვა →</a>
+                                @else
+                                    <div><b>კატალოგის დამატება კოდის გარეშე</b><p>მიუთითეთ თქვენი საჯარო საიტი ან პროდუქტის კატალოგის მისამართი.</p></div>
+                                    <a class="btn ghost" href="{{ route('onboarding') }}#catalog-url">კატალოგის დამატება →</a>
+                                @endif
+                            </div>
+                        @endunless
                         <details class="developer-connector" @if($errors->commerce->any()) open @endif>
                             <summary><span>Advanced</span> Custom store / developer integration</summary>
                             @unless($commerceConnection?->status === 'active')

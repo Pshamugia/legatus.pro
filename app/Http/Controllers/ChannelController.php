@@ -43,7 +43,8 @@ class ChannelController extends Controller
             ? route('channels.meta.connect', ['provider' => 'meta'])
             : null;
 
-        $productCount = $agent->products()->where('is_active', true)->count();
+        // Match the exact tenant-scoped catalog that customer conversations can use.
+        $productCount = $agent->customerProducts()->where('is_active', true)->count();
         $knowledgeSourceCount = $agent->knowledgeSources()->count();
         $failedKnowledgeSources = $agent->knowledgeSources()
             ->where('status', 'failed')
@@ -52,6 +53,12 @@ class ChannelController extends Controller
         $commerceProductCount = $commerceConnection
             ? $agent->products()->where('commerce_connection_id', $commerceConnection->id)->where('is_active', true)->count()
             : 0;
+        $catalogConnectionState = match (true) {
+            $commerceConnection?->status === 'active' => 'live',
+            $commerceConnection !== null => 'attention',
+            $productCount > 0 => 'available',
+            default => 'missing',
+        };
         $canManageChannels = in_array($tenant->role(), ['owner', 'admin'], true);
         $widgetEnabled = $agent->websiteWidgetEnabled();
         $widgetDomains = collect(data_get($agent->settings, 'widget_allowed_origins', []))
@@ -72,6 +79,7 @@ class ChannelController extends Controller
             'widgetDomains',
             'commerceConnection',
             'commerceProductCount',
+            'catalogConnectionState',
             'canManageChannels',
             'widgetEnabled',
         ));

@@ -16,6 +16,45 @@ class CommerceChannelManagementTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_existing_active_catalog_is_reported_as_available_without_a_live_api_connection(): void
+    {
+        [$user, $agent] = $this->tenant('public-catalog-store', 'owner');
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Public product catalog',
+            'source_scope' => 'catalog',
+            'url' => 'https://shop.example/products',
+            'status' => 'ready',
+            'progress' => 100,
+        ]);
+        $agent->products()->create([
+            'name' => 'Verified public product',
+            'price' => 20,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+
+        $this->actingAs($user)->get(route('channels.index'))
+            ->assertOk()
+            ->assertSee('data-catalog-status="available"', false)
+            ->assertSee('✓ კატალოგი ხელმისაწვდომია')
+            ->assertSee('თქვენი კატალოგი უკვე ხელმისაწვდომია')
+            ->assertSee('Legatus იყენებს თქვენს 1 აქტიურ პროდუქტს')
+            ->assertSee(route('knowledge.index'), false)
+            ->assertDontSee('data-catalog-status="missing"', false);
+    }
+
+    public function test_catalog_status_is_missing_only_when_no_catalog_or_live_connection_exists(): void
+    {
+        [$user] = $this->tenant('empty-catalog-store', 'owner');
+
+        $this->actingAs($user)->get(route('channels.index'))
+            ->assertOk()
+            ->assertSee('data-catalog-status="missing"', false)
+            ->assertSee('კატალოგი არ არის დამატებული');
+    }
+
     public function test_owner_can_verify_and_connect_a_store_without_exposing_the_secret(): void
     {
         [$user, $agent] = $this->tenant('owner-store', 'owner');
@@ -60,6 +99,8 @@ class CommerceChannelManagementTest extends TestCase
 
         $this->actingAs($user)->get(route('channels.index'))
             ->assertOk()
+            ->assertSee('data-catalog-status="live"', false)
+            ->assertSee('✓ Live API დაკავშირებულია')
             ->assertSee('data-commerce-status="active"', false)
             ->assertSee('Owner live catalog')
             ->assertSee('8.8.8.8')
