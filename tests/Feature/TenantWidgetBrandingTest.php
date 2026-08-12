@@ -21,8 +21,10 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertOk()
             ->assertSee('businessName="Bukinistebi.ge"', false)
             ->assertSee('assistantName="Maya"', false)
-            ->assertSee("label.textContent='Ask '+businessName", false)
-            ->assertSee("frame.title=assistantName+' · '+businessName+' AI shopping assistant'", false)
+            ->assertSee('launcherLabel="Ask Bukinistebi.ge"', false)
+            ->assertSee('frameTitle="Maya \u00b7 Bukinistebi.ge AI shopping assistant"', false)
+            ->assertSee('label.textContent=launcherLabel', false)
+            ->assertSee('frame.title=frameTitle', false)
             ->assertDontSee('Ask Legatus')
             ->assertDontSee('Open Legatus shopping assistant')
             ->assertDontSee('Ask Maya');
@@ -75,8 +77,8 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertSee('<strong>Maya · Bukinistebi.ge</strong>', false)
             ->assertSee("I'm Maya, the AI assistant for Bukinistebi.ge.")
             ->assertSee('Powered by Legatus')
-            ->assertSee('is thinking…')
-            ->assertSee('is preparing a verified answer…')
+            ->assertSee("phrase('thinking',{assistant:assistantName})", false)
+            ->assertSee("phrase('preparing',{assistant:assistantName})", false)
             ->assertDontSee('Legatus is checking verified data');
     }
 
@@ -109,7 +111,8 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertSee('assistantName="AI Assistant"', false)
             ->assertDontSee('assistantName="Legatus"', false)
             ->getContent();
-        $this->assertStringContainsString("label.textContent='Ask '+businessName", $script);
+        $this->assertStringContainsString('launcherLabel="Ask Bukinistebi.ge"', $script);
+        $this->assertStringContainsString('label.textContent=launcherLabel', $script);
 
         $this->get("/widget/{$agent->slug}")
             ->assertOk()

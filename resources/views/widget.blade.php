@@ -1,12 +1,22 @@
 @php
     $assistantName = $agent->assistantDisplayName();
-    $assistantIntroduction = $agent->hasCustomAssistantName()
-        ? "I'm {$assistantName}, the AI assistant for {$agent->business_name}."
-        : "I'm the AI assistant for {$agent->business_name}.";
+    $widgetTranslate = static function (string $key, array $replace = []) use ($widgetCopy): string {
+        $text = (string) ($widgetCopy[$key] ?? $key);
+        foreach ($replace as $name => $value) {
+            $text = str_replace(':'.$name, (string) $value, $text);
+        }
+
+        return $text;
+    };
+    $assistantIntroduction = $widgetTranslate(
+        $agent->hasCustomAssistantName() ? 'introduction_custom' : 'introduction_default',
+        ['assistant' => $assistantName, 'business' => $agent->business_name],
+    );
+    $initialGreeting = $widgetTranslate('greeting', ['introduction' => $assistantIntroduction]);
     $widgetTheme = $agent->widgetTheme();
 @endphp
 <!doctype html>
-<html lang="en">
+<html lang="{{ $widgetLocale }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -21,24 +31,24 @@
         <span class="avatar">{{ mb_strtoupper(mb_substr($assistantName, 0, 1)) }}</span>
         <div class="identity">
             <b>{{ $assistantName }} · {{ $agent->business_name }}</b>
-            <small>● Online · AI shopping assistant</small>
-            <span class="powered">Powered by Legatus</span>
+            <small>{{ $widgetCopy['status'] }}</small>
+            <span class="powered">{{ $widgetCopy['powered_by'] }}</span>
         </div>
         <span class="head-actions">
-            <button class="head-action" id="new-conversation" type="button" aria-label="Start a new conversation" title="New conversation">↻</button>
-            <button class="head-action" id="close-widget" type="button" aria-label="Close chat" title="Close">×</button>
+            <button class="head-action" id="new-conversation" type="button" aria-label="{{ $widgetCopy['new_conversation_aria'] }}" title="{{ $widgetCopy['new_conversation'] }}">↻</button>
+            <button class="head-action" id="close-widget" type="button" aria-label="{{ $widgetCopy['close_chat'] }}" title="{{ $widgetCopy['close'] }}">×</button>
         </span>
     </header>
     <main class="messages" id="messages" aria-live="polite">
-        <div class="bubble">Hello! 👋 {{ $assistantIntroduction }} What are you looking for? I can recommend products based on your preferences, budget, and needs.</div>
+        <div class="bubble">{{ $initialGreeting }}</div>
     </main>
     <div class="suggest">
-        <button type="button" data-q="Help me choose. Ask me a few questions first, then recommend products only from your catalog.">✨ Personal advice</button>
-        <button type="button" data-q="Can it be delivered tomorrow?">🚚 Delivery</button>
+        <button type="button" data-q="{{ $widgetCopy['personal_advice_prompt'] }}">✨ {{ $widgetCopy['personal_advice'] }}</button>
+        <button type="button" data-q="{{ $widgetCopy['delivery_prompt'] }}">🚚 {{ $widgetCopy['delivery'] }}</button>
     </div>
     <form class="composer" id="form">
-        <input id="input" required autocomplete="off" placeholder="Write a message..." aria-label="Message">
-        <button id="send" type="submit" aria-label="Send">↑</button>
+        <input id="input" required autocomplete="off" placeholder="{{ $widgetCopy['message_placeholder'] }}" aria-label="{{ $widgetCopy['message'] }}">
+        <button id="send" type="submit" aria-label="{{ $widgetCopy['send'] }}">↑</button>
     </form>
 </div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
@@ -57,6 +67,15 @@
     const input = document.querySelector('#input');
     const sendButton = document.querySelector('#send');
     const assistantName = @json($assistantName);
+    const widgetCopy = @json($widgetCopy);
+
+    function phrase(key, replacements = {}) {
+        let text = String(widgetCopy[key] || key);
+        Object.entries(replacements).forEach(([name, value]) => {
+            text = text.replaceAll(`:${name}`, String(value));
+        });
+        return text;
+    }
 
     function readToken() {
         try { return localStorage.getItem(storageKey); } catch { return null; }
@@ -102,7 +121,7 @@
     function addTrace(bubble, meta) {
         const sources = (meta.sources || []).map(source => {
             const label = source.label || source.name || source.title || source.type;
-            const detail = source.reference ? ` · ${source.reference}` : (source.updated_at ? ' · recently synced' : '');
+            const detail = source.reference ? ` · ${source.reference}` : (source.updated_at ? ` · ${phrase('recently_synced')}` : '');
             return label ? label + detail : null;
         }).filter(Boolean);
         const tools = (meta.tools || []).map(tool => String(tool).replaceAll('_', ' '));
@@ -118,7 +137,7 @@
             row.className = 'trace-row';
             const label = document.createElement('span');
             label.className = 'trace-label';
-            label.textContent = 'Grounded in:';
+            label.textContent = phrase('grounded_in');
             row.append(label);
             appendChips(row, sources);
             trace.append(row);
@@ -127,7 +146,7 @@
         if (hasConfidence) {
             const row = document.createElement('div');
             row.className = 'trace-row';
-            row.textContent = `Confidence: ${Math.round(Math.max(0, Math.min(1, Number(meta.confidence))) * 100)}%`;
+            row.textContent = phrase('confidence', {percent: Math.round(Math.max(0, Math.min(1, Number(meta.confidence))) * 100)});
             trace.append(row);
         }
 
@@ -136,7 +155,7 @@
             row.className = 'trace-row';
             const label = document.createElement('span');
             label.className = 'trace-label';
-            label.textContent = 'Actions:';
+            label.textContent = phrase('actions');
             row.append(label);
             appendChips(row, tools);
             trace.append(row);
@@ -145,7 +164,7 @@
         if (meta.reason) {
             const row = document.createElement('div');
             row.className = 'trace-row';
-            row.textContent = `Escalation: ${meta.reason}`;
+            row.textContent = phrase('escalation', {reason: meta.reason});
             trace.append(row);
         }
 
@@ -157,13 +176,13 @@
         const row = document.createElement('div');
         row.style.cssText = 'display:flex;align-items:center;gap:5px;margin-top:9px;padding-top:7px;border-top:1px solid #edf1ee;color:#71817a;font-size:10px';
         const label = document.createElement('span');
-        label.textContent = 'Was this useful?';
+        label.textContent = phrase('was_this_useful');
         row.append(label);
         [['👍', 'helpful'], ['👎', 'unhelpful']].forEach(([icon, value]) => {
             const button = document.createElement('button');
             button.type = 'button';
             button.textContent = icon;
-            button.setAttribute('aria-label', value === 'helpful' ? 'Helpful response' : 'Unhelpful response');
+            button.setAttribute('aria-label', phrase(value === 'helpful' ? 'helpful_response' : 'unhelpful_response'));
             button.style.cssText = 'border:1px solid #dfe7e1;background:white;border-radius:8px;padding:3px 7px;cursor:pointer';
             button.addEventListener('click', async () => {
                 if (!visitorToken) return;
@@ -172,7 +191,7 @@
                     headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
                     body: JSON.stringify({feedback: value, visitor_token: visitorToken}),
                 });
-                if (response.ok) row.textContent = 'Thanks · feedback saved ✓';
+                if (response.ok) row.textContent = phrase('feedback_saved');
             });
             row.append(button);
         });
@@ -185,7 +204,7 @@
         if (role === 'human') {
             const operator = document.createElement('span');
             operator.className = 'operator';
-            operator.textContent = 'Human operator';
+            operator.textContent = phrase('human_operator');
             bubble.append(operator);
         }
         const copy = document.createElement('span');
@@ -212,13 +231,13 @@
                     card.target = '_blank';
                     card.rel = 'noopener noreferrer';
                 }
-                name.textContent = product.name || 'Product';
+                name.textContent = product.name || phrase('product');
                 const currentPrice = Number(product.price);
                 const originalPrice = Number(product.original_price || 0);
                 const priceText = originalPrice > currentPrice
-                    ? `${currentPrice.toFixed(2)} ₾ · was ${originalPrice.toFixed(2)} ₾`
+                    ? `${currentPrice.toFixed(2)} ₾ · ${phrase('was', {price: originalPrice.toFixed(2)})}`
                     : `${currentPrice.toFixed(2)} ₾`;
-                detail.textContent = `${priceText} · ${inStock ? 'In stock' : 'Sold out — unavailable for purchase'}`;
+                detail.textContent = `${priceText} · ${phrase(inStock ? 'in_stock' : 'sold_out')}`;
                 card.append(name, detail);
                 row.append(card);
             });
@@ -237,7 +256,7 @@
         bubble.setAttribute('aria-live', 'polite');
 
         const label = document.createElement('span');
-        label.textContent = `${assistantName} is thinking…`;
+        label.textContent = phrase('thinking', {assistant: assistantName});
         const dots = document.createElement('span');
         dots.className = 'thinking-dots';
         dots.setAttribute('aria-hidden', 'true');
@@ -247,8 +266,8 @@
         box.scrollTop = box.scrollHeight;
 
         const updates = [
-            setTimeout(() => { label.textContent = `${assistantName} is processing your request…`; }, 2800),
-            setTimeout(() => { label.textContent = `${assistantName} is preparing a verified answer…`; }, 7500),
+            setTimeout(() => { label.textContent = phrase('processing', {assistant: assistantName}); }, 2800),
+            setTimeout(() => { label.textContent = phrase('preparing', {assistant: assistantName}); }, 7500),
         ];
 
         return () => {
@@ -347,7 +366,7 @@
                 messageId: data.message_id || null,
             });
         } catch (error) {
-            add(error.name === 'AbortError' ? 'The response timed out. Please try again.' : 'The connection was interrupted. Please try again.', 'ai');
+            add(phrase(error.name === 'AbortError' ? 'timed_out' : 'connection_interrupted'), 'ai');
         } finally {
             hideThinking();
             clearTimeout(timer);

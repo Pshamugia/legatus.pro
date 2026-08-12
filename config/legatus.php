@@ -17,4 +17,10 @@ return [
     'commerce_sync_lock_seconds' => (int) env('LEGATUS_COMMERCE_SYNC_LOCK_SECONDS', 600),
     'public_crawl_max_pages' => (int) env('LEGATUS_PUBLIC_CRAWL_MAX_PAGES', 5000),
     'widget_frame_ancestors' => env('LEGATUS_WIDGET_FRAME_ANCESTORS', '*'),
+    'widget_country_server_key' => env('LEGATUS_WIDGET_COUNTRY_SERVER_KEY', 'GEOIP_COUNTRY_CODE'),
+    'widget_country_header' => env('LEGATUS_WIDGET_COUNTRY_HEADER'),
+    'widget_country_trusted_proxies' => env('LEGATUS_WIDGET_COUNTRY_TRUSTED_PROXIES', ''),
+    'widget_country_lookup_url' => env('LEGATUS_WIDGET_COUNTRY_LOOKUP_URL', 'https://api.country.is/{ip}'),
+    'widget_country_cache_hours' => (int) env('LEGATUS_WIDGET_COUNTRY_CACHE_HOURS', 24),
+    'widget_country_negative_cache_minutes' => (int) env('LEGATUS_WIDGET_COUNTRY_NEGATIVE_CACHE_MINUTES', 10),
 ];

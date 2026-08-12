@@ -72,6 +72,14 @@ LEGATUS_DAILY_AI_TOKEN_LIMIT=250000
 LEGATUS_SEMANTIC_SIMILARITY_THRESHOLD=0.35
 LEGATUS_SEMANTIC_CANDIDATE_LIMIT=2000
 LEGATUS_WIDGET_FRAME_ANCESTORS=https://shop.example
+# Prefer a hosting/edge GeoIP value when available. A trusted header must also
+# name the proxy IPs/CIDRs that strip spoofed client headers.
+LEGATUS_WIDGET_COUNTRY_SERVER_KEY=GEOIP_COUNTRY_CODE
+LEGATUS_WIDGET_COUNTRY_HEADER=
+LEGATUS_WIDGET_COUNTRY_TRUSTED_PROXIES=
+LEGATUS_WIDGET_COUNTRY_LOOKUP_URL=https://api.country.is/{ip}
+LEGATUS_WIDGET_COUNTRY_CACHE_HOURS=24
+LEGATUS_WIDGET_COUNTRY_NEGATIVE_CACHE_MINUTES=10
 
 SESSION_DRIVER=database
 SESSION_ENCRYPT=true
@@ -157,6 +165,8 @@ The worker timeout must remain lower than `DB_QUEUE_RETRY_AFTER` (recommended: 8
 - Keep stack traces and server version details out of public error responses.
 
 The widget script is designed to be embedded on another website, while its iframe and API requests are served by the Legatus origin. Set `LEGATUS_WIDGET_FRAME_ANCESTORS` to the reviewed storefront origin(s); use `*` only for local or intentionally open demos. Invalid CSP sources are discarded and an empty valid list fails closed to `frame-ancestors 'none'`. The public conversation identity is an agent-bound HMAC-signed token, not a trusted caller-supplied visitor ID; rotating `APP_KEY` invalidates existing tokens and also changes the keyed fingerprints used for future contact-evidence comparisons. Public message, history, and feedback JSON endpoints are stateless: they do not start a Laravel session, read/write cookies, or rely on CSRF state. Test token persistence, history polling, operator replies, feedback ownership, CSP/frame headers, and browser privacy behavior on the exact production domain before launch. Confirm every HTML response carries a fresh nonce and that `script-src` has no `unsafe-inline` allowance.
+
+Customer chat UI locale is resolved without changing the global application locale. Prefer a hosting-populated country server variable or a country header from an explicitly trusted edge. When neither is available, the configured HTTPS lookup receives the public visitor IP server-side; its result is cached using an HMAC fingerprint rather than the raw IP. Georgia (`GE`) renders Georgian chat controls, while other or unresolved locations render English. Verify `Content-Language` from a real Georgian connection after deployment, especially when a reverse proxy sits in front of Apache/PHP.
 
 ## 7. Pre-release verification
 

@@ -8,18 +8,26 @@ use App\Models\Message;
 use App\Services\ConversationEngine;
 use App\Services\TenantContext;
 use App\Support\SignedVisitorToken;
+use App\Support\WidgetLocaleResolver;
 use Illuminate\Cache\LockTimeoutException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Lang;
 
 class ChatController extends Controller
 {
-    public function show(Agent $agent)
+    public function show(Request $request, Agent $agent, WidgetLocaleResolver $locales)
     {
         $this->ensureActive($agent);
 
-        return view('chat', compact('agent'));
+        $widgetLocale = $locales->resolve($request);
+        $widgetCopy = Lang::get('widget', [], $widgetLocale);
+
+        return response()
+            ->view('chat', compact('agent', 'widgetLocale', 'widgetCopy'))
+            ->header('Content-Language', $widgetLocale)
+            ->header('Cache-Control', 'no-store, private');
     }
 
     public function message(Request $request, Agent $agent, ConversationEngine $engine, SignedVisitorToken $tokens)
