@@ -8,5 +8,8 @@ class AgentRun extends Model
 {
     protected $guarded = [];
 
-    protected $casts = ['tools_used' => 'array'];
+    protected $casts = [
+        'tools_used' => 'array',
+        'model_usage' => 'array',
+    ];
 }

@@ -4,7 +4,16 @@ return [
 
     'openai' => [
         'key' => env('OPENAI_API_KEY'),
+        // Keep the established model as the default until the hybrid canary is
+        // explicitly enabled. This makes rollback a configuration change, not
+        // a code deployment.
         'model' => env('OPENAI_MODEL', 'gpt-5.6-sol'),
+        'primary_model' => env('OPENAI_PRIMARY_MODEL', 'gpt-5.6-luna'),
+        'fallback_model' => env('OPENAI_FALLBACK_MODEL', 'gpt-5.6-sol'),
+        'hybrid_enabled' => filter_var(env('OPENAI_HYBRID_ENABLED', false), FILTER_VALIDATE_BOOL),
+        'hybrid_rollout_percent' => min(100, max(0, (int) env('OPENAI_HYBRID_ROLLOUT_PERCENT', 5))),
+        'fallback_enabled' => filter_var(env('OPENAI_FALLBACK_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'fallback_reasoning_effort' => env('OPENAI_FALLBACK_REASONING_EFFORT', 'low'),
         'moderation_model' => env('OPENAI_MODERATION_MODEL', 'omni-moderation-latest'),
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'timeout' => max(25, (int) env('OPENAI_TIMEOUT', 30)),

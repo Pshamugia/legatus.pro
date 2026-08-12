@@ -63,14 +63,15 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 - production deploy-ის შემდეგ გადაამოწმე სერვერის `git rev-parse --short HEAD`; მხოლოდ სწორი SHA-ის შემდეგ მიიჩნიე ახალი კოდი ონლაინ ვერსიად.
 - რეალური live ტესტის ჩავარდნა წარმატებად არ აღწერო. აჩვენე ზუსტი შედეგი და გააგრძელე მიზეზის გასწორება.
 
-## მიმდინარე მდგომარეობა — 2026-08-09
+## მიმდინარე მდგომარეობა — 2026-08-12
 
 - website widget, knowledge ingestion, catalog/category/search discovery, OpenAI orchestration, Meta transport და Paddle webhook subscription flow განხორციელებულია და ტესტებით არის დაფარული.
 - Paddle production credentials/configuration და Meta public launch acceptance გარემოს გარე ნაბიჯებია; repository-ში არ შეინახო production secrets და არ განაცხადო გარე acceptance მტკიცებულების გარეშე.
 - ბოლო სამუშაო შეეხო მრავალინდუსტრიულ სემანტიკურ კატალოგურ დიალოგს: typo normalization, ავტორის/სუბიექტის კონტექსტი, დამატებითი შედეგების გამორიცხვა, სრული ხელმისაწვდომი/ამოწურული სია, ადამიანური fallback და ღია რეკომენდაციის ზუსტი ძიებისგან გამიჯვნა.
 - Social media scheduler მოიცავს tenant-aware განრიგებს, საჯარო კატალოგიდან პროდუქტების შერჩევას, Facebook/Instagram queue publishing-ს, provider-specific რედაქტირებად template-ებს, მიწოდების ჩართვა/გამორთვას, live preview-ს და schedule-level immutable template snapshot-ებს. გამოქვეყნებამდე პროდუქტის აქტიურობა და მარაგი ხელახლა მოწმდება.
 - Meta-ში `pages_manage_posts` და `instagram_content_publish` დამატებულია და current app-role testing-ისთვის მზადაა; მიმდინარე ბიზნესის Facebook/Instagram არხები ახალი უფლებებით ხელახლა დაკავშირებულია. სხვა ბიზნესებისთვის საჯარო ავტომატური გამოქვეყნება კვლავ დამოკიდებულია Meta App Review approval-ზე.
-- ბოლო საბაზისო Git commit ამ ფაილის განახლებამდე: `172b1a3` (`Document social publishing workers`). ყოველთვის გადაამოწმე მიმდინარე `HEAD`, რადგან ეს ჩანაწერი დროთა განმავლობაში მოძველდება.
+- Luna-default / Sol-fallback ჰიბრიდული routing ადგილობრივად განხორციელებულია, მაგრამ ნაგულისხმევად გამორთულია: არსებული `OPENAI_MODEL` რჩება მოქმედ მოდელად, სანამ `OPENAI_HYBRID_ENABLED=true` არ ჩაირთვება. Canary არჩევანი conversation-ზე ფიქსირდება; Sol-ის ერთი fresh-chain მცდელობა დაშვებულია მხოლოდ შემოწმებადი მოდელური/structured/tool-loop/guardrail ჩავარდნის ან state-changing action-ისას. Verified empty შედეგი, საერთო auth/quota/429 შეცდომა და რეალური tool outage Sol escalation-ს არ იწვევს. Model/stage token telemetry ინახება `agent_runs.model_usage`-ში. Production-ზე ჩართვა და რეალური ხარისხი/ეკონომია ჯერ არ არის დადასტურებული.
+- ბოლო საბაზისო Git commit ამ ფაილის განახლებამდე: `33a3163` (`Add channel-specific social post templates`). ყოველთვის გადაამოწმე მიმდინარე `HEAD`, რადგან ეს ჩანაწერი დროთა განმავლობაში მოძველდება.
 
 ## deployment
 

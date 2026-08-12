@@ -38,6 +38,13 @@ DB_PASSWORD=use_a_secret_manager
 
 OPENAI_API_KEY=use_a_secret_manager
 OPENAI_MODEL=gpt-5.6-sol
+# Hybrid rollout is opt-in. Keep false for the established Sol-only behavior.
+OPENAI_PRIMARY_MODEL=gpt-5.6-luna
+OPENAI_FALLBACK_MODEL=gpt-5.6-sol
+OPENAI_HYBRID_ENABLED=false
+OPENAI_HYBRID_ROLLOUT_PERCENT=5
+OPENAI_FALLBACK_ENABLED=true
+OPENAI_FALLBACK_REASONING_EFFORT=low
 OPENAI_MODERATION_MODEL=omni-moderation-latest
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 OPENAI_TIMEOUT=22
@@ -103,6 +110,8 @@ php artisan view:cache
 Do not run `migrate:fresh` in production: it deletes existing data.
 
 Run every pending migration before enabling traffic. In particular, `2026_07_20_000012_add_request_id_to_messages.php` adds the nullable customer-message `request_id` and the per-conversation unique index used for durable retry safety.
+
+The hybrid model release also requires `2026_08_11_000001_add_hybrid_model_telemetry_to_agent_runs.php` before `OPENAI_HYBRID_ENABLED=true` is set. Deploy and verify the code first with hybrid mode disabled. Then start at 5%, inspect tenant-scoped answers, guardrail/fallback rate, model usage, latency, and token totals, and only increase the percentage after the canary is healthy. Conversations are pinned to their first canary assignment, so rollout changes do not switch an active conversation between Luna and Sol.
 
 Do not deploy the development `.env`, SQLite database, logs, sessions, caches, or private uploaded-source files. Do not run `db:seed` or `legatus:bootstrap-demo-tenant` against a real tenant database unless the fictional Build Week dataset is explicitly desired.
 
@@ -206,3 +215,5 @@ The live commands consume OpenAI API usage. Inspect the model, tools, intent, an
 ## 10. Rollback
 
 Keep the previous application release and a database backup available. Roll back application code by switching the web server to the previous immutable release. Database rollback must be evaluated migration by migration; do not run broad destructive rollback commands against production without reviewing their data impact.
+
+For an immediate model-routing rollback, set `OPENAI_HYBRID_ENABLED=false`, rebuild Laravel's configuration cache, and restart the queue workers. This restores the established `OPENAI_MODEL` path even for conversations previously assigned to the Luna canary; no code rollback or database rollback is required.
