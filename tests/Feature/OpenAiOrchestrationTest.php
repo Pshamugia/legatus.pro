@@ -113,6 +113,9 @@ class OpenAiOrchestrationTest extends TestCase
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_catalog_follow_up' => true,
                     'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
                     'resolved_query' => 'Acme',
                     'exclude_product_ids' => [$previous->id],
                     'expects_complete_set' => true,
@@ -152,9 +155,8 @@ class OpenAiOrchestrationTest extends TestCase
             ->first(fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up');
         $this->assertNotNull($contextRequest);
         $this->assertSame('Anything else?', data_get(collect($contextRequest->data()['input'])->last(), 'content'));
-        $this->assertStringContainsString('structured records', (string) $contextRequest->data()['instructions']);
-        $this->assertStringContainsString('open-ended request for advice or recommendations', (string) $contextRequest->data()['instructions']);
-        $this->assertStringContainsString('is not a direct lookup', (string) $contextRequest->data()['instructions']);
+        $this->assertStringContainsString('Recently shown product records', (string) $contextRequest->data()['instructions']);
+        $this->assertStringContainsString('An open-ended recommendation is not a direct lookup', (string) $contextRequest->data()['instructions']);
     }
 
     #[DataProvider('crossIndustryMessages')]
@@ -288,7 +290,7 @@ class OpenAiOrchestrationTest extends TestCase
                 return Http::response(['id' => 'catalog-boundary-final', 'output' => [[
                     'type' => 'message',
                     'content' => [['type' => 'output_text', 'text' => json_encode([
-                        'text' => 'Summer detective fiction is usually light and entertaining.',
+                        'text' => 'I could not verify a matching summer detective title in this catalog. Would you prefer a different setting or a broader mystery selection?',
                         'intent' => 'recommendation',
                         'confidence' => .92,
                         'handoff' => false,
@@ -305,8 +307,7 @@ class OpenAiOrchestrationTest extends TestCase
 
         $reply = app(SalesAgentService::class)->reply($agent, 'ზაფხულისთვის კლასიკური დეტექტივი მირჩიე', $conversation);
 
-        $this->assertStringContainsString('ბიზნესის ვებსაიტზე', $reply['text']);
-        $this->assertStringNotContainsString('light and entertaining', $reply['text']);
+        $this->assertSame('I could not verify a matching summer detective title in this catalog. Would you prefer a different setting or a broader mystery selection?', $reply['text']);
         $this->assertSame([], $reply['products']->all());
         $this->assertSame(['recommend_products'], $reply['tools_used']);
     }
@@ -450,6 +451,9 @@ class OpenAiOrchestrationTest extends TestCase
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_catalog_follow_up' => false,
                     'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
                     'resolved_query' => null,
                     'exclude_product_ids' => [],
                     'expects_complete_set' => false,
@@ -546,9 +550,6 @@ class OpenAiOrchestrationTest extends TestCase
     {
         $this->seed();
         $agent = Agent::firstOrFail();
-        $agent->update(['settings' => array_merge($agent->settings ?? [], [
-            'catalog_search_url' => 'https://shop.example/search?q={query}',
-        ])]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'url', 'name' => 'Budget catalog', 'url' => 'https://shop.example/catalog', 'status' => 'ready',
         ]);
@@ -580,6 +581,9 @@ class OpenAiOrchestrationTest extends TestCase
                         'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
                             'is_catalog_follow_up' => false,
                             'recommendation_scope' => 'broad',
+                            'recommendation_query' => null,
+                            'recommendation_category' => null,
+                            'recommendation_occasion' => 'gift',
                             'resolved_query' => null,
                             'exclude_product_ids' => [],
                             'expects_complete_set' => false,
@@ -593,10 +597,10 @@ class OpenAiOrchestrationTest extends TestCase
                             // The model incorrectly turns the customer's lack
                             // of a genre preference into literal filters. The
                             // semantic scope resolver must remove both.
-                            'query' => 'any genre', 'budget' => 17, 'quantity' => null,
+                            'query' => 'gift item for the customer', 'budget' => 17, 'quantity' => null,
                             // A weak model choice must not reduce an open
                             // budget recommendation to one product card.
-                            'category' => 'any genre', 'mood' => null, 'occasion' => null, 'limit' => 1,
+                            'category' => 'gift', 'mood' => null, 'occasion' => 'gift', 'limit' => 1,
                         ]),
                     ]], 'usage' => []]);
                 }
@@ -673,6 +677,69 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('ჯამი: 48.00 ₾', $reply['text']);
         $this->assertStringContainsString('ბიუჯეტი: 50.00 ₾', $reply['text']);
         $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
+    }
+
+    public function test_budget_request_uses_the_semantically_resolved_tenant_category_and_preserves_follow_up_context(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Mystery collection', 'url' => 'https://shop.example/mystery',
+            'source_scope' => 'catalog', 'status' => 'ready',
+        ]);
+        $agent->products()->create([
+            'name' => 'Verified Mystery', 'sku' => 'MYSTERY-1', 'category' => 'Aurora Curios',
+            'search_text' => 'verified mystery detective', 'price' => 25, 'stock' => 2, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+        $agent->products()->create([
+            'name' => 'Unrelated Product', 'sku' => 'OTHER-1', 'category' => 'Biography',
+            'search_text' => 'unrelated biography', 'price' => 20, 'stock' => 2, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'semantic-category-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                $this->assertStringContainsString('"Aurora Curios"', (string) $request->data()['instructions']);
+
+                return Http::response(['id' => 'meaning', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'is_catalog_follow_up' => false, 'recommendation_scope' => 'constrained',
+                        'recommendation_query' => null, 'recommendation_category' => 'Aurora Curios',
+                        'recommendation_occasion' => null, 'resolved_query' => null,
+                        'exclude_product_ids' => [], 'expects_complete_set' => false,
+                    ])]],
+                ]], 'usage' => []]);
+            }
+            if (! isset($request->data()['previous_response_id'])) {
+                return Http::response(['id' => 'category-tool', 'output' => [[
+                    'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'category-call',
+                    'arguments' => json_encode([
+                        'query' => 'bad isolated surface words', 'budget' => 60, 'quantity' => null,
+                        'category' => 'wrong-category', 'mood' => null, 'occasion' => null, 'limit' => 3,
+                    ]),
+                ]], 'usage' => []]);
+            }
+
+            return Http::response(['id' => 'category-final', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I found a verified matching option.', 'intent' => 'recommendation', 'confidence' => .99,
+                    'handoff' => false, 'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+        });
+
+        app(SalesAgentService::class)->reply($agent, 'Please recommend mystery items within 60 GEL', $conversation);
+
+        $event = \App\Models\RecommendationEvent::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $this->assertSame('Aurora Curios', data_get($event->query, 'category'));
+        $this->assertSame('', data_get($event->query, 'query'));
     }
 
     public function test_semantic_social_turn_closes_pending_commerce_state_without_catalog_tools(): void
