@@ -112,6 +112,7 @@ class OpenAiOrchestrationTest extends TestCase
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_catalog_follow_up' => true,
+                    'recommendation_scope' => 'none',
                     'resolved_query' => 'Acme',
                     'exclude_product_ids' => [$previous->id],
                     'expects_complete_set' => true,
@@ -448,6 +449,7 @@ class OpenAiOrchestrationTest extends TestCase
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_catalog_follow_up' => false,
+                    'recommendation_scope' => 'none',
                     'resolved_query' => null,
                     'exclude_product_ids' => [],
                     'expects_complete_set' => false,
@@ -544,6 +546,9 @@ class OpenAiOrchestrationTest extends TestCase
     {
         $this->seed();
         $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://shop.example/search?q={query}',
+        ])]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'url', 'name' => 'Budget catalog', 'url' => 'https://shop.example/catalog', 'status' => 'ready',
         ]);
@@ -570,14 +575,28 @@ class OpenAiOrchestrationTest extends TestCase
                 return Http::response(['results' => [['flagged' => false]]]);
             }
             if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response(['id' => 'budget-context', 'output' => [[
+                        'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                            'is_catalog_follow_up' => false,
+                            'recommendation_scope' => 'broad',
+                            'resolved_query' => null,
+                            'exclude_product_ids' => [],
+                            'expects_complete_set' => false,
+                        ])]],
+                    ]], 'usage' => []]);
+                }
                 if (! isset($request->data()['previous_response_id'])) {
                     return Http::response(['id' => 'budget-tool', 'output' => [[
                         'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'budget-call',
                         'arguments' => json_encode([
-                            'query' => '', 'budget' => 17, 'quantity' => null,
+                            // The model incorrectly turns the customer's lack
+                            // of a genre preference into literal filters. The
+                            // semantic scope resolver must remove both.
+                            'query' => 'any genre', 'budget' => 17, 'quantity' => null,
                             // A weak model choice must not reduce an open
                             // budget recommendation to one product card.
-                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 1,
+                            'category' => 'any genre', 'mood' => null, 'occasion' => null, 'limit' => 1,
                         ]),
                     ]], 'usage' => []]);
                 }
