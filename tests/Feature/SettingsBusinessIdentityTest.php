@@ -18,14 +18,14 @@ class SettingsBusinessIdentityTest extends TestCase
 
         $this->actingAs($owner)->get(route('settings.index'))
             ->assertOk()
-            ->assertSee('ბიზნესის სახელი · Business name')
-            ->assertSee('AI ასისტენტის სახელი · Assistant display name')
+            ->assertSee('Business name')
+            ->assertSee('Assistant display name')
             ->assertSee('name="business_name" value="Old Brand"', false)
             ->assertSee('name="agent_name" value="Old Assistant"', false)
             ->assertSee('Ask [Business]')
             ->assertSee('Ask Bukinistebi.ge')
-            ->assertSee('AI თანამშრომლის chat identity-ს')
-            ->assertSee('მაგალითად, Nia');
+            ->assertSee("AI employee's chat identity", false)
+            ->assertSee('for example, Nia');
     }
 
     public function test_owner_updates_both_names_without_changing_another_tenant(): void

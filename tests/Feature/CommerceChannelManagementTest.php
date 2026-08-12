@@ -38,9 +38,9 @@ class CommerceChannelManagementTest extends TestCase
         $this->actingAs($user)->get(route('channels.index'))
             ->assertOk()
             ->assertSee('data-catalog-status="available"', false)
-            ->assertSee('✓ კატალოგი ხელმისაწვდომია')
-            ->assertSee('თქვენი კატალოგი უკვე ხელმისაწვდომია')
-            ->assertSee('Legatus იყენებს თქვენს 1 აქტიურ პროდუქტს')
+            ->assertSee('✓ Catalog available')
+            ->assertSee('Your catalog is already available')
+            ->assertSee('Legatus is using your 1 active product')
             ->assertSee(route('knowledge.index'), false)
             ->assertDontSee('data-catalog-status="missing"', false);
     }
@@ -52,7 +52,7 @@ class CommerceChannelManagementTest extends TestCase
         $this->actingAs($user)->get(route('channels.index'))
             ->assertOk()
             ->assertSee('data-catalog-status="missing"', false)
-            ->assertSee('კატალოგი არ არის დამატებული');
+            ->assertSee('Catalog not added');
     }
 
     public function test_owner_can_verify_and_connect_a_store_without_exposing_the_secret(): void
@@ -100,7 +100,7 @@ class CommerceChannelManagementTest extends TestCase
         $this->actingAs($user)->get(route('channels.index'))
             ->assertOk()
             ->assertSee('data-catalog-status="live"', false)
-            ->assertSee('✓ Live API დაკავშირებულია')
+            ->assertSee('✓ Live API connected')
             ->assertSee('data-commerce-status="active"', false)
             ->assertSee('Owner live catalog')
             ->assertSee('8.8.8.8')
@@ -242,7 +242,7 @@ class CommerceChannelManagementTest extends TestCase
 
         $this->actingAs($viewer)->get(route('channels.index'))
             ->assertOk()
-            ->assertSee('owner-ს ან admin-ს შეუძლია')
+            ->assertSee('Only a business owner or admin can change the connection.')
             ->assertDontSee('name="secret"', false)
             ->assertDontSee(route('channels.commerce.disconnect'), false);
     }

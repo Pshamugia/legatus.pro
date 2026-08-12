@@ -1,12 +1,12 @@
 @php
     $assistantName = $agent->assistantDisplayName();
     $assistantIntroduction = $agent->hasCustomAssistantName()
-        ? "მე ვარ {$assistantName} — {$agent->business_name}-ის AI ასისტენტი."
-        : "მე ვარ {$agent->business_name}-ის AI ასისტენტი.";
+        ? "I'm {$assistantName}, the AI assistant for {$agent->business_name}."
+        : "I'm the AI assistant for {$agent->business_name}.";
     $widgetTheme = $agent->widgetTheme();
 @endphp
 <!doctype html>
-<html lang="ka">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -25,20 +25,20 @@
             <span class="powered">Powered by Legatus</span>
         </div>
         <span class="head-actions">
-            <button class="head-action" id="new-conversation" type="button" aria-label="ახალი საუბრის დაწყება" title="ახალი საუბარი">↻</button>
-            <button class="head-action" id="close-widget" type="button" aria-label="ჩატის დახურვა" title="დახურვა">×</button>
+            <button class="head-action" id="new-conversation" type="button" aria-label="Start a new conversation" title="New conversation">↻</button>
+            <button class="head-action" id="close-widget" type="button" aria-label="Close chat" title="Close">×</button>
         </span>
     </header>
     <main class="messages" id="messages" aria-live="polite">
-        <div class="bubble">გამარჯობა! 👋 {{ $assistantIntroduction }} რას ეძებთ? გირჩევთ პროდუქტს თქვენი გემოვნების, ბიუჯეტისა და საჭიროების მიხედვით.</div>
+        <div class="bubble">Hello! 👋 {{ $assistantIntroduction }} What are you looking for? I can recommend products based on your preferences, budget, and needs.</div>
     </main>
     <div class="suggest">
-        <button type="button" data-q="დამეხმარე არჩევანში — ჯერ რამდენიმე კითხვა დამისვი და შემდეგ მხოლოდ თქვენი კატალოგიდან მირჩიე">✨ პერსონალური რჩევა</button>
-        <button type="button" data-q="ხვალ მიწოდება შეიძლება?">🚚 მიწოდება</button>
+        <button type="button" data-q="Help me choose. Ask me a few questions first, then recommend products only from your catalog.">✨ Personal advice</button>
+        <button type="button" data-q="Can it be delivered tomorrow?">🚚 Delivery</button>
     </div>
     <form class="composer" id="form">
-        <input id="input" required autocomplete="off" placeholder="მომწერეთ..." aria-label="შეტყობინება">
-        <button id="send" type="submit" aria-label="გაგზავნა">↑</button>
+        <input id="input" required autocomplete="off" placeholder="Write a message..." aria-label="Message">
+        <button id="send" type="submit" aria-label="Send">↑</button>
     </form>
 </div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
@@ -216,9 +216,9 @@
                 const currentPrice = Number(product.price);
                 const originalPrice = Number(product.original_price || 0);
                 const priceText = originalPrice > currentPrice
-                    ? `${currentPrice.toFixed(2)} ₾ · ადრე ${originalPrice.toFixed(2)} ₾`
+                    ? `${currentPrice.toFixed(2)} ₾ · was ${originalPrice.toFixed(2)} ₾`
                     : `${currentPrice.toFixed(2)} ₾`;
-                detail.textContent = `${priceText} · ${inStock ? 'მარაგშია' : 'ამოწურულია — ვერ შეიძენთ'}`;
+                detail.textContent = `${priceText} · ${inStock ? 'In stock' : 'Sold out — unavailable for purchase'}`;
                 card.append(name, detail);
                 row.append(card);
             });
@@ -237,7 +237,7 @@
         bubble.setAttribute('aria-live', 'polite');
 
         const label = document.createElement('span');
-        label.textContent = `${assistantName} ფიქრობს…`;
+        label.textContent = `${assistantName} is thinking…`;
         const dots = document.createElement('span');
         dots.className = 'thinking-dots';
         dots.setAttribute('aria-hidden', 'true');
@@ -247,8 +247,8 @@
         box.scrollTop = box.scrollHeight;
 
         const updates = [
-            setTimeout(() => { label.textContent = `${assistantName} თქვენს მოთხოვნას ამუშავებს…`; }, 2800),
-            setTimeout(() => { label.textContent = `${assistantName} გადამოწმებულ პასუხს ამზადებს…`; }, 7500),
+            setTimeout(() => { label.textContent = `${assistantName} is processing your request…`; }, 2800),
+            setTimeout(() => { label.textContent = `${assistantName} is preparing a verified answer…`; }, 7500),
         ];
 
         return () => {
@@ -347,7 +347,7 @@
                 messageId: data.message_id || null,
             });
         } catch (error) {
-            add(error.name === 'AbortError' ? 'პასუხმა დროის ლიმიტს გადააჭარბა. გთხოვთ ხელახლა სცადოთ.' : 'კავშირი შეფერხდა. გთხოვთ ხელახლა სცადოთ.', 'ai');
+            add(error.name === 'AbortError' ? 'The response timed out. Please try again.' : 'The connection was interrupted. Please try again.', 'ai');
         } finally {
             hideThinking();
             clearTimeout(timer);

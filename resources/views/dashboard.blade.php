@@ -4,7 +4,7 @@
 <div class="dash-shell">
     @include('partials.workspace-navigation', ['active' => 'dashboard'])
     <main class="main">
-        <div class="topline"><div><span class="eyebrow">Mission control</span><h1>გამარჯობა 👋</h1><p style="color:var(--muted);margin:4px 0">რეალური შედეგები {{ $agent->business_name }}-ის ყველა საუბრის მიხედვით.</p></div><div style="display:flex;gap:9px">@if($agent->websiteWidgetEnabled())<a class="btn ghost" href="{{ route('chat.show',$agent) }}">Preview agent</a>@else<a class="btn ghost" href="{{ route('channels.index') }}#website-install">Website chat is OFF</a>@endif<a class="btn" href="{{ route('onboarding') }}">Manage setup</a></div></div>
+        <div class="topline"><div><span class="eyebrow">Mission control</span><h1>Hello 👋</h1><p style="color:var(--muted);margin:4px 0">Real results from every {{ $agent->business_name }} conversation.</p></div><div style="display:flex;gap:9px">@if($agent->websiteWidgetEnabled())<a class="btn ghost" href="{{ route('chat.show',$agent) }}">Preview agent</a>@else<a class="btn ghost" href="{{ route('channels.index') }}#website-install">Website chat is OFF</a>@endif<a class="btn" href="{{ route('onboarding') }}">Manage setup</a></div></div>
 
         @if(session('status'))<div class="panel" style="margin:18px 0;color:#267244;padding:14px">✓ {{ session('status') }}</div>@endif
         @if(session('success'))<div class="panel" style="margin:18px 0;color:#267244;padding:14px">✓ {{ session('success') }}</div>@endif
@@ -26,10 +26,10 @@
                         <div class="copy"><strong>{{ $conversation->customer_name ?? 'Visitor' }}</strong> <span class="channel">· {{ ucfirst($conversation->channel) }}</span> @if(str_starts_with($conversation->visitor_id, 'demo-'))<span class="tag" style="padding:3px 6px">Simulated demo</span>@endif<p>{{ $conversation->messages->last()?->content }}</p></div>
                         <div style="text-align:right"><span class="pill">{{ $conversation->status === 'human' ? 'Needs human' : ($conversation->status === 'closed' ? 'Closed' : 'AI handling') }}</span>@if($conversation->outcome)<div class="channel" style="margin-top:5px">{{ str_replace('_',' ',$conversation->outcome) }}</div>@endif</div>
                     </a>
-                @empty<div style="padding:35px;color:var(--muted)">საუბრები ჯერ არ არის — გახსენით Preview agent.</div>@endforelse
+                @empty<div style="padding:35px;color:var(--muted)">No conversations yet — open Preview agent to start one.</div>@endforelse
             </section>
             <aside>
-                <div class="agent-card"><div class="person"><span class="avatar" style="background:var(--lime);color:var(--green)">L</span><div><strong>{{ $agent->name }}</strong><small style="color:#bcd0c9">AI Sales Employee</small></div></div><p>{{ $agent->business_name }}-ის პროდუქტებს, პოლიტიკას და ბრენდის ტონს იყენებს გადამოწმებული პასუხებისთვის.</p><div style="display:flex;justify-content:space-between;font-size:12px"><span>Knowledge readiness</span><b>{{ $metrics['knowledge_readiness'] }}%</b></div><div class="progress" style="margin-top:9px"><i style="width:{{ $metrics['knowledge_readiness'] }}%"></i></div></div>
+                <div class="agent-card"><div class="person"><span class="avatar" style="background:var(--lime);color:var(--green)">L</span><div><strong>{{ $agent->name }}</strong><small style="color:#bcd0c9">AI Sales Employee</small></div></div><p>Uses {{ $agent->business_name }} products, policies, and brand voice to provide verified answers.</p><div style="display:flex;justify-content:space-between;font-size:12px"><span>Knowledge readiness</span><b>{{ $metrics['knowledge_readiness'] }}%</b></div><div class="progress" style="margin-top:9px"><i style="width:{{ $metrics['knowledge_readiness'] }}%"></i></div></div>
                 <div class="panel" style="margin-top:18px">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px"><h3>Channel status</h3><a class="channel" href="{{ route('channels.index') }}">Manage →</a></div>
                     <p>● Website widget @if($agent->websiteWidgetEnabled())<span class="up">ON</span>@else<span style="color:#9b5b12">OFF</span>@endif</p>

@@ -23,8 +23,8 @@
     <nav class="nav">
         <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
         <div class="navlinks">
-            <a href="#product">პროდუქტი</a>
-            <a href="#trust">ნდობა</a>
+            <a href="#product">Product</a>
+            <a href="#trust">Trust</a>
             <a href="#pricing">Pricing</a>
             <a href="#contact">Contact</a>
             @auth
@@ -40,17 +40,17 @@
         <section>
             <span class="tag"><span class="dot"></span> AI sales employee · online 24/7</span>
             <h1>You imagine. We  <em>execute</em></h1>
-            <p>საქართველოში მცირე ონლაინ ბიზნესები Instagram-სა და Messenger-ში გაყიდვებს ხშირად ხელით მართავენ. როცა მფლობელს სძინავს ან დაკავებულია, პასუხი გვიანდება და გაყიდვა იკარგება. Legatus თითოეულ ბიზნესს აძლევს ციფრულ ელჩს, რომელიც მომხმარებელს უპასუხოდ არ ტოვებს — და ზუსტად იცის, როდის უნდა დაუძახოს ადამიანს.</p>
+            <p>Legatus is an AI platform that manages content and sales on your behalf. Plan months of Facebook and Instagram posts, and rely on a digital ambassador that answers customers 24/7 across your website and social channels.</p>
             <div class="actions">
                 <a class="btn lime" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
                 @if($demoAgent && $primaryRoute !== route('chat.show', $demoAgent))
-                    <a class="btn ghost" href="{{ route('chat.show', $demoAgent) }}">სცადე live demo ↗</a>
+                    <a class="btn ghost" href="{{ route('chat.show', $demoAgent) }}">Try the live demo ↗</a>
                 @endif
             </div>
             <div class="proof">
-                <span><b>URL + CSV</b><br>სწრაფი ონბორდინგი</span>
-                <span><b>24/7</b><br>მომხმარებელთან</span>
-                <span><b>KA · EN</b><br>ორენოვანი demo</span>
+                <span><b>URL + CSV</b><br>Fast onboarding</span>
+                <span><b>24/7</b><br>Customer support</span>
+                <span><b>KA · EN</b><br>Bilingual assistant</span>
             </div>
         </section>
 
@@ -63,12 +63,12 @@
                 <span class="tag">Illustrative demo · seeded catalog</span>
             </div>
             <div class="chatbody">
-                <div class="bubble user">ვეძებ „ოსტატი და მარგარიტას“ მსგავს თანამედროვე წიგნს, 30 ლარამდე.</div>
+                <div class="bubble user">I am looking for a contemporary novel like The Master and Margarita, under $30.</div>
                 <div class="bubble ai">
-                    თქვენთვის <b>Piranesi</b> საუკეთესო შესაბამისობაა — იდუმალი ატმოსფერო და რეალობის საზღვრებთან თამაში აქვს, 27.50 ₾ ღირს და მარაგში 7 ცალია.
+                    <b>Piranesi</b> is the best match — it has a mysterious atmosphere and plays with the boundaries of reality. It costs $27.50, with 7 copies in stock.
                     <div class="product-row">
-                        <div class="product-mini"><b>Piranesi</b><span>27.50 ₾ · 7 მარაგში</span></div>
-                        <div class="product-mini"><b>Before the Coffee Gets Cold</b><span>26.90 ₾ · 9 მარაგში</span></div>
+                        <div class="product-mini"><b>Piranesi</b><span>$27.50 · 7 in stock</span></div>
+                        <div class="product-mini"><b>Before the Coffee Gets Cold</b><span>$26.90 · 9 in stock</span></div>
                     </div>
                     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">
                         <span class="tag">Seeded catalog snapshot</span>
@@ -76,16 +76,28 @@
                         <span class="tag">check_stock</span>
                     </div>
                 </div>
-                <div class="bubble user">კორპორაციული საჩუქრებისთვის 10 ცალზე 18% ფასდაკლებას თუ გამიკეთებთ?</div>
-                <div class="bubble ai">მარაგში 14 ცალია, მაგრამ ეს ფასდაკლება ჩემს 10%-იან ლიმიტს აღემატება. მენეჯერს გადავცემ რაოდენობასა და შეთავაზების სრულ კონტექსტს.</div>
+                <div class="bubble user">Can you offer an 18% discount on 10 copies for corporate gifts?</div>
+                <div class="bubble ai">There are 14 in stock, but that discount exceeds my 10% approval limit. I will pass the quantity and full offer context to a manager.</div>
             </div>
         </section>
     </main>
 
     <section class="metrics" id="trust">
-        <div class="metric"><b>Grounded</b><span>ფასი და მარაგი მხოლოდ გადამოწმებული ბიზნესის მონაცემებიდან</span></div>
-        <div class="metric"><b>Observable</b><span>წყარო, confidence, tools, latency და escalation reason თითოეულ flow-ში</span></div>
-        <div class="metric"><b>Human-led</b><span>პოლიტიკის გამონაკლისები და დაბალი confidence ადამიანთან გადადის</span></div>
+        <div class="metric"><b>Grounded</b><span>Prices and availability come only from verified business data</span></div>
+        <div class="metric"><b>Observable</b><span>Sources, confidence, tools, latency, and escalation reasons for every flow</span></div>
+        <div class="metric"><b>Human-led</b><span>Policy exceptions and uncertain cases are handed to a person</span></div>
+    </section>
+
+    <section class="launch-steps" aria-labelledby="launch-steps-title">
+        <div class="launch-steps-copy">
+            <span class="eyebrow">Simple setup</span>
+            <h2 id="launch-steps-title">Launch in 3 simple steps</h2>
+        </div>
+        <div class="launch-steps-grid">
+            <article class="panel"><span>01</span><h3>Connect your website</h3><p>Legatus instantly learns your products and business rules.</p></article>
+            <article class="panel"><span>02</span><h3>Turn on your channels</h3><p>Chat starts working automatically on your website, Facebook, and Instagram.</p></article>
+            <article class="panel"><span>03</span><h3>Delegate the routine</h3><p>AI answers customers with verified information and plans posts months in advance.</p></article>
+        </div>
     </section>
 
     <section id="pricing" style="padding:70px 0">
@@ -106,5 +118,45 @@
         <div style="display:flex;gap:18px;flex-wrap:wrap"><a href="{{ route('terms') }}">Terms of Service</a><a href="{{ route('privacy') }}">Privacy Policy</a><a href="{{ route('refund-policy') }}">Refund Policy</a></div>
     </footer>
 </div>
-<style>@media(max-width:800px){.billing-grid{grid-template-columns:1fr!important}}</style>
+<style>
+.launch-steps{padding:25px 0 70px}.launch-steps-copy{text-align:center;max-width:680px;margin:0 auto 28px}.launch-steps-copy h2{font-size:38px;margin:10px 0}.launch-steps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.launch-steps-grid article>span{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--lime);font-weight:800}.launch-steps-grid h3{margin:18px 0 8px}.launch-steps-grid p{color:var(--muted);font-size:14px;line-height:1.65;margin:0}
+@media(max-width:850px){
+    .hero{grid-template-columns:minmax(0,1fr);gap:42px}
+    .hero>section{min-width:0}
+    .demo-head{gap:14px;flex-wrap:wrap}
+    .demo-head>.tag{max-width:100%;white-space:normal}
+}
+@media(max-width:600px){
+    .wrap{padding-inline:16px}
+    .nav{height:auto;min-height:68px;gap:10px}
+    .navlinks{gap:8px}
+    .navlinks .btn{padding:10px 12px;font-size:12px}
+    .hero{padding:34px 0 58px;gap:32px}
+    .hero h1{font-size:clamp(38px,13vw,46px);line-height:1.02;letter-spacing:-2.5px;margin:18px 0}
+    .hero p{font-size:16px;line-height:1.65}
+    .actions{flex-direction:column;align-items:stretch;margin-top:24px}
+    .actions .btn{width:100%}
+    .proof{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:28px}
+    .demo-card{padding:10px;border-radius:21px}
+    .demo-head{align-items:flex-start;padding:11px;flex-direction:column}
+    .person{min-width:0}
+    .person>div{min-width:0}
+    .person strong,.person small{overflow-wrap:anywhere}
+    .chatbody{padding:13px;min-height:0}
+    .bubble{max-width:94%;padding:11px 12px;font-size:13px}
+    .metrics{padding:22px 0 55px}
+    .metric{padding:20px 12px}
+    .launch-steps{padding:10px 0 48px}
+    .launch-steps-copy h2{font-size:32px}
+    .launch-steps-grid{grid-template-columns:1fr}
+    #pricing{padding:48px 0!important}
+    #pricing h2{font-size:32px!important}
+    .billing-grid{grid-template-columns:1fr!important}
+}
+@media(max-width:380px){
+    .brand{font-size:18px}
+    .navlinks .btn{padding:9px 10px}
+    .proof{grid-template-columns:1fr}
+}
+</style>
 @endsection

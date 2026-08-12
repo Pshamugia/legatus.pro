@@ -31,12 +31,12 @@
                 @csrf @method('PUT')
                 <h3>Business & AI identity</h3>
                 <p style="color:var(--muted);font-size:13px;line-height:1.55">Keep the business brand separate from the AI employee’s personal display name.</p>
-                <label for="business-name">ბიზნესის სახელი · Business name</label>
+                <label for="business-name">Business name</label>
                 <input id="business-name" name="business_name" value="{{ old('business_name', $agent->business_name ?: $organization->name) }}" maxlength="120" required aria-describedby="business-name-help" {{ ! in_array($role, ['owner', 'admin']) ? 'disabled' : '' }}>
-                <small id="business-name-help" class="identity-help">აკონტროლებს საჯარო ბრენდს და ღილაკს “Ask [Business]” — მაგალითად, Ask Bukinistebi.ge.</small>
-                <label for="agent-name">AI ასისტენტის სახელი · Assistant display name</label>
+                <small id="business-name-help" class="identity-help">Controls the public brand and the “Ask [Business]” button — for example, Ask Bukinistebi.ge.</small>
+                <label for="agent-name">Assistant display name</label>
                 <input id="agent-name" name="agent_name" value="{{ old('agent_name', $agent->assistantDisplayName()) }}" maxlength="80" required aria-describedby="agent-name-help" {{ ! in_array($role, ['owner', 'admin']) ? 'disabled' : '' }}>
-                <small id="agent-name-help" class="identity-help">აკონტროლებს AI თანამშრომლის chat identity-ს — მაგალითად, Nia. ეს არ ცვლის ბიზნესის ბრენდს.</small>
+                <small id="agent-name-help" class="identity-help">Controls the AI employee's chat identity — for example, Nia. This does not change the business brand.</small>
 
                 <section class="theme-section" aria-labelledby="widget-theme-title">
                     <h3 id="widget-theme-title">Widget branding</h3>
@@ -82,8 +82,8 @@
                         <div class="theme-preview-launcher"><span id="theme-preview-business-initial">{{ mb_strtoupper(mb_substr(old('business_name', $agent->business_name ?: $organization->name), 0, 1)) }}</span><b>Ask <span id="theme-preview-business">{{ old('business_name', $agent->business_name ?: $organization->name) }}</span></b></div>
                         <div class="theme-preview-frame">
                             <div class="theme-preview-head"><span id="theme-preview-assistant-initial">{{ mb_strtoupper(mb_substr(old('agent_name', $agent->assistantDisplayName()), 0, 1)) }}</span><div><b><span id="theme-preview-assistant">{{ old('agent_name', $agent->assistantDisplayName()) }}</span> · <span id="theme-preview-header-business">{{ old('business_name', $agent->business_name ?: $organization->name) }}</span></b><small>● Online · Powered by Legatus</small></div></div>
-                            <div class="theme-preview-body"><p>გამარჯობა! როგორ დაგეხმაროთ?</p><p>მაჩვენე ყველაზე პოპულარული პროდუქტები</p></div>
-                            <button type="button">გაგზავნა ↑</button>
+                            <div class="theme-preview-body"><p>Hello! How can I help?</p><p>Show me your most popular products</p></div>
+                            <button type="button">Send ↑</button>
                         </div>
                     </div>
                     <small class="theme-status" id="widget-theme-status" aria-live="polite"></small>
@@ -103,7 +103,7 @@
                 <h3 style="margin-top:28px">Verified delivery policy</h3>
                 <p style="color:var(--muted);font-size:13px">Delivery promises are calculated from these server-owned rules, never from a model guess.</p>
                 <label>Timezone</label><input name="delivery_timezone" value="{{ old('delivery_timezone', $delivery['timezone'] ?? 'Asia/Tbilisi') }}" required>
-                <label>Local cities (comma-separated)</label><input name="delivery_local_cities" value="{{ old('delivery_local_cities', implode(', ', $delivery['local_cities'] ?? ['თბილისი', 'Tbilisi'])) }}" required>
+                <label>Local cities (comma-separated)</label><input name="delivery_local_cities" value="{{ old('delivery_local_cities', implode(', ', $delivery['local_cities'] ?? ['Tbilisi'])) }}" required>
                 <label>Daily cutoff</label><input name="delivery_cutoff" type="time" value="{{ old('delivery_cutoff', $delivery['cutoff'] ?? '18:00') }}" required>
                 <label>Local business days</label><input name="delivery_local_days" type="number" min="1" max="10" value="{{ old('delivery_local_days', $delivery['local_business_days'] ?? 1) }}" required>
                 <label>Regional minimum business days</label><input name="delivery_regional_min_days" type="number" min="1" max="30" value="{{ old('delivery_regional_min_days', $delivery['regional_min_business_days'] ?? 1) }}" required>

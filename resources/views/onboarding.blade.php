@@ -55,7 +55,7 @@
                 <div class="setup-step-head"><span>1</span><div><h2>Business and AI identity</h2><p>These are separate: the launcher uses the business name; the conversation uses the AI employee’s name.</p></div></div>
                 <div class="setup-grid">
                     <div><label for="business-name">Business name</label><input id="business-name" name="business_name" value="{{ $initialBusiness }}" required maxlength="120" placeholder="e.g. Bukinistebi.ge"></div>
-                    <div><label for="agent-name">AI employee name</label><input id="agent-name" name="agent_name" value="{{ $initialAssistant }}" required maxlength="80" placeholder="e.g. ანა"></div>
+                    <div><label for="agent-name">AI employee name</label><input id="agent-name" name="agent_name" value="{{ $initialAssistant }}" required maxlength="80" placeholder="e.g. Anna"></div>
                 </div>
                 <div class="identity-preview" aria-live="polite">
                     <span>Website button</span><strong id="launcher-preview">Ask {{ $initialBusiness }}</strong>

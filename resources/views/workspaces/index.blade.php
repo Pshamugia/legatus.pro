@@ -5,7 +5,7 @@
     @include('partials.workspace-navigation', ['active' => 'workspaces', 'variant' => 'topbar', 'organization' => $activeWorkspace, 'addBusinessUrl' => '#new-business'])
 
     <div class="topline">
-        <div><span class="eyebrow">Business workspaces</span><h1>თქვენი ბიზნესები · Your businesses</h1><p style="color:var(--muted)">თითოეულ ბიზნესს აქვს საკუთარი AI თანამშრომელი, ცოდნა, არხები და საუბრები.</p></div>
+        <div><span class="eyebrow">Business workspaces</span><h1>Your businesses</h1><p style="color:var(--muted)">Each business has its own AI employee, knowledge, channels, and conversations.</p></div>
     </div>
 
     @if(session('status'))<div class="panel" style="margin:18px 0;color:#267244">✓ {{ session('status') }}</div>@endif
@@ -53,7 +53,7 @@
 
         <form class="panel" id="new-business" method="post" action="{{ route('workspaces.store') }}">
             @csrf
-            <h3>ახალი ბიზნესის დამატება</h3>
+            <h3>Add a new business</h3>
             <p style="color:var(--muted);font-size:13px;line-height:1.55">Create an isolated workspace, then complete the same guided onboarding as your first business.</p>
             <label for="new-business-name">Business name</label>
             <input id="new-business-name" name="business_name" value="{{ old('business_name') }}" maxlength="120" required placeholder="e.g. My second store">

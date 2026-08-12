@@ -10,18 +10,18 @@
     </style>
 </head>
 <body><main class="shell">
-    <header class="top"><div class="brand"><span class="mark">L</span>Legatus</div><div><h1>Super Admin</h1><p>ბიზნესები, პაკეტები და გადახდის მდგომარეობა</p></div><div class="actions"><a class="btn" href="{{ route('dashboard') }}">Workspace →</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn">Log out</button></form></div></header>
+    <header class="top"><div class="brand"><span class="mark">L</span>Legatus</div><div><h1>Super Admin</h1><p>Businesses, plans, and payment status</p></div><div class="actions"><a class="btn" href="{{ route('dashboard') }}">Workspace →</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn">Log out</button></form></div></header>
     @if(session('status'))<div class="notice">{{ session('status') }}</div>@endif
     <section class="metrics">
-        <div class="metric"><span>სულ ბიზნესი</span><strong>{{ number_format($metrics['businesses']) }}</strong></div>
-        <div class="metric"><span>ამ თვეში ახალი</span><strong>{{ number_format($metrics['new_this_month']) }}</strong></div>
-        <div class="metric"><span>აქტიური</span><strong>{{ number_format($metrics['active']) }}</strong></div>
-        <div class="metric"><span>საცდელ პერიოდში</span><strong>{{ number_format($metrics['trialing']) }}</strong></div>
-        <div class="metric"><span>უფასო წვდომა</span><strong>{{ number_format($metrics['complimentary']) }}</strong></div>
-        <div class="metric"><span>საჭიროებს ყურადღებას</span><strong>{{ number_format($metrics['attention']) }}</strong></div>
+        <div class="metric"><span>Total businesses</span><strong>{{ number_format($metrics['businesses']) }}</strong></div>
+        <div class="metric"><span>New this month</span><strong>{{ number_format($metrics['new_this_month']) }}</strong></div>
+        <div class="metric"><span>Active</span><strong>{{ number_format($metrics['active']) }}</strong></div>
+        <div class="metric"><span>Trialing</span><strong>{{ number_format($metrics['trialing']) }}</strong></div>
+        <div class="metric"><span>Complimentary access</span><strong>{{ number_format($metrics['complimentary']) }}</strong></div>
+        <div class="metric"><span>Needs attention</span><strong>{{ number_format($metrics['attention']) }}</strong></div>
     </section>
-    <section class="panel"><div class="toolbar"><h2>რეგისტრირებული ბიზნესები</h2><span class="env">{{ $environment }}</span><form class="search" method="get"><input name="search" value="{{ $search }}" placeholder="ბიზნესი, მფლობელი ან ელფოსტა"><button>ძებნა</button></form></div>
-        <div class="table-wrap"><table><thead><tr><th>ბიზნესი</th><th>მფლობელი</th><th>რეგისტრაცია</th><th>პაკეტი</th><th>სტატუსი</th><th>უფასო წვდომა</th><th>საცდელი პერიოდი</th><th>გადახდის ვადა</th><th>Paddle</th></tr></thead><tbody>
+    <section class="panel"><div class="toolbar"><h2>Registered businesses</h2><span class="env">{{ $environment }}</span><form class="search" method="get"><input name="search" value="{{ $search }}" placeholder="Business, owner, or email"><button>Search</button></form></div>
+        <div class="table-wrap"><table><thead><tr><th>Business</th><th>Owner</th><th>Registered</th><th>Plan</th><th>Status</th><th>Complimentary access</th><th>Trial period</th><th>Payment due</th><th>Paddle</th></tr></thead><tbody>
         @forelse($organizations as $organization)
             @php
                 $owner = $organization->users->first(fn($user) => $user->pivot->role === 'owner') ?? $organization->users->first();
@@ -57,10 +57,10 @@
                     @endif
                 </td>
                 <td>{{ $subscription?->trial_ends_at?->timezone('Asia/Tbilisi')->format('d M Y, H:i') ?? '—' }}</td>
-                <td>{{ $subscription?->current_period_ends_at?->timezone('Asia/Tbilisi')->format('d M Y, H:i') ?? '—' }}@if($subscription?->current_period_ends_at?->isPast())<span class="subtext" style="color:#a14b35">ვადა გასულია</span>@endif</td>
+                <td>{{ $subscription?->current_period_ends_at?->timezone('Asia/Tbilisi')->format('d M Y, H:i') ?? '—' }}@if($subscription?->current_period_ends_at?->isPast())<span class="subtext" style="color:#a14b35">Expired</span>@endif</td>
                 <td><span class="subtext">{{ $subscription?->paddle_subscription_id ?? '—' }}</span></td>
             </tr>
-        @empty<tr><td colspan="9" class="empty">ბიზნესი ვერ მოიძებნა.</td></tr>@endforelse
+        @empty<tr><td colspan="9" class="empty">No businesses found.</td></tr>@endforelse
         </tbody></table></div><div class="pagination">{{ $organizations->links() }}</div>
     </section>
 </main></body></html>

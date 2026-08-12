@@ -107,13 +107,13 @@ class WidgetChannelTest extends TestCase
 
         $this->get('/app/channels')
             ->assertOk()
-            ->assertSeeInOrder(['ასწავლეთ', 'დაამატეთ საიტზე', 'დააკავშირეთ Meta'])
+            ->assertSeeInOrder(['Teach', 'Add to website', 'Connect Meta'])
             ->assertSee('Facebook Messenger')
             ->assertSee('Instagram Direct')
             ->assertSee('Connect Facebook')
             ->assertSee('Connect Instagram')
             ->assertSee(route('channels.meta.connect', ['provider' => 'meta']), false)
-            ->assertSee('Meta-ს ოფიციალურ გვერდზე')
+            ->assertSee("Meta's official page", false)
             ->assertDontSee('Paste token')
             ->assertDontSee('Webhook URL');
     }
@@ -139,8 +139,8 @@ class WidgetChannelTest extends TestCase
             ->assertOk()
             ->assertSee('data-channel="facebook" data-status="connected"', false)
             ->assertSee('Bukinistebi.ge')
-            ->assertSee('დაკავშირებულია')
-            ->assertSee('1/2 დაკავშირებული');
+            ->assertSee('Connected')
+            ->assertSee('1/2 connected');
 
         $this->get(route('dashboard'))
             ->assertOk()
@@ -169,8 +169,8 @@ class WidgetChannelTest extends TestCase
         $this->get('/app/channels')
             ->assertOk()
             ->assertSee('data-channel="instagram" data-status="error"', false)
-            ->assertSee('კავშირს ყურადღება სჭირდება')
-            ->assertSee('ხელახლა დაკავშირება')
+            ->assertSee('Connection needs attention')
+            ->assertSee('Reconnect')
             ->assertDontSee('secret-provider-value');
     }
 }

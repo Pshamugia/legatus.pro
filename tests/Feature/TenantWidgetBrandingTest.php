@@ -64,19 +64,19 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertSee('<title>Maya · Bukinistebi.ge</title>', false)
             ->assertSee('<b>Maya · Bukinistebi.ge</b>', false)
             ->assertSee('id="new-conversation"', false)
-            ->assertSee('ახალი საუბრის დაწყება')
+            ->assertSee('Start a new conversation')
             ->assertSee("clearToken();\n        window.location.reload();", false)
-            ->assertSee('მე ვარ Maya — Bukinistebi.ge-ის AI ასისტენტი')
+            ->assertSee("I'm Maya, the AI assistant for Bukinistebi.ge.")
             ->assertSee('Powered by Legatus')
             ->assertDontSee('Ask Maya');
 
         $this->get(route('chat.show', $agent))
             ->assertOk()
             ->assertSee('<strong>Maya · Bukinistebi.ge</strong>', false)
-            ->assertSee('მე ვარ Maya — Bukinistebi.ge-ის AI ასისტენტი')
+            ->assertSee("I'm Maya, the AI assistant for Bukinistebi.ge.")
             ->assertSee('Powered by Legatus')
-            ->assertSee('ფიქრობს…')
-            ->assertSee('გადამოწმებულ პასუხს ამზადებს…')
+            ->assertSee('is thinking…')
+            ->assertSee('is preparing a verified answer…')
             ->assertDontSee('Legatus is checking verified data');
     }
 
@@ -114,8 +114,8 @@ class TenantWidgetBrandingTest extends TestCase
         $this->get("/widget/{$agent->slug}")
             ->assertOk()
             ->assertSee('<b>AI Assistant · Bukinistebi.ge</b>', false)
-            ->assertSee('მე ვარ Bukinistebi.ge-ის AI ასისტენტი')
-            ->assertDontSee('მე ვარ Legatus');
+            ->assertSee("I'm the AI assistant for Bukinistebi.ge.")
+            ->assertDontSee("I'm Legatus");
 
         config([
             'services.openai.key' => null,
@@ -135,8 +135,8 @@ class TenantWidgetBrandingTest extends TestCase
         $this->get("/widget/{$agent->slug}")
             ->assertOk()
             ->assertSee('<b>AI Assistant · Bukinistebi.ge</b>', false)
-            ->assertSee('მე ვარ Bukinistebi.ge-ის AI ასისტენტი')
-            ->assertDontSee('მე ვარ AI Assistant');
+            ->assertSee("I'm the AI assistant for Bukinistebi.ge.")
+            ->assertDontSee("I'm AI Assistant");
     }
 
     private function brandedAgent(): Agent

@@ -11,8 +11,8 @@
         <div class="topline channels-heading">
             <div>
                 <span class="eyebrow">Simple channel setup</span>
-                <h1>გაუშვით Legatus 3 ნაბიჯში</h1>
-                <p>პროგრამირება არ გჭირდებათ — დააკოპირეთ ერთი script და დააკავშირეთ თქვენი სოციალური ანგარიშები.</p>
+                <h1>Launch Legatus in 3 steps</h1>
+                <p>No coding required — copy one script and connect your social accounts.</p>
             </div>
             @if($widgetEnabled)
                 <a class="btn ghost" href="{{ route('widget.frame', $agent) }}" target="_blank" rel="noopener">Preview website chat ↗</a>
@@ -24,13 +24,13 @@
         @if(session('success') || session('channel_success') || session('commerce_success') || session('status'))
             <div class="channel-alert channel-alert--success" role="status">
                 <span>✓</span>
-                <div><b>მზადაა</b><p>{{ session('success') ?? session('channel_success') ?? session('commerce_success') ?? session('status') }}</p></div>
+                <div><b>Ready</b><p>{{ session('success') ?? session('channel_success') ?? session('commerce_success') ?? session('status') }}</p></div>
             </div>
         @endif
         @foreach((array) session('warnings', []) as $warning)
             <div class="channel-alert channel-alert--error" role="alert">
                 <span>!</span>
-                <div><b>წყაროს შემოწმება სჭირდება · Source needs attention</b><p>{{ $warning }}</p></div>
+                <div><b>Source needs attention</b><p>{{ $warning }}</p></div>
             </div>
         @endforeach
         @foreach($failedKnowledgeSources as $failedSource)
@@ -42,22 +42,22 @@
         @if(session('error') || session('channel_error') || session('commerce_error'))
             <div class="channel-alert channel-alert--error" role="alert">
                 <span>!</span>
-                <div><b>დაკავშირება ვერ დასრულდა</b><p>{{ session('error') ?? session('channel_error') ?? session('commerce_error') }}</p></div>
+                <div><b>Connection could not be completed</b><p>{{ session('error') ?? session('channel_error') ?? session('commerce_error') }}</p></div>
             </div>
         @endif
 
-        <ol class="setup-progress" aria-label="დაყენების სამი ნაბიჯი">
+        <ol class="setup-progress" aria-label="Three setup steps">
             <li class="{{ $productCount > 0 ? 'is-ready' : '' }}">
                 <span>1</span>
-                <div><b>ასწავლეთ</b><small>კატალოგი და წესები</small></div>
+                <div><b>Teach</b><small>Catalog and policies</small></div>
             </li>
             <li>
                 <span>2</span>
-                <div><b>დაამატეთ საიტზე</b><small>ერთი script</small></div>
+                <div><b>Add to website</b><small>One script</small></div>
             </li>
             <li class="{{ $connectedMetaCount > 0 ? 'is-ready' : '' }}">
                 <span>3</span>
-                <div><b>დააკავშირეთ Meta</b><small>Facebook და Instagram</small></div>
+                <div><b>Connect Meta</b><small>Facebook and Instagram</small></div>
             </li>
         </ol>
 
@@ -67,19 +67,19 @@
                 <div class="section-heading">
                     <div>
                         <span class="eyebrow">Knowledge</span>
-                        <h2 id="knowledge-step-title">მიეცით Legatus-ს თქვენი ბიზნესის ცოდნა</h2>
-                        <p>ატვირთეთ კატალოგი ან მიუთითეთ საიტი. პასუხები დაეფუძნება მხოლოდ თქვენს ფასებს, მარაგსა და წესებს.</p>
+                        <h2 id="knowledge-step-title">Give Legatus your business knowledge</h2>
+                        <p>Upload a catalog or provide your website. Answers will be grounded only in your prices, inventory and policies.</p>
                     </div>
                     @if($productCount > 0)
-                        <span class="status-badge status-badge--connected">✓ მზადაა</span>
+                        <span class="status-badge status-badge--connected">✓ Ready</span>
                     @else
-                        <span class="status-badge">არ არის მზად · 0 პროდუქტი</span>
+                        <span class="status-badge">Not ready · 0 products</span>
                     @endif
                 </div>
                 <div class="knowledge-summary">
-                    <div><strong>{{ number_format($productCount) }}</strong><span>აქტიური პროდუქტი</span></div>
-                    <div><strong>{{ number_format($knowledgeSourceCount) }}</strong><span>ცოდნის წყარო</span></div>
-                    <a class="btn ghost" href="{{ route('knowledge.index') }}">ცოდნის მართვა →</a>
+                    <div><strong>{{ number_format($productCount) }}</strong><span>Active products</span></div>
+                    <div><strong>{{ number_format($knowledgeSourceCount) }}</strong><span>Knowledge sources</span></div>
+                    <a class="btn ghost" href="{{ route('knowledge.index') }}">Manage knowledge →</a>
                 </div>
 
                 <div class="commerce-setup" id="commerce-connection">
@@ -87,22 +87,22 @@
                         <div>
                             <span class="eyebrow">{{ in_array($catalogConnectionState, ['live', 'attention'], true) ? 'Live product catalog' : 'Product catalog' }}</span>
                             @if($catalogConnectionState === 'available')
-                                <h3>თქვენი კატალოგი უკვე ხელმისაწვდომია</h3>
-                                <p>Legatus იყენებს თქვენს {{ number_format($productCount) }} აქტიურ პროდუქტს. ცალკე Live API კავშირი მხოლოდ მაშინ არის საჭირო, თუ ფასისა და მარაგის პირდაპირ, რეალურ დროში სინქრონიზაცია გსურთ.</p>
+                                <h3>Your catalog is already available</h3>
+                                <p>Legatus is using your {{ number_format($productCount) }} active {{ \Illuminate\Support\Str::plural('product', $productCount) }}. A separate Live API connection is only needed for direct, real-time price and inventory synchronization.</p>
                             @else
-                                <h3>დააკავშირეთ თქვენი ონლაინ მაღაზია</h3>
-                                <p>Legatus უსაფრთხოდ ამოწმებს ფასს, მარაგსა და კატალოგს პირდაპირ თქვენს მაღაზიაში. კავშირი მხოლოდ წარმატებული შემოწმების შემდეგ შეინახება.</p>
+                                <h3>Connect your online store</h3>
+                                <p>Legatus securely checks prices, inventory and catalog data directly from your store. The connection is saved only after successful verification.</p>
                             @endif
                         </div>
                         <span data-catalog-status="{{ $catalogConnectionState }}" class="status-badge {{ in_array($catalogConnectionState, ['live', 'available'], true) ? 'status-badge--connected' : '' }}">
                             @if($catalogConnectionState === 'live')
-                                ✓ Live API დაკავშირებულია
+                                ✓ Live API connected
                             @elseif($catalogConnectionState === 'attention')
-                                ყურადღება სჭირდება
+                                Needs attention
                             @elseif($catalogConnectionState === 'available')
-                                ✓ კატალოგი ხელმისაწვდომია
+                                ✓ Catalog available
                             @else
-                                კატალოგი არ არის დამატებული
+                                Catalog not added
                             @endif
                         </span>
                     </div>
@@ -110,19 +110,19 @@
                     @if($commerceConnection)
                         <div class="commerce-status" data-commerce-status="{{ $commerceConnection->status }}">
                             <div>
-                                <span>წყარო</span>
+                                <span>Source</span>
                                 <b>{{ $commerceConnection->name ?: 'Connected store' }}</b>
                                 <small>{{ parse_url($commerceConnection->base_url, PHP_URL_HOST) }}</small>
                             </div>
                             <div>
-                                <span>აქტიური პროდუქტები</span>
+                                <span>Active products</span>
                                 <b>{{ number_format($commerceProductCount) }}</b>
-                                <small>Live catalog-იდან</small>
+                                <small>From the live catalog</small>
                             </div>
                             <div>
-                                <span>ბოლო სინქრონიზაცია</span>
-                                <b>{{ $commerceConnection->last_sync_at?->diffForHumans() ?? 'ჯერ არ დასრულებულა' }}</b>
-                                <small>{{ $commerceConnection->status === 'error' ? 'ბოლო ცდას პრობლემა ჰქონდა' : 'ყოველ საათში ახლდება' }}</small>
+                                <span>Last synchronization</span>
+                                <b>{{ $commerceConnection->last_sync_at?->diffForHumans() ?? 'Not completed yet' }}</b>
+                                <small>{{ $commerceConnection->status === 'error' ? 'The last attempt encountered a problem' : 'Updates every hour' }}</small>
                             </div>
                         </div>
 
@@ -130,11 +130,11 @@
                             <div class="commerce-actions">
                                 <form method="POST" action="{{ route('channels.commerce.sync') }}">
                                     @csrf
-                                    <button class="btn lime" type="submit">ახლავე სინქრონიზაცია</button>
+                                    <button class="btn lime" type="submit">Sync now</button>
                                 </form>
                                 <details>
-                                    <summary>კავშირის შეცვლა</summary>
-                                    <p>ახალი მონაცემები ჯერ შემოწმდება; წარუმატებელი ცდა არსებულ კავშირს არ შეცვლის.</p>
+                                    <summary>Change connection</summary>
+                                    <p>New data is verified first; a failed attempt will not replace the existing connection.</p>
                                 </details>
                             </div>
                         @endif
@@ -144,11 +144,11 @@
                         @unless($commerceConnection)
                             <div class="catalog-onboarding-choice">
                                 @if($catalogConnectionState === 'available')
-                                    <div><b>მოქმედი კატალოგი</b><p>პროდუქტების და მათი წყაროების ნახვა ან განახლება ცოდნის გვერდიდან შეგიძლიათ.</p></div>
-                                    <a class="btn ghost" href="{{ route('knowledge.index') }}">კატალოგის მართვა →</a>
+                                    <div><b>Active catalog</b><p>View or update products and their sources from the Knowledge page.</p></div>
+                                    <a class="btn ghost" href="{{ route('knowledge.index') }}">Manage catalog →</a>
                                 @else
-                                    <div><b>კატალოგის დამატება კოდის გარეშე</b><p>მიუთითეთ თქვენი საჯარო საიტი ან პროდუქტის კატალოგის მისამართი.</p></div>
-                                    <a class="btn ghost" href="{{ route('onboarding') }}#catalog-url">კატალოგის დამატება →</a>
+                                    <div><b>Add a catalog without code</b><p>Provide your public website or product catalog URL.</p></div>
+                                    <a class="btn ghost" href="{{ route('onboarding') }}#catalog-url">Add catalog →</a>
                                 @endif
                             </div>
                         @endunless
@@ -156,23 +156,23 @@
                             <summary><span>Advanced</span> Custom store / developer integration</summary>
                             @unless($commerceConnection?->status === 'active')
                                 <div class="connector-guide">
-                                    <b>ეს ნაწილი განკუთვნილია მხოლოდ custom მაღაზიის ტექნიკური ინტეგრაციისთვის</b>
-                                    <p>Connector Key ID და Shared secret არ არის OpenAI-ის ან Facebook-ის გასაღები — მას მაღაზიის connector ქმნის. Bukinistebi/Laravel connector-ზე სერვერის Terminal-ში ერთხელ გაუშვით:</p>
+                                    <b>This section is only for a custom store's technical integration</b>
+                                    <p>Connector Key ID and Shared secret are not OpenAI or Facebook credentials — they are created by the store connector. For a Bukinistebi/Laravel connector, run this once in the server terminal:</p>
                                     <code>php artisan legatus:connector-setup --write</code>
-                                    <p>ჩვეულებრივ ბიზნეს მომხმარებელს ამ ველების შევსება არ სჭირდება. Shared secret პაროლივით დაიცავით.</p>
+                                    <p>Regular business users do not need to complete these fields. Protect the Shared secret like a password.</p>
                                 </div>
                             @endunless
                             <form class="commerce-form" method="POST" action="{{ route('channels.commerce.connect') }}" autocomplete="off">
                             @csrf
                             <div class="field commerce-form__wide">
-                                <label for="commerce-name">წყაროს სახელი <small>(არასავალდებულო)</small></label>
-                                <input id="commerce-name" name="name" type="text" maxlength="120" placeholder="მაგ. Bukinistebi live catalog">
+                                <label for="commerce-name">Source name <small>(optional)</small></label>
+                                <input id="commerce-name" name="name" type="text" maxlength="120" placeholder="e.g. Bukinistebi live catalog">
                                 @error('name', 'commerce')<small class="field-error">{{ $message }}</small>@enderror
                             </div>
                             <div class="field commerce-form__wide">
-                                <label for="commerce-base-url">მაღაზიის HTTPS მისამართი</label>
+                                <label for="commerce-base-url">Store HTTPS address</label>
                                 <input id="commerce-base-url" name="base_url" type="url" maxlength="500" required placeholder="https://your-store.example" inputmode="url">
-                                <small>ჩაწერეთ მხოლოდ მთავარი მისამართი — ბილიკის გარეშე.</small>
+                                <small>Enter only the main address, without a path.</small>
                                 @error('base_url', 'commerce')<small class="field-error">{{ $message }}</small>@enderror
                             </div>
                             <div class="field">
@@ -183,12 +183,12 @@
                             <div class="field">
                                 <label for="commerce-secret">Shared secret</label>
                                 <input id="commerce-secret" name="secret" type="password" minlength="32" maxlength="512" required autocomplete="new-password" spellcheck="false">
-                                <small>მინიმუმ 32 სიმბოლო. Legatus მას შიფრავს და აღარასოდეს აჩვენებს.</small>
+                                <small>At least 32 characters. Legatus encrypts it and never displays it again.</small>
                                 @error('secret', 'commerce')<small class="field-error">{{ $message }}</small>@enderror
                             </div>
                             <div class="commerce-form__footer">
-                                <span>🔒 მონაცემები შეინახება მხოლოდ კავშირის და კატალოგის წარმატებული შემოწმების შემდეგ.</span>
-                                <button class="btn dark" type="submit">{{ $commerceConnection ? 'შემოწმება და კავშირის შეცვლა' : 'შემოწმება და დაკავშირება' }}</button>
+                                <span>🔒 Data is saved only after the connection and catalog are successfully verified.</span>
+                                <button class="btn dark" type="submit">{{ $commerceConnection ? 'Verify and change connection' : 'Verify and connect' }}</button>
                             </div>
                             </form>
                         </details>
@@ -196,18 +196,18 @@
                         @if($commerceConnection)
                             <div class="commerce-disconnect">
                                 <details>
-                                    <summary>მაღაზიის გათიშვა</summary>
-                                    <p>გათიშვისას ამ წყაროდან იმპორტირებული პროდუქტები ჩატში დაუყოვნებლივ გაითიშება.</p>
+                                    <summary>Disconnect store</summary>
+                                    <p>Products imported from this source will be disabled in chat immediately.</p>
                                     <form method="POST" action="{{ route('channels.commerce.disconnect') }}">
                                         @csrf
                                         @method('DELETE')
-                                        <button class="link-button" type="submit">გათიშეთ მაღაზია</button>
+                                        <button class="link-button" type="submit">Disconnect store</button>
                                     </form>
                                 </details>
                             </div>
                         @endif
                     @else
-                        <p class="commerce-readonly">კავშირის შეცვლა მხოლოდ ბიზნესის owner-ს ან admin-ს შეუძლია.</p>
+                        <p class="commerce-readonly">Only a business owner or admin can change the connection.</p>
                     @endif
                 </div>
             </div>
@@ -219,8 +219,8 @@
                 <div class="section-heading">
                     <div>
                         <span class="eyebrow">Website widget</span>
-                        <h2 id="website-step-title">ჩასვით ერთი script თქვენს საიტზე</h2>
-                        <p>ერთხელ ჩასვით კოდი <code>&lt;/body&gt;</code>-ს წინ. ჩატი ყველა გვერდზე ავტომატურად გამოჩნდება და განახლებები ხელახლა ჩასმას აღარ მოითხოვს.</p>
+                        <h2 id="website-step-title">Add one script to your website</h2>
+                        <p>Add the code once before <code>&lt;/body&gt;</code>. Chat appears automatically on every page, and updates never require reinstalling the script.</p>
                     </div>
                     <span class="status-badge {{ $widgetEnabled ? 'status-badge--connected' : 'status-badge--off' }}">
                         {{ $widgetEnabled ? '● Website chat ON' : '○ Website chat OFF' }}
@@ -264,7 +264,7 @@
                 <p class="copy-feedback" id="copy-feedback" aria-live="polite"></p>
                 @if($widgetDomains->isNotEmpty())
                     <div class="trusted-domains">
-                        <span>🔒 უსაფრთხოდ დაშვებული დომენი</span>
+                        <span>🔒 Securely allowed domain</span>
                         @foreach($widgetDomains as $domain)
                             <code>{{ $domain }}</code>
                         @endforeach
@@ -272,9 +272,9 @@
                 @endif
 
                 <div class="install-benefits">
-                    <div><span>01</span><b>კონფლიქტის გარეშე</b><small>Widget იზოლირებულია თქვენი საიტის დიზაინისგან.</small></div>
-                    <div><span>02</span><b>მობილურზე მზადაა</b><small>ჩატი ავტომატურად ერგება პატარა ეკრანს.</small></div>
-                    <div><span>03</span><b>ერთიანი inbox</b><small>ვებ-საუბრები Legatus-ის Inbox-ში ინახება.</small></div>
+                    <div><span>01</span><b>Conflict-free</b><small>The widget is isolated from your website design.</small></div>
+                    <div><span>02</span><b>Mobile-ready</b><small>Chat automatically adapts to smaller screens.</small></div>
+                    <div><span>03</span><b>One inbox</b><small>Website conversations are stored in the Legatus Inbox.</small></div>
                 </div>
             </div>
         </section>
@@ -285,11 +285,11 @@
                 <div class="section-heading">
                     <div>
                         <span class="eyebrow">Facebook + Instagram</span>
-                        <h2 id="social-step-title">დააკავშირეთ სოციალური არხები</h2>
-                        <p>შედით Meta ანგარიშით, აირჩიეთ გვერდი და დაადასტურეთ წვდომა. ტექნიკურ პარამეტრებს Legatus თავად მართავს.</p>
+                        <h2 id="social-step-title">Connect social channels</h2>
+                        <p>Sign in with Meta, choose a Page and approve access. Legatus handles the technical configuration for you.</p>
                     </div>
                     <span class="status-badge {{ $connectedMetaCount === 2 ? 'status-badge--connected' : '' }}">
-                        {{ $connectedMetaCount }}/2 დაკავშირებული
+                        {{ $connectedMetaCount }}/2 connected
                     </span>
                 </div>
 
@@ -317,10 +317,10 @@
                                     <span class="connection-status connection-status--{{ $channel['status'] }}">
                                         <i></i>
                                         @switch($channel['status'])
-                                            @case('connected') დაკავშირებულია @break
-                                            @case('pending') დაკავშირება სრულდება @break
-                                            @case('error') კავშირს ყურადღება სჭირდება @break
-                                            @default არ არის დაკავშირებული
+                                            @case('connected') Connected @break
+                                            @case('pending') Connection in progress @break
+                                            @case('error') Connection needs attention @break
+                                            @default Not connected
                                         @endswitch
                                     </span>
                                 </div>
@@ -330,39 +330,39 @@
 
                             @if($channel['connected'])
                                 <div class="connected-account">
-                                    <span>დაკავშირებული ანგარიში</span>
+                                    <span>Connected account</span>
                                     <b>{{ $channel['account_name'] ?: 'Meta business account' }}</b>
                                     <small>
                                         @if($channel['last_webhook_at'])
-                                            ბოლო აქტივობა {{ $channel['last_webhook_at']->diffForHumans() }}
+                                            Last activity {{ $channel['last_webhook_at']->diffForHumans() }}
                                         @else
-                                            მზადაა პირველი შეტყობინების მისაღებად
+                                            Ready to receive the first message
                                         @endif
                                     </small>
                                 </div>
                                 <div class="channel-actions">
-                                    <a class="btn ghost" href="{{ route('inbox.index') }}">Inbox-ის გახსნა</a>
+                                    <a class="btn ghost" href="{{ route('inbox.index') }}">Open Inbox</a>
                                     @if($channel['disconnect_url'])
                                         <form action="{{ $channel['disconnect_url'] }}" method="POST">
                                             @csrf
                                             @method('DELETE')
-                                            <button class="link-button" type="submit">გათიშვა</button>
+                                            <button class="link-button" type="submit">Disconnect</button>
                                         </form>
                                     @endif
                                 </div>
                             @else
                                 @if($channel['error'])
-                                    <div class="connection-error" role="alert"><b>დაკავშირების პრობლემა</b><span>{{ $channel['error'] }}</span></div>
+                                    <div class="connection-error" role="alert"><b>Connection problem</b><span>{{ $channel['error'] }}</span></div>
                                 @endif
 
                                 @if($channel['connect_url'])
                                     <a class="connect-button connect-button--{{ $channel['provider'] }}" href="{{ $channel['connect_url'] }}">
                                         <span>{{ $channel['icon'] }}</span>
-                                        {{ $channel['status'] === 'error' ? 'ხელახლა დაკავშირება' : 'Connect '.$channel['short_name'] }}
+                                        {{ $channel['status'] === 'error' ? 'Reconnect' : 'Connect '.$channel['short_name'] }}
                                     </a>
                                 @else
                                     <button class="connect-button" type="button" disabled>Connector setup required</button>
-                                    <small class="connector-note">ამ გარემოში Meta connector ჯერ არ არის კონფიგურირებული.</small>
+                                    <small class="connector-note">The Meta connector is not configured in this environment yet.</small>
                                 @endif
                             @endif
                         </article>
@@ -371,7 +371,7 @@
 
                 <div class="meta-reassurance">
                     <span>🔒</span>
-                    <p><b>უსაფრთხო დაკავშირება</b> — ავტორიზაცია ხდება Meta-ს ოფიციალურ გვერდზე. Legatus თქვენს პაროლს არასდროს ხედავს.</p>
+                    <p><b>Secure connection</b> — authorization happens on Meta's official page. Legatus never sees your password.</p>
                 </div>
             </div>
         </section>
@@ -397,14 +397,14 @@
         try {
             await navigator.clipboard.writeText(snippet.textContent.trim());
             button.textContent = 'Copied ✓';
-            feedback.textContent = 'Script დაკოპირებულია — ჩასვით თქვენი საიტის </body> ტეგამდე.';
+            feedback.textContent = 'Script copied — paste it before your website\'s </body> tag.';
         } catch (error) {
             const selection = window.getSelection();
             const range = document.createRange();
             range.selectNodeContents(snippet);
             selection.removeAllRanges();
             selection.addRange(range);
-            feedback.textContent = 'კოდი მონიშნულია — დააჭირეთ Ctrl+C ან ⌘+C.';
+            feedback.textContent = 'Code selected — press Ctrl+C or ⌘+C.';
         }
 
         window.setTimeout(() => {

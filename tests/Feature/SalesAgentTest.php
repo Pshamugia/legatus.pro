@@ -19,7 +19,16 @@ class SalesAgentTest extends TestCase
 
     public function test_landing_page_is_available(): void
     {
-        $this->get('/')->assertOk()->assertSee('Every conversation');
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('You imagine. We')
+            ->assertSee('Legatus is an AI platform that manages content and sales on your behalf.')
+            ->assertSee('Launch in 3 simple steps')
+            ->assertSee('Connect your website')
+            ->assertSee('Turn on your channels')
+            ->assertSee('Delegate the routine')
+            ->assertSee('@media(max-width:600px)', false)
+            ->assertDontSee('პროდუქტი');
     }
 
     public function test_demo_agent_answers_and_persists_a_conversation(): void
