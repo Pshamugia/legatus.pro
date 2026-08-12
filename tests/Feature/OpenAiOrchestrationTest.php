@@ -551,6 +551,14 @@ class OpenAiOrchestrationTest extends TestCase
             'name' => 'ხელმისაწვდომი წიგნი', 'sku' => 'BUDGET-16', 'search_text' => 'ხელმისაწვდომი წიგნი',
             'price' => 16, 'stock' => 1, 'is_active' => true, 'metadata' => ['source_id' => $source->id],
         ]);
+        $secondAffordable = $agent->products()->create([
+            'name' => 'მეორე ხელმისაწვდომი წიგნი', 'sku' => 'BUDGET-15', 'search_text' => 'მეორე ხელმისაწვდომი წიგნი',
+            'price' => 15, 'stock' => 1, 'is_active' => true, 'metadata' => ['source_id' => $source->id],
+        ]);
+        $thirdAffordable = $agent->products()->create([
+            'name' => 'მესამე ხელმისაწვდომი წიგნი', 'sku' => 'BUDGET-12', 'search_text' => 'მესამე ხელმისაწვდომი წიგნი',
+            'price' => 12, 'stock' => 1, 'is_active' => true, 'metadata' => ['source_id' => $source->id],
+        ]);
         $expensive = $agent->products()->create([
             'name' => 'ძვირი წიგნი', 'sku' => 'BUDGET-18', 'search_text' => 'ძვირი წიგნი',
             'price' => 18, 'stock' => 1, 'is_active' => true, 'metadata' => ['source_id' => $source->id],
@@ -567,7 +575,9 @@ class OpenAiOrchestrationTest extends TestCase
                         'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'budget-call',
                         'arguments' => json_encode([
                             'query' => '', 'budget' => 17, 'quantity' => null,
-                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 5,
+                            // A weak model choice must not reduce an open
+                            // budget recommendation to one product card.
+                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 1,
                         ]),
                     ]], 'usage' => []]);
                 }
@@ -585,7 +595,10 @@ class OpenAiOrchestrationTest extends TestCase
 
         $reply = app(SalesAgentService::class)->reply($agent, 'დაახლოებით 17 ლარის ფარგლებში რა წიგნებს მირჩევ?', $conversation);
 
-        $this->assertSame([$affordable->id], $reply['products']->pluck('id')->all());
+        $this->assertEqualsCanonicalizing(
+            [$affordable->id, $secondAffordable->id, $thirdAffordable->id],
+            $reply['products']->pluck('id')->all(),
+        );
         $this->assertNotContains($expensive->id, $reply['products']->pluck('id')->all());
         $this->assertContains('recommend_products', $reply['tools_used']);
         $this->assertStringContainsString('ბიუჯეტის ფარგლებში', $reply['text']);
@@ -674,6 +687,26 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([], $reply['products']->all());
         $this->assertNotContains('recommend_products', $reply['tools_used']);
         $this->assertNull(data_get($conversation->fresh()->context, 'pending_budget_request'));
+    }
+
+    public function test_a_new_turn_cannot_receive_the_previous_answer_verbatim(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'repeat-guard-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $repeated = 'ამ მოთხოვნასთან შესაბამისი პროდუქტი ვერ ვიპოვე.';
+        $conversation->messages()->create(['role' => 'assistant', 'content' => $repeated]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'არ გესმის რა გითხარი?']);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $reason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => $repeated, 'intent' => 'clarification', 'confidence' => .99,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ], collect());
+
+        $this->assertStringContainsString('repeated the previous assistant answer', $reason);
     }
 
     public function test_quantity_correction_reuses_the_budget_and_replaces_the_failed_bundle_size(): void

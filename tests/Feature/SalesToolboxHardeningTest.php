@@ -869,6 +869,32 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([$next->id], collect($result['unavailable_products'])->pluck('id')->all());
     }
 
+    public function test_occasion_preferences_rank_but_do_not_eliminate_relevant_budget_options(): void
+    {
+        [$agent, $first, $conversation] = $this->context(stock: 3);
+        $first->update([
+            'name' => 'Gift Edition', 'category' => 'Books',
+            'description' => 'A special gift-ready edition', 'search_text' => 'Gift Edition Books',
+            'price' => 15,
+        ]);
+        foreach ([['Second Book', 22], ['Third Book', 28]] as [$name, $price]) {
+            $agent->products()->create([
+                'name' => $name, 'category' => 'Books', 'search_text' => $name.' Books',
+                'price' => $price, 'stock' => 2, 'is_active' => true,
+            ]);
+        }
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'Books', 'budget' => 100, 'quantity' => null,
+            'category' => null, 'mood' => null, 'occasion' => 'gift',
+            'limit' => 3, 'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertCount(3, $result['recommendations']);
+        $this->assertSame($first->id, $result['recommendations'][0]['id']);
+        $this->assertLessThanOrEqual(100, collect($result['recommendations'])->max('price'));
+    }
+
     public function test_long_storefront_typo_suggestion_is_accepted_but_unrelated_names_are_rejected(): void
     {
         $method = new \ReflectionMethod(SalesToolbox::class, 'validatedSearchSuggestion');

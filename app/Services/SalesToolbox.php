@@ -396,9 +396,17 @@ class SalesToolbox
 
     private function recommend(Agent $agent, Conversation $c, array $a): array
     {
-        $criteria = trim(implode(' ', array_filter([$a['query'], $a['category'], $a['mood'], $a['occasion']])));
+        // Query/category/mood describe the requested product fit. Occasion
+        // describes why it may be a good choice and is a ranking preference,
+        // not an exact catalogue term every candidate must literally contain.
+        $criteria = trim(implode(' ', array_filter([$a['query'], $a['category'], $a['mood']])));
+        $preferenceCriteria = trim((string) ($a['occasion'] ?? ''));
         $termGroups = array_values(array_filter(
             $this->searchTermGroups($criteria),
+            fn (array $variants): bool => ! ctype_digit((string) ($variants[0] ?? '')),
+        ));
+        $preferenceTermGroups = array_values(array_filter(
+            $this->searchTermGroups($preferenceCriteria),
             fn (array $variants): bool => ! ctype_digit((string) ($variants[0] ?? '')),
         ));
         $taxonomyProductIds = $this->authoritativeTaxonomyProductIds(
@@ -447,7 +455,7 @@ class SalesToolbox
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }
-        $ranked = $query->get()->map(function ($p) use ($termGroups, $a, $c) {
+        $ranked = $query->get()->map(function ($p) use ($termGroups, $preferenceTermGroups, $a, $c) {
             $matched = collect($termGroups)
                 ->filter(fn (array $variants): bool => $this->productMatchesTermGroup($p, $variants))
                 ->map(fn (array $variants): string => (string) ($variants[0] ?? ''))
@@ -460,7 +468,8 @@ class SalesToolbox
             // recent products for weak/no matches, so every recommendation
             // must still match the customer's actual words in verified data.
             $relevance = $this->productSearchScore($p, $termGroups);
-            $score = $relevance + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
+            $preferenceScore = $this->productSearchScore($p, $preferenceTermGroups);
+            $score = $relevance + $preferenceScore + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
 
             $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'taxonomy' => array_values(array_filter((array) data_get($p->metadata, 'taxonomy', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance, '_matched_groups' => $matched->count()];
             if ($result['stock_precision'] === 'exact') {

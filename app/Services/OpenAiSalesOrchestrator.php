@@ -211,6 +211,24 @@ class OpenAiSalesOrchestrator
             $outputs = [];
             foreach ($calls as $call) {
                 $args = json_decode($call['arguments'] ?? '{}', true) ?: [];
+                if ($call['name'] === 'recommend_products') {
+                    // The model owns the conversational interpretation, but a
+                    // verified shopping promise must not collapse into a
+                    // single arbitrary card. Preserve server-parsed numeric
+                    // constraints and request a useful shortlist unless the
+                    // customer explicitly asked for an exact quantity.
+                    if ($budgetConstraint !== null) {
+                        $args['budget'] = $budgetConstraint;
+                    }
+                    if ($quantityConstraint !== null) {
+                        $args['quantity'] = $quantityConstraint;
+                        $args['limit'] = max($quantityConstraint, (int) ($args['limit'] ?? 0));
+                    } else {
+                        $args['quantity'] = null;
+                        $args['limit'] = max(3, (int) ($args['limit'] ?? 0));
+                    }
+                    $args['limit'] = min(5, $args['limit']);
+                }
                 $semanticResolution = collect($used)->firstWhere('name', 'resolve_catalog_context');
                 if (is_array($semanticResolution) && in_array($call['name'], ['search_products', 'recommend_products'], true)) {
                     $args['query'] = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
@@ -1358,6 +1376,16 @@ class OpenAiSalesOrchestrator
 
     private function guardrailReason(Agent $agent, Conversation $conversation, array $data, Collection $used): ?string
     {
+        $previousAssistantText = $conversation->messages()
+            ->where('role', 'assistant')
+            ->latest('id')
+            ->value('content');
+        if (is_string($previousAssistantText)
+            && Str::squish($previousAssistantText) !== ''
+            && Str::squish($previousAssistantText) === Str::squish((string) ($data['text'] ?? ''))) {
+            return 'The response merely repeated the previous assistant answer instead of handling the new dialogue turn.';
+        }
+
         $failedTool = $used->first(fn ($call) => array_key_exists('ok', $call['result'] ?? []) && ($call['result']['ok'] ?? false) !== true);
         if ($failedTool) {
             return 'Verification tool '.$failedTool['name'].' did not complete successfully.';
