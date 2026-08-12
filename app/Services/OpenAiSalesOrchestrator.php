@@ -244,7 +244,9 @@ class OpenAiSalesOrchestrator
                         $args['limit'] = max($quantityConstraint, (int) ($args['limit'] ?? 0));
                     } else {
                         $args['quantity'] = null;
-                        $args['limit'] = max(3, (int) ($args['limit'] ?? 0));
+                        $args['limit'] = $budgetConstraint !== null
+                            ? 5
+                            : max(3, (int) ($args['limit'] ?? 0));
                     }
                     // A semantically broad request (for example, the customer
                     // explicitly accepts any category, or gives only a budget)
@@ -426,17 +428,17 @@ class OpenAiSalesOrchestrator
             $data['text'] = $quantityRequested && $bundleComplete
                 ? $this->budgetBundleText($budgetRecommendations, (float) $bundleTotal, $budgetConstraint, $georgian)
                 : (! $quantityRequested
-                    ? ($georgian ? 'თქვენი ბიუჯეტის ფარგლებში შესაბამისი ხელმისაწვდომი ვარიანტები შევარჩიე. შეგიძლიათ ქვემოთ შეადაროთ.' : 'I found verified available options within your budget. You can compare them below.')
+                    ? $this->openBudgetBundleText($budgetRecommendations, (float) $bundleTotal, $budgetConstraint, $georgian)
                     : $data['text']);
             $data['intent'] = 'recommendation';
             $data['confidence'] = 1;
             $data['handoff'] = false;
             $data['escalation_reason'] = null;
             $data['product_ids'] = $budgetRecommendations->pluck('id')->all();
-            $data['factual_claims'] = $quantityRequested && $bundleComplete ? $budgetRecommendations->map(fn (array $product): array => [
+            $data['factual_claims'] = $bundleComplete ? $budgetRecommendations->map(fn (array $product): array => [
                 'type' => 'price', 'product_id' => (int) $product['id'],
                 'amount' => (float) $product['price'], 'quantity' => null, 'reference' => null,
-            ])->push(['type' => 'offer', 'product_id' => null, 'amount' => (float) $bundleTotal, 'quantity' => $quantityConstraint, 'reference' => null])
+            ])->push(['type' => 'offer', 'product_id' => null, 'amount' => (float) $bundleTotal, 'quantity' => $quantityConstraint ?? $budgetRecommendations->count(), 'reference' => null])
                 ->push(['type' => 'budget', 'product_id' => null, 'amount' => $budgetConstraint, 'quantity' => null, 'reference' => null])->all()
                 : $budgetRecommendations->map(fn (array $product): array => ['type' => 'product', 'product_id' => (int) $product['id'], 'amount' => null, 'quantity' => null, 'reference' => null])->all();
             if (! $quantityRequested || $bundleComplete) {
@@ -2167,6 +2169,13 @@ class OpenAiSalesOrchestrator
         return $georgian
             ? "შევარჩიე მოთხოვნილი კომბინაცია:\n{$lines}\nჯამი: ".number_format($total, 2).' ₾ · ბიუჯეტი: '.number_format($budget, 2).' ₾.'
             : "I selected the requested bundle:\n{$lines}\nTotal: ".number_format($total, 2).' GEL · Budget: '.number_format($budget, 2).' GEL.';
+    }
+
+    private function openBudgetBundleText(Collection $products, float $total, float $budget, bool $georgian): string
+    {
+        return $georgian
+            ? 'შევარჩიე '.$products->count().' შესაბამისი ხელმისაწვდომი ვარიანტი. ჯამი: '.number_format($total, 2).' ₾ · ბიუჯეტი: '.number_format($budget, 2).' ₾.'
+            : 'I selected '.$products->count().' verified available options. Total: '.number_format($total, 2).' GEL · Budget: '.number_format($budget, 2).' GEL.';
     }
 
     private function isBudgetRecommendationRequest(string $message): bool

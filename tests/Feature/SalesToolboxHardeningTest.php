@@ -760,6 +760,30 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertLessThanOrEqual(50, collect($result['recommendations'])->sum('price'));
     }
 
+    public function test_open_budget_recommendations_build_one_total_basket_instead_of_per_item_limits(): void
+    {
+        [$agent, $existing, $conversation] = $this->context(stock: 4);
+        Http::fake(['*' => Http::response('<html><body></body></html>')]);
+        $existing->update(['name' => 'First option', 'category' => 'General', 'search_text' => 'first option', 'price' => 15]);
+        foreach ([20, 15, 30, 45] as $index => $price) {
+            $agent->products()->create([
+                'name' => 'Option '.($index + 2), 'sku' => 'OPEN-BUDGET-'.$index,
+                'category' => 'General', 'search_text' => 'option '.($index + 2),
+                'price' => $price, 'stock' => 3, 'is_active' => true, 'metadata' => [],
+            ]);
+        }
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => '', 'budget' => 80, 'quantity' => null, 'category' => null,
+            'mood' => null, 'occasion' => null, 'limit' => 5, 'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['bundle_complete']);
+        $this->assertCount(4, $result['recommendations']);
+        $this->assertEqualsWithDelta(80, $result['bundle_total'], 0.001);
+        $this->assertLessThanOrEqual(80, collect($result['recommendations'])->sum('price'));
+    }
+
     public function test_verified_business_category_index_is_used_before_polluted_general_catalog_text(): void
     {
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);

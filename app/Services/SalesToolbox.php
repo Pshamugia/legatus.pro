@@ -502,6 +502,15 @@ class SalesToolbox
             $ranked = $this->selectBudgetBundle($ranked, $requestedQuantity, isset($a['budget']) ? (float) $a['budget'] : null);
             $bundleComplete = $ranked->count() === $requestedQuantity;
             $bundleTotal = $bundleComplete ? round((float) $ranked->sum('price'), 2) : null;
+        } elseif (isset($a['budget']) && (float) $a['budget'] > 0 && (int) $a['limit'] > 1) {
+            // A budget for several unspecified items is a total basket budget,
+            // not merely a per-product ceiling. Build the largest useful
+            // shortlist that fits the total so the assistant can state the
+            // actual sum instead of displaying individually affordable cards
+            // whose combined cost was never checked.
+            $ranked = $this->selectOpenBudgetBundle($ranked, (int) $a['limit'], (float) $a['budget']);
+            $bundleComplete = $ranked->isNotEmpty();
+            $bundleTotal = $bundleComplete ? round((float) $ranked->sum('price'), 2) : null;
         } else {
             $ranked = $ranked->take($a['limit'])->values();
         }
@@ -548,6 +557,50 @@ class SalesToolbox
         }
 
         return $selected->count() === $quantity ? $selected->values() : $cheapest->values();
+    }
+
+    private function selectOpenBudgetBundle(Collection $products, int $limit, float $budget): Collection
+    {
+        $limit = max(1, min(5, $limit));
+        $candidates = $products
+            ->filter(fn (array $product): bool => (float) ($product['price'] ?? 0) > 0
+                && (float) $product['price'] <= $budget + 0.001)
+            ->take(50)
+            ->values();
+
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+
+        $best = collect();
+        $bestScore = -INF;
+        $bestTotal = 0.0;
+        $count = $candidates->count();
+        $walk = function (int $index, Collection $selected, float $total) use (&$walk, &$best, &$bestScore, &$bestTotal, $candidates, $count, $limit, $budget): void {
+            if ($selected->isNotEmpty()) {
+                $score = (float) $selected->sum(fn (array $product): float => (float) ($product['score'] ?? 0));
+                if ($selected->count() > $best->count()
+                    || ($selected->count() === $best->count() && $score > $bestScore)
+                    || ($selected->count() === $best->count() && abs($score - $bestScore) < 0.001 && $total > $bestTotal)) {
+                    $best = $selected;
+                    $bestScore = $score;
+                    $bestTotal = $total;
+                }
+            }
+            if ($index >= $count || $selected->count() >= $limit) {
+                return;
+            }
+            for ($candidateIndex = $index; $candidateIndex < $count; $candidateIndex++) {
+                $candidate = $candidates[$candidateIndex];
+                $nextTotal = $total + (float) $candidate['price'];
+                if ($nextTotal <= $budget + 0.001) {
+                    $walk($candidateIndex + 1, $selected->concat([$candidate]), $nextTotal);
+                }
+            }
+        };
+        $walk(0, collect(), 0.0);
+
+        return $best->values();
     }
 
     private function compare(Agent $agent, Conversation $conversation, array $a): array
