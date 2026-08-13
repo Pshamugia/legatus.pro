@@ -58,6 +58,121 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNotContains('server_guardrail', $response->json('tools_used'));
     }
 
+    public function test_semantic_delivery_intent_understands_natural_arrival_wording_without_keyword_rules(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery terms',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery terms',
+            'content' => 'თბილისში მიტანის დრო არის 2 სამუშაო დღე.',
+            'content_hash' => hash('sha256', 'semantic-delivery-intent'),
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'delivery-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'is_catalog_follow_up' => false,
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'delivery-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I cannot verify that.', 'intent' => 'clarification', 'confidence' => .8,
+                    'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+                    'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'შეკვეთას როდის მოიტანენ?',
+        ])->assertOk()->assertJsonPath('intent', 'delivery');
+
+        $this->assertStringContainsString('2 სამუშაო დღე', $response->json('text'));
+        $this->assertContains('calculate_delivery', $response->json('tools_used'));
+        $resolverRequest = Http::recorded()->map(fn ($pair) => $pair[0])->first(
+            fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up'
+        );
+        $this->assertTrue((bool) data_get($resolverRequest?->data(), 'text.format.schema.properties.is_delivery_request'));
+    }
+
+    public function test_semantic_delivery_intent_uses_prior_dialogue_for_an_indirect_follow_up(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery terms',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery terms',
+            'content' => 'თბილისში მიტანის დრო არის 2 სამუშაო დღე.',
+            'content_hash' => hash('sha256', 'contextual-delivery-intent'),
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'contextual-delivery-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'დღეს დილით შევუკვეთე პროდუქტი მითითებულ მისამართზე.',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'და როდის უნდა ველოდო?',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'contextual-delivery-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'is_catalog_follow_up' => false,
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'contextual-delivery-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I cannot verify that.', 'intent' => 'clarification', 'confidence' => .8,
+                    'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+                    'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, 'და როდის უნდა ველოდო?');
+
+        $this->assertSame('delivery', $reply['intent']);
+        $this->assertStringContainsString('2 სამუშაო დღე', $reply['text']);
+        $this->assertContains('calculate_delivery', $reply['tools_used']);
+        $resolverInput = Http::recorded()->map(fn ($pair) => $pair[0])->first(
+            fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up'
+        )?->data()['input'] ?? [];
+        $this->assertStringContainsString(
+            'დღეს დილით შევუკვეთე პროდუქტი მითითებულ მისამართზე.',
+            json_encode($resolverInput, JSON_UNESCAPED_UNICODE),
+        );
+    }
+
     public function test_recent_product_attributes_are_supplied_for_relational_follow_ups(): void
     {
         $this->seed();
