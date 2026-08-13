@@ -67,6 +67,7 @@ class SalesToolbox
     private function search(Agent $agent, Conversation $conversation, array $a): array
     {
         $termGroups = $this->searchTermGroups((string) $a['query']);
+        $identityMatch = (bool) ($a['_identity_match'] ?? false);
         if ($termGroups === []) {
             return [
                 'ok' => true,
@@ -86,7 +87,7 @@ class SalesToolbox
             (string) $a['query'],
         );
         $categoryIndexPending = $taxonomyProductIds === [];
-        $localSearch = function () use ($agent, $conversation, $a, $termGroups, &$taxonomyProductIds) {
+        $localSearch = function () use ($agent, $conversation, $a, $termGroups, $identityMatch, &$taxonomyProductIds) {
             if ($termGroups === []) {
                 return collect();
             }
@@ -117,6 +118,7 @@ class SalesToolbox
                 ]),
                 $conversation,
                 $termGroups,
+                $identityMatch,
             );
         };
         $matches = $localSearch();
@@ -156,7 +158,14 @@ class SalesToolbox
         $remoteSearch = null;
         if ($taxonomyProductIds === null && $products->isEmpty() && $unavailableProducts->isEmpty()) {
             $remoteSearch = $this->commerceSearchResponse($agent, $a, $termGroups);
-            $remoteMatches = $this->productsFromCommerceSearch($agent, $conversation, $a, $remoteSearch);
+            $remoteMatches = $this->productsFromCommerceSearch(
+                $agent,
+                $conversation,
+                $a,
+                $remoteSearch,
+                $identityMatch ? $termGroups : [],
+                $identityMatch,
+            );
             $products = $remoteMatches->where('available', true)->values();
             $unavailableProducts = $remoteMatches->where('available', false)->values();
         }
@@ -259,7 +268,12 @@ class SalesToolbox
         }
     }
 
-    private function presentSearchProducts($candidates, Conversation $conversation, array $termGroups = [])
+    private function presentSearchProducts(
+        $candidates,
+        Conversation $conversation,
+        array $termGroups = [],
+        bool $identityMatch = false,
+    )
     {
         $presented = $candidates
             ->map(function ($product) use ($conversation, $termGroups): array {
@@ -293,9 +307,15 @@ class SalesToolbox
             });
         if ($termGroups !== []) {
             $maximumMatches = (int) $presented->max('_matched_groups');
-            $requiredMatches = count($termGroups) <= 2
-                ? 1
-                : max(2, (int) ceil(count($termGroups) * .4));
+            // A server-resolved named-product/entity lookup must preserve the
+            // whole identity. A candidate matching only one word from a title
+            // is not an alternative for that title. Flexible discovery keeps
+            // the existing partial-match behavior for broader searches.
+            $requiredMatches = $identityMatch
+                ? count($termGroups)
+                : (count($termGroups) <= 2
+                    ? 1
+                    : max(2, (int) ceil(count($termGroups) * .4)));
             $presented = $presented->filter(fn (array $product): bool => $product['_search_score'] > 0
                 && $product['_matched_groups'] === $maximumMatches
                 && $product['_matched_groups'] >= $requiredMatches);
@@ -1207,6 +1227,8 @@ class SalesToolbox
         Conversation $conversation,
         array $arguments,
         ?array $response,
+        array $termGroups = [],
+        bool $identityMatch = false,
     ) {
         if (! is_array($response) || ! is_array($response['data'] ?? null) || ! array_is_list($response['data'])) {
             return collect();
@@ -1242,7 +1264,7 @@ class SalesToolbox
 
         // The remote endpoint determines semantic ordering, while every returned
         // row remains bound to the tenant's last authoritative signed snapshot.
-        return $this->presentSearchProducts($products, $conversation);
+        return $this->presentSearchProducts($products, $conversation, $termGroups, $identityMatch);
     }
 
     private function validatedSearchSuggestion(string $query, mixed $suggestion): ?string

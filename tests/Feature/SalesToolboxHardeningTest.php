@@ -601,6 +601,51 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame('ქართველი ერის ისტორია', data_get($result, 'products.0.name'));
     }
 
+    public function test_named_product_lookup_does_not_return_items_matching_only_one_title_word(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'Three Generations',
+            'description' => 'A family history',
+            'search_text' => 'Three Generations A family history',
+        ]);
+        $agent->products()->create([
+            'name' => 'Three Novels',
+            'description' => 'A collected edition',
+            'search_text' => 'Three Novels A collected edition',
+            'price' => 18,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $missing = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Three Musketeers',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $missing['products']);
+        $this->assertSame([], $missing['unavailable_products']);
+
+        $musketeers = $agent->products()->create([
+            'name' => 'The Three Musketeers',
+            'description' => 'A historical adventure novel',
+            'search_text' => 'The Three Musketeers A historical adventure novel',
+            'price' => 22,
+            'stock' => 3,
+            'is_active' => true,
+        ]);
+        $found = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Three Musketeers',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([$musketeers->id], collect($found['products'])->pluck('id')->all());
+    }
+
     public function test_product_search_treats_wildcards_as_literal_text(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

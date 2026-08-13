@@ -91,6 +91,7 @@ class OpenAiSalesOrchestrator
                     'category' => null,
                     'max_price' => null,
                     'exclude_product_ids' => $excludedIds->all(),
+                    '_identity_match' => true,
                 ];
                 $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
                 [$result, $stockCalls] = $this->verifySearchResultStock($result, $agent, $conversation);
@@ -229,6 +230,9 @@ class OpenAiSalesOrchestrator
                 if (is_array($semanticResolution) && in_array($call['name'], ['search_products', 'recommend_products'], true)) {
                     $args['query'] = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
                     $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
+                    if ($call['name'] === 'search_products') {
+                        $args['_identity_match'] = true;
+                    }
                 }
                 if ($call['name'] === 'recommend_products') {
                     // The model owns the conversational interpretation, but a
