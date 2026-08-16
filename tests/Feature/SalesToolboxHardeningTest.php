@@ -646,6 +646,42 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([$musketeers->id], collect($found['products'])->pluck('id')->all());
     }
 
+    public function test_entity_family_follow_up_drops_failed_bundle_format_and_returns_all_matching_items(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->delete();
+
+        $expectedIds = collect(range(1, 15))->map(function (int $volume) use ($agent): int {
+            return $agent->products()->create([
+                'name' => "Historian work volume {$volume}",
+                'description' => 'An individually available volume',
+                'search_text' => "Ivane Javakhishvili Historian work volume {$volume}",
+                'price' => 10 + $volume,
+                'stock' => 1,
+                'is_active' => true,
+                'metadata' => ['author' => 'Ivane Javakhishvili'],
+            ])->id;
+        });
+
+        $failedBundle = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Ivane Javakhishvili complete twelve volume set',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+        $entityFamily = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Ivane Javakhishvili',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => false,
+            '_return_all_matches' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $failedBundle['products']);
+        $this->assertEqualsCanonicalizing($expectedIds->all(), collect($entityFamily['products'])->pluck('id')->all());
+        $this->assertCount(15, $entityFamily['products']);
+    }
+
     public function test_product_search_treats_wildcards_as_literal_text(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

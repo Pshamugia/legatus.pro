@@ -119,6 +119,7 @@ class SalesToolbox
                 $conversation,
                 $termGroups,
                 $identityMatch,
+                (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6,
             );
         };
         $matches = $localSearch();
@@ -273,6 +274,7 @@ class SalesToolbox
         Conversation $conversation,
         array $termGroups = [],
         bool $identityMatch = false,
+        int $limit = 6,
     )
     {
         $presented = $candidates
@@ -323,7 +325,7 @@ class SalesToolbox
 
         return $presented
             ->sortByDesc('_search_score')
-            ->take(6)
+            ->take(max(1, min($limit, 50)))
             ->map(function (array $product): array {
                 unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups']);
 

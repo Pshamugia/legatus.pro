@@ -432,6 +432,91 @@ class HybridModelRoutingTest extends TestCase
         ]);
     }
 
+    public function test_empty_exact_bundle_resolution_is_rechecked_by_sol_and_broadened_to_the_verified_entity_family(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update([
+            'settings' => array_merge($agent->settings ?? [], [
+                'catalog_search_url' => 'https://chapter.test/search?q={query}',
+            ]),
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'semantic-dead-end-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'Do you have the complete twelve-volume Aurelius Testauthor set?',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'I could not find the complete set. Would individual volumes work?',
+        ]);
+        $products = collect(range(1, 15))->map(fn (int $volume) => $agent->products()->create([
+            'name' => "Aurelius work volume {$volume}",
+            'search_text' => "Aurelius Testauthor work volume {$volume}",
+            'price' => 10 + $volume,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['author' => 'Aurelius Testauthor'],
+        ]));
+        $this->enableHybridCanary();
+
+        Http::fake(function ($request) use ($products) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (data_get($request->data(), 'text.format.name') === 'catalog_follow_up') {
+                $isSol = $request->data()['model'] === 'gpt-5.6-sol';
+
+                return Http::response([
+                    'id' => $isSol ? 'sol-semantic-resolution' : 'luna-semantic-resolution',
+                    'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'is_delivery_request' => false,
+                        'is_catalog_follow_up' => true,
+                        'recommendation_scope' => 'none',
+                        'recommendation_query' => null,
+                        'recommendation_category' => null,
+                        'recommendation_occasion' => null,
+                        'resolved_query' => $isSol ? 'Aurelius Testauthor' : 'Aurelius Testauthor complete twelve volume set',
+                        'catalog_match_scope' => $isSol ? 'entity_family' : 'exact_identity',
+                        'exclude_product_ids' => [],
+                        'expects_complete_set' => true,
+                    ])]]]],
+                    'usage' => [],
+                ]);
+            }
+
+            return Http::response($this->strictResponse(
+                'semantic-family-final',
+                'I found individually available works by this author.',
+                [],
+                [],
+                [],
+            ));
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Individual volumes work too. How many are available?',
+            $conversation,
+        );
+
+        $this->assertContains('semantic_resolution_fallback', $reply['tools_used']);
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $search = collect($run->tools_used)->firstWhere('name', 'search_products');
+        $this->assertFalse($search['arguments']['_identity_match']);
+        $this->assertTrue($search['arguments']['_return_all_matches']);
+        $this->assertCount(15, $search['result']['products']);
+        $this->assertFalse($reply['handoff']);
+        $this->assertCount(15, $reply['products']);
+        $models = $this->responseRequests()->map(fn ($request) => $request->data()['model'])->all();
+        $this->assertSame(['gpt-5.6-luna', 'gpt-5.6-sol'], array_slice($models, 0, 2));
+        $this->assertSame('gpt-5.6-luna', $models[array_key_last($models)]);
+    }
+
     private function enableHybridCanary(): void
     {
         config([

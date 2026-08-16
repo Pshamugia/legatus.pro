@@ -232,6 +232,7 @@ class OpenAiOrchestrationTest extends TestCase
                     'recommendation_category' => null,
                     'recommendation_occasion' => null,
                     'resolved_query' => 'Acme',
+                    'catalog_match_scope' => 'entity_family',
                     'exclude_product_ids' => [$previous->id],
                     'expects_complete_set' => true,
                 ])]],
@@ -272,6 +273,7 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('Anything else?', data_get(collect($contextRequest->data()['input'])->last(), 'content'));
         $this->assertStringContainsString('Recently shown product records', (string) $contextRequest->data()['instructions']);
         $this->assertStringContainsString('An open-ended recommendation is not a direct lookup', (string) $contextRequest->data()['instructions']);
+        $this->assertStringContainsString('failed exact bundle lookup never proves that entity-family items are absent', (string) $contextRequest->data()['instructions']);
     }
 
     #[DataProvider('crossIndustryMessages')]
