@@ -98,15 +98,18 @@ class OpenAiSalesOrchestrator
             $resolvedQuery = trim((string) ($catalogContext['resolved_query'] ?? ''));
             if ($resolvedQuery !== '') {
                 $matchScope = (string) ($catalogContext['catalog_match_scope'] ?? 'exact_identity');
+                $resolvedCategory = filled($catalogContext['resolved_category'] ?? null)
+                    ? (string) $catalogContext['resolved_category']
+                    : null;
                 $expectsCompleteSet = (bool) ($catalogContext['expects_complete_set'] ?? false);
                 $arguments = [
                     'query' => $resolvedQuery,
-                    'category' => null,
+                    'category' => $resolvedCategory,
                     'max_price' => is_numeric(data_get($conversation->context, 'active_catalog_scope.max_price'))
                         ? (float) data_get($conversation->context, 'active_catalog_scope.max_price')
                         : null,
                     'exclude_product_ids' => $excludedIds->all(),
-                    '_identity_match' => $matchScope === 'exact_identity',
+                    '_identity_match' => $resolvedCategory === null && $matchScope === 'exact_identity',
                     '_return_all_matches' => $expectsCompleteSet,
                 ];
                 $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
@@ -140,15 +143,18 @@ class OpenAiSalesOrchestrator
                         $catalogContext = $alternateContext;
                         $resolvedQuery = $alternateQuery;
                         $matchScope = $alternateScope;
+                        $resolvedCategory = filled($alternateContext['resolved_category'] ?? null)
+                            ? (string) $alternateContext['resolved_category']
+                            : null;
                         $expectsCompleteSet = (bool) ($alternateContext['expects_complete_set'] ?? false);
                         $excludedIds = collect($alternateContext['exclude_product_ids'] ?? [])
                             ->map(fn ($id): int => (int) $id)->intersect($recentIds)->unique()->values();
                         $arguments = [
                             'query' => $resolvedQuery,
-                            'category' => null,
+                            'category' => $resolvedCategory,
                             'max_price' => null,
                             'exclude_product_ids' => $excludedIds->all(),
-                            '_identity_match' => $matchScope === 'exact_identity',
+                            '_identity_match' => $resolvedCategory === null && $matchScope === 'exact_identity',
                             '_return_all_matches' => $expectsCompleteSet,
                         ];
                         $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
@@ -163,6 +169,7 @@ class OpenAiSalesOrchestrator
                 $used[] = ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
                     'ok' => true,
                     'resolved_query' => $resolvedQuery,
+                    'resolved_category' => $resolvedCategory,
                     'catalog_match_scope' => $matchScope,
                     'exclude_product_ids' => $excludedIds->all(),
                     'expects_complete_set' => $expectsCompleteSet,
@@ -308,7 +315,9 @@ class OpenAiSalesOrchestrator
                     $args['query'] = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
                     $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
                     if ($call['name'] === 'search_products') {
-                        $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
+                        $args['category'] = data_get($semanticResolution, 'result.resolved_category');
+                        $args['_identity_match'] = blank($args['category'])
+                            && data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
                         $args['_return_all_matches'] = (bool) data_get($semanticResolution, 'result.expects_complete_set', false);
                     }
                 }
@@ -1324,7 +1333,15 @@ class OpenAiSalesOrchestrator
             ], 'responses.catalog_context', $deadline, 30);
             $this->accumulateUsage($response, $inputTokens, $outputTokens, $modelUsage, $model, 'responses.catalog_context');
 
-            return $this->structuredOutput($response);
+            $resolved = $this->structuredOutput($response);
+            $requestedCategory = trim((string) ($resolved['resolved_category'] ?? ''));
+            $resolved['resolved_category'] = $requestedCategory === ''
+                ? null
+                : collect($catalogCategories)->first(
+                    fn (string $category): bool => mb_strtolower($category) === mb_strtolower($requestedCategory),
+                );
+
+            return $resolved;
         } catch (\Throwable $exception) {
             Log::warning('Semantic catalog context resolution failed; continuing with normal orchestration.', [
                 'conversation_id' => $conversation->id,
@@ -1348,11 +1365,15 @@ class OpenAiSalesOrchestrator
                 'recommendation_category' => ['type' => ['string', 'null']],
                 'recommendation_occasion' => ['type' => ['string', 'null']],
                 'resolved_query' => ['type' => ['string', 'null']],
+                'resolved_category' => [
+                    'type' => ['string', 'null'],
+                    'description' => 'For direct category browsing, the exact canonical value from the verified tenant category list; otherwise null.',
+                ],
                 'catalog_match_scope' => ['type' => 'string', 'enum' => ['exact_identity', 'entity_family']],
                 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'expects_complete_set' => ['type' => 'boolean'],
             ],
-            'required' => ['is_delivery_request', 'is_catalog_follow_up', 'catalog_scope_action', 'recommendation_scope', 'recommendation_query', 'recommendation_category', 'recommendation_occasion', 'resolved_query', 'catalog_match_scope', 'exclude_product_ids', 'expects_complete_set'],
+            'required' => ['is_delivery_request', 'is_catalog_follow_up', 'catalog_scope_action', 'recommendation_scope', 'recommendation_query', 'recommendation_category', 'recommendation_occasion', 'resolved_query', 'resolved_category', 'catalog_match_scope', 'exclude_product_ids', 'expects_complete_set'],
             'additionalProperties' => false,
         ]];
     }
@@ -1395,6 +1416,7 @@ class OpenAiSalesOrchestrator
             $resolved['recommendation_category'] = null;
             $resolved['recommendation_occasion'] = null;
             $resolved['resolved_query'] = $query;
+            $resolved['resolved_category'] = $scope['category'] ?? null;
             $resolved['catalog_match_scope'] = (string) ($scope['catalog_match_scope'] ?? 'entity_family');
             $resolved['exclude_product_ids'] = $this->activeCatalogProductIds($conversation)->all();
 
@@ -1424,6 +1446,9 @@ class OpenAiSalesOrchestrator
             : ($scope['occasion'] ?? null);
         if (($resolved['is_catalog_follow_up'] ?? false) === true && blank($resolved['resolved_query'] ?? null)) {
             $resolved['resolved_query'] = $scope['query'] ?? $scope['category'] ?? null;
+        }
+        if (($resolved['is_catalog_follow_up'] ?? false) === true && blank($resolved['resolved_category'] ?? null)) {
+            $resolved['resolved_category'] = $scope['category'] ?? null;
         }
 
         return $resolved;

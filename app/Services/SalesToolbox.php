@@ -95,21 +95,33 @@ class SalesToolbox
             if ($taxonomyProductIds !== null) {
                 $q->whereIn('products.id', $taxonomyProductIds);
             }
-            $q->where(function ($termQuery) use ($termGroups): void {
-                foreach ($termGroups as $variants) {
-                    $patterns = collect($variants)
-                        ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
-                    foreach ($patterns as $pattern) {
-                        $termQuery->orWhere(fn ($candidate) => $candidate
-                            ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
-                            ->orWhereRaw("LOWER(products.sku) LIKE ? ESCAPE '!'", [$pattern])
-                            ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern])
-                            ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
-                            ->orWhereRaw("LOWER(products.search_text) LIKE ? ESCAPE '!'", [$pattern]));
+            $authoritativeCategoryBrowse = filled($a['category'] ?? null) && $taxonomyProductIds !== null;
+            if (! $authoritativeCategoryBrowse) {
+                $q->where(function ($termQuery) use ($termGroups): void {
+                    foreach ($termGroups as $variants) {
+                        $patterns = collect($variants)
+                            ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
+                        foreach ($patterns as $pattern) {
+                            $termQuery->orWhere(fn ($candidate) => $candidate
+                                ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
+                                ->orWhereRaw("LOWER(products.sku) LIKE ? ESCAPE '!'", [$pattern])
+                                ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern])
+                                ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
+                                ->orWhereRaw("LOWER(products.search_text) LIKE ? ESCAPE '!'", [$pattern]));
+                        }
                     }
-                }
-            });
-            $this->applyProductSearchFilters($q, $a);
+                });
+            }
+            $excludedProductIds = collect($a['exclude_product_ids'] ?? [])
+                ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
+            if ($excludedProductIds !== []) {
+                $q->whereNotIn('products.id', $excludedProductIds);
+            }
+            $filters = $a;
+            if ($authoritativeCategoryBrowse) {
+                $filters['category'] = null;
+            }
+            $this->applyProductSearchFilters($q, $filters);
 
             return $this->presentSearchProducts(
                 $q->limit(300)->get([
@@ -117,8 +129,8 @@ class SalesToolbox
                     'price', 'stock', 'updated_at',
                 ]),
                 $conversation,
-                $termGroups,
-                $identityMatch,
+                $authoritativeCategoryBrowse ? [] : $termGroups,
+                $authoritativeCategoryBrowse ? false : $identityMatch,
                 (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6,
             );
         };

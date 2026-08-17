@@ -83,6 +83,8 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 - ბოლო წარმატებული კატალოგური მოქმედება ინახება tenant-scoped აქტიურ სავაჭრო კონტექსტად: tool, query, category, budget, quantity, max price, mood, occasion, match scope და უკვე ნაჩვენები პროდუქტები. სემანტიკური resolver სრული დიალოგიდან ადგენს, მომხმარებელი აგრძელებს, აზუსტებს თუ ცვლის მოთხოვნას; გაგრძელებისას სერვერი ინარჩუნებს ყველა ჯერ კიდევ მოქმედ შეზღუდვას და გამორიცხავს უკვე ნაჩვენებ პროდუქტებს. ეს ქცევა არ არის მიბმული ცალკეულ ფრაზებზე, ენაზე ან ინდუსტრიაზე.
 - შეზღუდული catalog search/recommendation შედეგი `result_scope=shortlist`-ით აღინიშნება და მისი `returned_count` სრული კატალოგის რაოდენობად ვერ გამოცხადდება. factual verifier ასეთ პასუხს უარყოფს, რის შემდეგაც ჰიბრიდულ რეჟიმში Sol ერთ fresh-chain მცდელობას იღებს უკვე გადამოწმებული tenant evidence-ით; სრული სიის მოთხოვნა კვლავ `result_scope=complete` გზით მუშავდება.
 
+- Verified taxonomy/category browsing uses ready tenant Knowledge-source membership rather than requiring the category label to appear in every product title. Product exclusions are applied before shortlist pagination, so follow-ups such as "more" retain the active category and return the next unseen products instead of a single unrelated or sold-out sixth result.
+
 ## deployment
 
 ლოკალურად GitHub-ზე ატვირთვა:

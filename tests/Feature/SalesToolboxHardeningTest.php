@@ -894,6 +894,89 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertCount(5, $result['recommendations']);
     }
 
+    public function test_search_excludes_prior_shortlist_before_selecting_the_next_page(): void
+    {
+        [$agent, $first, $conversation] = $this->context(stock: 3);
+        $first->update(['name' => 'Mystery 1', 'search_text' => 'Mystery 1']);
+        $products = collect([$first]);
+        foreach (range(2, 10) as $index) {
+            $products->push($agent->products()->create([
+                'name' => 'Mystery '.$index,
+                'sku' => 'MYSTERY-'.$index,
+                'category' => 'General',
+                'search_text' => 'Mystery '.$index,
+                'price' => 10 + $index,
+                'stock' => 3,
+                'is_active' => true,
+                'metadata' => [],
+            ]));
+        }
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Mystery',
+            'category' => null,
+            'max_price' => null,
+            'exclude_product_ids' => $products->take(6)->pluck('id')->all(),
+        ], $agent, $conversation);
+
+        $this->assertSame(
+            $products->skip(6)->pluck('id')->all(),
+            collect($result['products'])->pluck('id')->all(),
+        );
+        $this->assertSame([], $result['unavailable_products']);
+    }
+
+    public function test_verified_category_membership_does_not_require_category_words_in_product_titles(): void
+    {
+        [$agent, $first, $conversation] = $this->context(stock: 3);
+        $first->update(['name' => 'A life remembered', 'category' => 'General', 'search_text' => 'A life remembered']);
+        $second = $agent->products()->create([
+            'name' => 'Portrait of an artist',
+            'sku' => 'BIO-MAPPED-2',
+            'category' => 'General',
+            'search_text' => 'Portrait of an artist',
+            'price' => 24,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Biography',
+            'name' => 'Category: Biography',
+            'url' => 'https://store.example/categories/biography',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        foreach ([$first, $second] as $product) {
+            $source->chunks()->create([
+                'agent_id' => $agent->id,
+                'kind' => 'product',
+                'title' => $product->name,
+                'content' => json_encode(['name' => $product->name]),
+                'content_hash' => hash('sha256', 'biography-'.$product->id),
+                'metadata' => ['product_id' => $product->id],
+            ]);
+        }
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Biography books',
+            'category' => 'Biography',
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertEqualsCanonicalizing(
+            [$first->id, $second->id],
+            collect($result['products'])->pluck('id')->all(),
+        );
+        Http::assertNothingSent();
+    }
+
     public function test_verified_business_category_index_is_used_before_polluted_general_catalog_text(): void
     {
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);

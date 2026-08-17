@@ -296,6 +296,43 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('failed exact bundle lookup never proves that entity-family items are absent', (string) $contextRequest->data()['instructions']);
     }
 
+    public function test_more_results_keeps_the_verified_category_scope_and_excludes_shown_products(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'category-continuation-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => [
+                'last_catalog_product_ids' => [31, 32],
+                'active_catalog_scope' => [
+                    'tool' => 'search_products',
+                    'query' => 'Biography',
+                    'category' => 'Biography',
+                    'catalog_match_scope' => 'entity_family',
+                    'shown_product_ids' => [29, 30],
+                ],
+            ],
+        ]);
+
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'mergeActiveCatalogScope');
+        $resolved = $method->invoke(app(OpenAiSalesOrchestrator::class), $conversation, [
+            'is_catalog_follow_up' => true,
+            'catalog_scope_action' => 'continue',
+            'recommendation_scope' => 'none',
+            'resolved_query' => 'something else',
+            'resolved_category' => null,
+            'catalog_match_scope' => 'exact_identity',
+            'exclude_product_ids' => [],
+        ]);
+
+        $this->assertSame('Biography', $resolved['resolved_query']);
+        $this->assertSame('Biography', $resolved['resolved_category']);
+        $this->assertSame('entity_family', $resolved['catalog_match_scope']);
+        $this->assertSame([29, 30, 31, 32], $resolved['exclude_product_ids']);
+    }
+
     #[DataProvider('crossIndustryMessages')]
     public function test_production_messages_use_semantic_orchestration_regardless_of_industry(string $message): void
     {
