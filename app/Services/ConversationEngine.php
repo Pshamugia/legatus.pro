@@ -121,7 +121,14 @@ class ConversationEngine
         $reply['products'] = $this->publicProducts($reply['products'] ?? [], $conversation);
         if ($reply['products'] !== []) {
             $context = is_array($conversation->context) ? $conversation->context : [];
-            $context['last_catalog_product_ids'] = collect($reply['products'])->pluck('id')->filter()->values()->all();
+            $shownIds = collect($reply['products'])->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique()->values();
+            $context['last_catalog_product_ids'] = $shownIds->all();
+            if (is_array(data_get($context, 'active_catalog_scope'))) {
+                data_set($context, 'active_catalog_scope.shown_product_ids', collect(array_merge(
+                    (array) data_get($context, 'active_catalog_scope.shown_product_ids', []),
+                    $shownIds->all(),
+                ))->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all());
+            }
             $conversation->context = $context;
             $conversation->save();
         }

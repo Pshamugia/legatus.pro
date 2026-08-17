@@ -218,7 +218,15 @@ class OpenAiOrchestrationTest extends TestCase
             'visitor_id' => 'semantic-follow-up-customer',
             'status' => 'ai',
             'channel' => 'widget',
-            'context' => ['last_catalog_product_ids' => [$previous->id]],
+            'context' => [
+                'last_catalog_product_ids' => [$previous->id],
+                'active_catalog_scope' => [
+                    'tool' => 'search_products',
+                    'query' => 'Acme',
+                    'catalog_match_scope' => 'entity_family',
+                    'shown_product_ids' => [$previous->id],
+                ],
+            ],
         ]);
         config(['services.openai.key' => 'test-key']);
         Http::fakeSequence()
@@ -227,13 +235,17 @@ class OpenAiOrchestrationTest extends TestCase
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_catalog_follow_up' => true,
+                    'catalog_scope_action' => 'continue',
                     'recommendation_scope' => 'none',
                     'recommendation_query' => null,
                     'recommendation_category' => null,
                     'recommendation_occasion' => null,
-                    'resolved_query' => 'Acme',
-                    'catalog_match_scope' => 'entity_family',
-                    'exclude_product_ids' => [$previous->id],
+                    // Simulate a weaker model interpreting the short turn in
+                    // isolation. The server must retain the verified active
+                    // shopping scope instead of allowing this drift.
+                    'resolved_query' => 'Unrelated',
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
                     'expects_complete_set' => true,
                 ])]],
             ]], 'usage' => []])
@@ -266,6 +278,14 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNotContains($previous->id, collect($reply['products'])->pluck('id')->all());
         $this->assertContains('resolve_catalog_context', $reply['tools_used']);
         $this->assertContains('search_products', $reply['tools_used']);
+        $searchRun = AgentRun::where('agent_id', $agent->id)
+            ->where('conversation_id', $conversation->id)
+            ->latest('id')
+            ->firstOrFail();
+        $searchCall = collect($searchRun->tools_used)->firstWhere('name', 'search_products');
+        $this->assertSame('Acme', data_get($searchCall, 'arguments.query'));
+        $this->assertSame([$previous->id], data_get($searchCall, 'arguments.exclude_product_ids'));
+        $this->assertSame('Acme', data_get($conversation->fresh()->context, 'active_catalog_scope.query'));
         $contextRequest = Http::recorded()
             ->map(fn ($pair) => $pair[0])
             ->first(fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up');
