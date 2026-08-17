@@ -96,7 +96,15 @@ class SalesToolbox
             if ($taxonomyProductIds !== null) {
                 $q->whereIn('products.id', $taxonomyProductIds);
             }
-            $authoritativeCategoryBrowse = filled($a['category'] ?? null) && $taxonomyProductIds !== null;
+            // A one-subject query that resolves to a verified taxonomy source
+            // is a category browse even when the model leaves `category` null.
+            // Requiring the category word to also appear in each product title
+            // collapses a real category to the handful of products whose names
+            // repeat that label (and can leave only a sold-out title match).
+            // Multi-subject queries keep their text constraints so a named
+            // product inside a category does not expand to the whole category.
+            $authoritativeCategoryBrowse = $taxonomyProductIds !== null
+                && (filled($a['category'] ?? null) || count($termGroups) === 1);
             if (! $authoritativeCategoryBrowse) {
                 $q->where(function ($termQuery) use ($termGroups): void {
                     foreach ($termGroups as $variants) {
@@ -244,12 +252,34 @@ class SalesToolbox
         $sources = $agent->knowledgeSources()
             ->where('source_scope', 'category')
             ->get(['id', 'agent_id', 'name', 'source_scope', 'url', 'taxonomy_label', 'index_version', 'last_synced_at'])
-            ->filter(function ($source) use ($needles): bool {
+            ->filter(function ($source) use ($needles, $termGroups): bool {
                 $label = Str::lower(trim((string) $source->taxonomy_label));
 
-                return $label !== '' && $needles->contains(
+                if ($label === '') {
+                    return false;
+                }
+
+                if ($needles->contains(
                     fn (string $needle): bool => Str::contains($needle, $label) || Str::contains($label, $needle),
-                );
+                )) {
+                    return true;
+                }
+
+                // For a single meaningful catalogue subject, tolerate a small
+                // UTF-8 edit distance in the taxonomy label. This is generic
+                // typo recovery; verified tenant taxonomy still determines the
+                // category and no product fact is inferred from the typo.
+                if (count($termGroups) !== 1) {
+                    return false;
+                }
+
+                return collect($termGroups[0])->contains(function (string $needle) use ($label): bool {
+                    $length = max(mb_strlen($needle), mb_strlen($label));
+
+                    return $length >= 5
+                        && $this->utf8Distance($needle, $label) <= min(3, max(1, (int) floor($length * 0.35)))
+                        && $this->sameSuggestionPrefix($needle, $label);
+                });
             });
         if ($sources->isEmpty()) {
             return null;
@@ -351,7 +381,16 @@ class SalesToolbox
         }
 
         return $presented
-            ->sortByDesc('_search_score')
+            // Availability is a commercial constraint, not merely display
+            // metadata. Rank equally relevant purchasable products before
+            // sold-out matches *before* cutting the customer shortlist;
+            // otherwise an old database/chunk order can fill the limit with
+            // unavailable rows while valid in-stock matches exist.
+            ->sortBy([
+                ['available', 'desc'],
+                ['_search_score', 'desc'],
+                ['updated_at', 'desc'],
+            ])
             ->take(max(1, min($limit, 50)))
             ->map(function (array $product): array {
                 unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups']);

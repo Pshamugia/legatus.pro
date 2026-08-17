@@ -1007,6 +1007,173 @@ class SalesToolboxHardeningTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_category_only_query_uses_every_verified_taxonomy_member_when_model_omits_category(): void
+    {
+        [$agent, $first, $conversation] = $this->context(stock: 3);
+        $first->update([
+            'name' => 'The first case',
+            'category' => 'General',
+            'search_text' => 'The first case',
+        ]);
+        $second = $agent->products()->create([
+            'name' => 'A quiet witness',
+            'sku' => 'MYSTERY-MAPPED-2',
+            'category' => 'General',
+            'search_text' => 'A quiet witness',
+            'price' => 18,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $soldOutTitleMatch = $agent->products()->create([
+            'name' => 'Mystery anthology',
+            'sku' => 'MYSTERY-SOLD-OUT',
+            'category' => 'General',
+            'search_text' => 'Mystery anthology',
+            'price' => 5,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Mystery',
+            'name' => 'Category: Mystery',
+            'url' => 'https://store.example/categories/mystery',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        foreach ([$first, $second, $soldOutTitleMatch] as $product) {
+            $source->chunks()->create([
+                'agent_id' => $agent->id,
+                'kind' => 'product',
+                'title' => $product->name,
+                'content' => json_encode(['name' => $product->name]),
+                'content_hash' => hash('sha256', 'mystery-category-'.$product->id),
+                'metadata' => ['product_id' => $product->id],
+            ]);
+        }
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Mysteries available?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertEqualsCanonicalizing(
+            [$first->id, $second->id],
+            collect($result['products'])->pluck('id')->all(),
+        );
+        $this->assertSame([$soldOutTitleMatch->id], collect($result['unavailable_products'])->pluck('id')->all());
+        Http::assertNothingSent();
+    }
+
+    public function test_single_subject_taxonomy_typo_still_uses_verified_category_membership(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 3);
+        $product->update([
+            'name' => 'Verified category member',
+            'category' => 'General',
+            'search_text' => 'Verified category member',
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'დეტექტივი',
+            'name' => 'Category index',
+            'url' => 'https://store.example/categories/category',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'product',
+            'title' => $product->name,
+            'content' => json_encode(['name' => $product->name]),
+            'content_hash' => hash('sha256', 'category-typo-'.$product->id),
+            'metadata' => ['product_id' => $product->id],
+        ]);
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'დეტქტივები გაქვთ?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+        Http::assertNothingSent();
+    }
+
+    public function test_category_shortlist_prefers_available_matches_before_sold_out_matches(): void
+    {
+        [$agent, $available, $conversation] = $this->context(stock: 4);
+        $available->update([
+            'name' => 'Available category member',
+            'category' => 'General',
+            'search_text' => 'Available category member',
+            'updated_at' => now()->subDay(),
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Mystery',
+            'name' => 'Category: Mystery',
+            'url' => 'https://store.example/categories/mystery',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        foreach (range(1, 8) as $index) {
+            $soldOut = $agent->products()->create([
+                'name' => "Mystery archive {$index}",
+                'sku' => "MYSTERY-ARCHIVE-{$index}",
+                'category' => 'General',
+                'search_text' => "Mystery archive {$index}",
+                'price' => 5 + $index,
+                'stock' => 0,
+                'is_active' => true,
+                'metadata' => [],
+                'updated_at' => now(),
+            ]);
+            $source->chunks()->create([
+                'agent_id' => $agent->id,
+                'kind' => 'product',
+                'title' => $soldOut->name,
+                'content' => json_encode(['name' => $soldOut->name]),
+                'content_hash' => hash('sha256', 'sold-out-mystery-'.$soldOut->id),
+                'metadata' => ['product_id' => $soldOut->id],
+            ]);
+        }
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'product',
+            'title' => $available->name,
+            'content' => json_encode(['name' => $available->name]),
+            'content_hash' => hash('sha256', 'available-mystery-'.$available->id),
+            'metadata' => ['product_id' => $available->id],
+        ]);
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Mysteries available?',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame([$available->id], collect($result['products'])->pluck('id')->all());
+        $this->assertCount(5, $result['unavailable_products']);
+        $this->assertTrue($result['has_more']);
+        Http::assertNothingSent();
+    }
+
     public function test_verified_business_category_index_is_used_before_polluted_general_catalog_text(): void
     {
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);
