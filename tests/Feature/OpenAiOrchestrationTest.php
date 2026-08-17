@@ -1123,6 +1123,53 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([$soldOut->id], collect($response->json('products'))->pluck('id')->all());
     }
 
+    public function test_an_empty_exact_lookup_offers_similar_options_without_defensive_wording(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $unrelated = $agent->products()->where('stock', '>', 0)->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'missing-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'missing-search-call',
+                'arguments' => json_encode(['query' => 'A product name that does not exist', 'category' => null, 'max_price' => null]),
+            ]]])
+            ->push(['id' => 'unrelated-recommendation', 'output' => [[
+                'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'unrelated-recommendation-call',
+                'arguments' => json_encode([
+                    'query' => $unrelated->name, 'budget' => null, 'quantity' => null,
+                    'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 1,
+                ]),
+            ]]])
+            ->push(['id' => 'wrong-final-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "I found {$unrelated->name}.",
+                    'intent' => 'discovery', 'confidence' => .99, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [$unrelated->id], 'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $unrelated->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null,
+                    ]],
+                ])]],
+            ]]])
+            ->push(['id' => 'unused-fallback']);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have A product name that does not exist?',
+        ])->assertOk()
+            ->assertJsonPath('intent', 'discovery')
+            ->assertJsonPath('products', []);
+
+        $this->assertSame(
+            'I could not find the exact requested product in the catalog. Would you like me to suggest similar options?',
+            $response->json('text'),
+        );
+        $this->assertStringNotContainsString('I will not substitute', $response->json('text'));
+        $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
+    }
+
     public function test_a_verified_available_product_is_never_hidden_by_a_generic_model_answer(): void
     {
         $this->seed();
