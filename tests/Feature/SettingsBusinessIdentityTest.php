@@ -20,12 +20,32 @@ class SettingsBusinessIdentityTest extends TestCase
             ->assertOk()
             ->assertSee('Business name')
             ->assertSee('Assistant display name')
+            ->assertSee('Chat launcher label')
             ->assertSee('name="business_name" value="Old Brand"', false)
             ->assertSee('name="agent_name" value="Old Assistant"', false)
-            ->assertSee('Ask [Business]')
-            ->assertSee('Ask Bukinistebi.ge')
+            ->assertSee('name="widget_launcher_label" value=""', false)
+            ->assertSee("leave blank to show the visitor's localized default", false)
             ->assertSee("AI employee's chat identity", false)
             ->assertSee('for example, Nia');
+    }
+
+    public function test_owner_can_set_or_clear_a_tenant_scoped_chat_launcher_label(): void
+    {
+        [$owner, $agent] = $this->tenant('launcher-workspace', 'owner', 'Brand', 'Assistant');
+        [, $otherAgent] = $this->tenant('other-launcher-workspace', 'owner', 'Other Brand', 'Other Assistant');
+
+        $this->actingAs($owner)->put(route('settings.update'), $this->validSettings([
+            'widget_launcher_label' => "  მელაპარაკე ნებისმიერ თემაზე  ",
+        ]))->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertSame('მელაპარაკე ნებისმიერ თემაზე', data_get($agent->fresh()->settings, 'widget_launcher_label'));
+        $this->assertNull(data_get($otherAgent->fresh()->settings, 'widget_launcher_label'));
+
+        $this->actingAs($owner)->put(route('settings.update'), $this->validSettings([
+            'widget_launcher_label' => '   ',
+        ]))->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertArrayNotHasKey('widget_launcher_label', $agent->fresh()->settings);
     }
 
     public function test_owner_updates_both_names_without_changing_another_tenant(): void
@@ -188,6 +208,7 @@ class SettingsBusinessIdentityTest extends TestCase
         return array_merge([
             'business_name' => 'Updated Brand',
             'agent_name' => 'Updated Assistant',
+            'widget_launcher_label' => '',
             'tone' => 'Warm and concise',
             'human_handoff_enabled' => 1,
             'handoff_threshold' => 0.65,

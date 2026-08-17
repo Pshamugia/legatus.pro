@@ -27,10 +27,12 @@ class SettingsController extends Controller
         $r->merge([
             'business_name' => $this->trimUnicodeWhitespace($r->input('business_name')),
             'agent_name' => $this->trimUnicodeWhitespace($r->input('agent_name')),
+            'widget_launcher_label' => $this->trimUnicodeWhitespace($r->input('widget_launcher_label')),
         ]);
         $data = $r->validate([
             'business_name' => $this->identityRules(120),
             'agent_name' => $this->identityRules(80),
+            'widget_launcher_label' => $this->optionalDisplayTextRules(80),
             'widget_theme_preset' => ['sometimes', 'string', Rule::in(WidgetTheme::allowedPresets())],
             'widget_theme_primary' => ['bail', 'exclude_unless:widget_theme_preset,custom', 'required', 'string', 'regex:/\A#[0-9A-Fa-f]{6}\z/'],
             'widget_theme_accent' => [
@@ -103,6 +105,12 @@ class SettingsController extends Controller
                 $settings['widget_theme'] = $widgetTheme;
             }
 
+            if (($data['widget_launcher_label'] ?? '') === '') {
+                unset($settings['widget_launcher_label']);
+            } else {
+                $settings['widget_launcher_label'] = $data['widget_launcher_label'];
+            }
+
             $agent->update([
                 'business_name' => $data['business_name'],
                 'name' => $data['agent_name'],
@@ -137,6 +145,25 @@ class SettingsController extends Controller
 
             if (preg_match('/[\p{Cc}]/u', $value) === 1) {
                 $fail('Names cannot contain control characters.');
+            }
+        }];
+    }
+
+    private function optionalDisplayTextRules(int $maximum): array
+    {
+        return ['bail', 'nullable', 'string', "max:{$maximum}", function (string $attribute, mixed $value, \Closure $fail): void {
+            if ($value === null || $value === '') {
+                return;
+            }
+
+            if (! mb_check_encoding($value, 'UTF-8')) {
+                $fail('Use valid Unicode text for the chat launcher label.');
+
+                return;
+            }
+
+            if (preg_match('/[\p{Cc}]/u', $value) === 1) {
+                $fail('The chat launcher label cannot contain control characters.');
             }
         }];
     }

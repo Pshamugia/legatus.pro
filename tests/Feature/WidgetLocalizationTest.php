@@ -261,11 +261,11 @@ class WidgetLocalizationTest extends TestCase
 
         $this->assertCount(4, $matches, 'The localized launcher copy was not embedded as JSON data.');
         $this->assertSame(
-            trans('widget.launcher_open', ['business' => $agent->business_name], $locale),
+            trans('widget.launcher_open', ['label' => trans('widget.launcher_label', [], $locale)], $locale),
             json_decode($matches[1], true, flags: JSON_THROW_ON_ERROR),
         );
         $this->assertSame(
-            trans('widget.launcher_label', ['business' => $agent->business_name], $locale),
+            trans('widget.launcher_label', [], $locale),
             json_decode($matches[2], true, flags: JSON_THROW_ON_ERROR),
         );
         $this->assertSame(

@@ -23,8 +23,11 @@ class WidgetController extends Controller
         $businessName = trim($agent->business_name);
         $assistantName = $agent->assistantDisplayName();
         $theme = $agent->widgetTheme();
-        $launcherOpen = (string) Lang::get('widget.launcher_open', ['business' => $businessName], $widgetLocale);
-        $launcherLabel = (string) Lang::get('widget.launcher_label', ['business' => $businessName], $widgetLocale);
+        $configuredLauncherLabel = trim((string) data_get($agent->settings, 'widget_launcher_label', ''));
+        $launcherLabel = $configuredLauncherLabel !== ''
+            ? $configuredLauncherLabel
+            : (string) Lang::get('widget.launcher_label', [], $widgetLocale);
+        $launcherOpen = (string) Lang::get('widget.launcher_open', ['label' => $launcherLabel], $widgetLocale);
         $frameTitle = (string) Lang::get('widget.frame_title', [
             'assistant' => $assistantName,
             'business' => $businessName,

@@ -13,20 +13,20 @@ class TenantWidgetBrandingTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_launcher_uses_the_business_name_while_the_frame_receives_the_chosen_assistant_name(): void
+    public function test_launcher_uses_a_custom_label_while_the_frame_receives_the_chosen_assistant_name(): void
     {
         $agent = $this->brandedAgent();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], ['widget_launcher_label' => 'AIჩატი'])]);
 
         $response = $this->get("/widget/{$agent->slug}.js")
             ->assertOk()
             ->assertSee('businessName="Bukinistebi.ge"', false)
             ->assertSee('assistantName="Maya"', false)
-            ->assertSee('launcherLabel="Ask Bukinistebi.ge"', false)
+            ->assertSee('launcherLabel="AI\u10e9\u10d0\u10e2\u10d8"', false)
             ->assertSee('frameTitle="Maya \u00b7 Bukinistebi.ge AI shopping assistant"', false)
             ->assertSee('label.textContent=launcherLabel', false)
             ->assertSee('frame.title=frameTitle', false)
-            ->assertDontSee('Ask Legatus')
-            ->assertDontSee('Open Legatus shopping assistant')
+            ->assertDontSee('Ask Bukinistebi.ge')
             ->assertDontSee('Ask Maya');
 
         $this->assertFalse($response->headers->has('Set-Cookie'));
@@ -111,7 +111,7 @@ class TenantWidgetBrandingTest extends TestCase
             ->assertSee('assistantName="AI Assistant"', false)
             ->assertDontSee('assistantName="Legatus"', false)
             ->getContent();
-        $this->assertStringContainsString('launcherLabel="Ask Bukinistebi.ge"', $script);
+        $this->assertStringContainsString('launcherLabel="Chat"', $script);
         $this->assertStringContainsString('label.textContent=launcherLabel', $script);
 
         $this->get("/widget/{$agent->slug}")

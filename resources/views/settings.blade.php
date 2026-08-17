@@ -11,6 +11,8 @@
     $selectedWidgetTheme = old('widget_theme_preset', $widgetTheme['preset']);
     $widgetThemePrimaryInput = old('widget_theme_primary', $widgetTheme['primary']);
     $widgetThemeAccentInput = old('widget_theme_accent', $widgetTheme['accent']);
+    $widgetLauncherLabel = old('widget_launcher_label', data_get($agent->settings, 'widget_launcher_label', ''));
+    $widgetLauncherPreview = trim((string) $widgetLauncherLabel) !== '' ? $widgetLauncherLabel : 'Chat';
     $previewWidgetTheme = \App\Support\WidgetTheme::resolve([
         'preset' => $selectedWidgetTheme,
         'primary' => $widgetThemePrimaryInput,
@@ -33,10 +35,13 @@
                 <p style="color:var(--muted);font-size:13px;line-height:1.55">Keep the business brand separate from the AI employee’s personal display name.</p>
                 <label for="business-name">Business name</label>
                 <input id="business-name" name="business_name" value="{{ old('business_name', $agent->business_name ?: $organization->name) }}" maxlength="120" required aria-describedby="business-name-help" {{ ! in_array($role, ['owner', 'admin']) ? 'disabled' : '' }}>
-                <small id="business-name-help" class="identity-help">Controls the public brand and the “Ask [Business]” button — for example, Ask Bukinistebi.ge.</small>
+                <small id="business-name-help" class="identity-help">Controls the public business brand. The floating chat button has its own label below.</small>
                 <label for="agent-name">Assistant display name</label>
                 <input id="agent-name" name="agent_name" value="{{ old('agent_name', $agent->assistantDisplayName()) }}" maxlength="80" required aria-describedby="agent-name-help" {{ ! in_array($role, ['owner', 'admin']) ? 'disabled' : '' }}>
                 <small id="agent-name-help" class="identity-help">Controls the AI employee's chat identity — for example, Nia. This does not change the business brand.</small>
+                <label for="widget-launcher-label">Chat launcher label</label>
+                <input id="widget-launcher-label" name="widget_launcher_label" value="{{ $widgetLauncherLabel }}" maxlength="80" placeholder="Chat" aria-describedby="widget-launcher-label-help" {{ ! $canManageSettings ? 'disabled' : '' }}>
+                <small id="widget-launcher-label-help" class="identity-help">Text shown on the floating chat button. Use any short phrase; leave blank to show the visitor's localized default.</small>
 
                 <section class="theme-section" aria-labelledby="widget-theme-title">
                     <h3 id="widget-theme-title">Widget branding</h3>
@@ -79,7 +84,7 @@
                     </div>
 
                     <div class="theme-preview" id="widget-theme-preview" style="--preview-primary:{{ $previewWidgetTheme['primary'] }};--preview-accent:{{ $previewWidgetTheme['accent'] }};--preview-primary-foreground:{{ $previewWidgetTheme['primary_foreground'] }};--preview-accent-foreground:{{ $previewWidgetTheme['accent_foreground'] }}">
-                        <div class="theme-preview-launcher"><span id="theme-preview-business-initial">{{ mb_strtoupper(mb_substr(old('business_name', $agent->business_name ?: $organization->name), 0, 1)) }}</span><b>Ask <span id="theme-preview-business">{{ old('business_name', $agent->business_name ?: $organization->name) }}</span></b></div>
+                        <div class="theme-preview-launcher"><span id="theme-preview-business-initial">{{ mb_strtoupper(mb_substr(old('business_name', $agent->business_name ?: $organization->name), 0, 1)) }}</span><b id="theme-preview-launcher-label">{{ $widgetLauncherPreview }}</b></div>
                         <div class="theme-preview-frame">
                             <div class="theme-preview-head"><span id="theme-preview-assistant-initial">{{ mb_strtoupper(mb_substr(old('agent_name', $agent->assistantDisplayName()), 0, 1)) }}</span><div><b><span id="theme-preview-assistant">{{ old('agent_name', $agent->assistantDisplayName()) }}</span> · <span id="theme-preview-header-business">{{ old('business_name', $agent->business_name ?: $organization->name) }}</span></b><small>● Online · Powered by Legatus</small></div></div>
                             <div class="theme-preview-body"><p>Hello! How can I help?</p><p>Show me your most popular products</p></div>
@@ -193,6 +198,7 @@
     const status=document.querySelector('#widget-theme-status');
     const businessInput=document.querySelector('#business-name');
     const assistantInput=document.querySelector('#agent-name');
+    const launcherLabelInput=document.querySelector('#widget-launcher-label');
     const hex=/^#[0-9A-Fa-f]{6}$/;
 
     function luminance(color){
@@ -247,16 +253,16 @@
     function syncIdentity(){
         const business=businessInput.value.trim()||'Your business';
         const assistant=assistantInput.value.trim()||'AI Assistant';
-        document.querySelector('#theme-preview-business').textContent=business;
         document.querySelector('#theme-preview-header-business').textContent=business;
         document.querySelector('#theme-preview-assistant').textContent=assistant;
+        document.querySelector('#theme-preview-launcher-label').textContent=launcherLabelInput.value.trim()||'Chat';
         document.querySelector('#theme-preview-business-initial').textContent=Array.from(business)[0].toLocaleUpperCase();
         document.querySelector('#theme-preview-assistant-initial').textContent=Array.from(assistant)[0].toLocaleUpperCase();
     }
     radios.forEach(radio=>radio.addEventListener('change',syncTheme));
     [primaryInput,accentInput].forEach(input=>input.addEventListener('input',()=>applyPreview(primaryInput.value,accentInput.value)));
     [[primaryPicker,primaryInput],[accentPicker,accentInput]].forEach(([picker,input])=>picker.addEventListener('input',()=>{input.value=picker.value.toUpperCase();applyPreview(primaryInput.value,accentInput.value)}));
-    [businessInput,assistantInput].forEach(input=>input.addEventListener('input',syncIdentity));
+    [businessInput,assistantInput,launcherLabelInput].forEach(input=>input.addEventListener('input',syncIdentity));
     syncTheme();syncIdentity();
 }
 </script>
