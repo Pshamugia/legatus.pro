@@ -87,7 +87,8 @@ class SalesToolbox
             (string) $a['query'],
         );
         $categoryIndexPending = $taxonomyProductIds === [];
-        $localSearch = function () use ($agent, $conversation, $a, $termGroups, $identityMatch, &$taxonomyProductIds) {
+        $presentationLimit = (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6;
+        $localSearch = function () use ($agent, $conversation, $a, $termGroups, $identityMatch, $presentationLimit, &$taxonomyProductIds) {
             if ($termGroups === []) {
                 return collect();
             }
@@ -131,7 +132,9 @@ class SalesToolbox
                 $conversation,
                 $authoritativeCategoryBrowse ? [] : $termGroups,
                 $authoritativeCategoryBrowse ? false : $identityMatch,
-                (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6,
+                // Fetch one extra candidate for an honest has_more signal.
+                // The extra record is never exposed to the customer.
+                min(50, $presentationLimit + ((bool) ($a['_return_all_matches'] ?? false) ? 0 : 1)),
             );
         };
         $matches = $localSearch();
@@ -201,12 +204,22 @@ class SalesToolbox
             );
         }
 
+        $returnAllMatches = (bool) ($a['_return_all_matches'] ?? false);
+        $hasMore = ! $returnAllMatches
+            && ($products->count() + $unavailableProducts->count()) > $presentationLimit;
+        if (! $returnAllMatches) {
+            $products = $products->take($presentationLimit)->values();
+            $remaining = max(0, $presentationLimit - $products->count());
+            $unavailableProducts = $unavailableProducts->take($remaining)->values();
+        }
+
         return [
             'ok' => true,
             'data_boundary' => $this->catalogDataBoundary(),
             'source' => $publicSearch['source'] ?? $this->catalogSource($agent),
-            'result_scope' => (bool) ($a['_return_all_matches'] ?? false) ? 'complete' : 'shortlist',
+            'result_scope' => $returnAllMatches ? 'complete' : 'shortlist',
             'returned_count' => $products->count() + $unavailableProducts->count(),
+            'has_more' => $hasMore,
             'products' => $products->all(),
             'unavailable_products' => $unavailableProducts->all(),
             'did_you_mean' => $didYouMean,

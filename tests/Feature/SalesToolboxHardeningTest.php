@@ -927,6 +927,36 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([], $result['unavailable_products']);
     }
 
+    public function test_search_shortlist_reports_when_more_matching_products_exist(): void
+    {
+        [$agent, $first, $conversation] = $this->context(stock: 3);
+        $first->update(['name' => 'Category option 1', 'search_text' => 'category option 1']);
+        foreach (range(2, 8) as $index) {
+            $agent->products()->create([
+                'name' => 'Category option '.$index,
+                'sku' => 'CATEGORY-OPTION-'.$index,
+                'category' => 'General',
+                'search_text' => 'category option '.$index,
+                'price' => 10 + $index,
+                'stock' => 3,
+                'is_active' => true,
+                'metadata' => [],
+            ]);
+        }
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'category option',
+            'category' => null,
+            'max_price' => null,
+        ], $agent, $conversation);
+
+        $this->assertSame('shortlist', $result['result_scope']);
+        $this->assertSame(6, $result['returned_count']);
+        $this->assertTrue($result['has_more']);
+        $this->assertCount(6, $result['products']);
+    }
+
     public function test_verified_category_membership_does_not_require_category_words_in_product_titles(): void
     {
         [$agent, $first, $conversation] = $this->context(stock: 3);

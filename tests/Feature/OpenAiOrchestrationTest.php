@@ -993,6 +993,27 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertFalse($method->invoke($orchestrator, 'There are only 5 available products.', $complete));
     }
 
+    public function test_response_style_changes_between_customer_turns_without_relaxing_factual_rules(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'style-variation-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'responseStyleInstructions');
+        $orchestrator = app(OpenAiSalesOrchestrator::class);
+
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'Show me some options.']);
+        $first = $method->invoke($orchestrator, $conversation);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'Show me some options again.']);
+        $second = $method->invoke($orchestrator, $conversation);
+
+        $this->assertNotSame($first, $second);
+        $this->assertStringContainsString('preserving the exact verified facts', $first);
+        $this->assertStringContainsString('result_scope=shortlist', $second);
+        $this->assertStringContainsString('If has_more=true', $second);
+    }
+
     public function test_quantity_correction_reuses_the_budget_and_replaces_the_failed_bundle_size(): void
     {
         $this->seed();

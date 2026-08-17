@@ -243,7 +243,7 @@ class OpenAiSalesOrchestrator
             $response = $this->postJson('/responses', [
                 'model' => $primaryModel,
                 'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
-                'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation),
+                'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->responseStyleInstructions($conversation),
                 'input' => $this->history($conversation, $orchestrationMessage),
                 'tools' => $this->tools->definitions($agent),
                 'tool_choice' => 'auto',
@@ -852,13 +852,21 @@ class OpenAiSalesOrchestrator
         $grounding = [
             'products' => $evidence,
             'verified_no_remaining_matches' => $verifiedEmptySearch && $productIds->isEmpty(),
+            'catalog_result_scope' => $used
+                ->whereIn('name', ['search_products', 'recommend_products'])
+                ->pluck('result.result_scope')->filter()->last(),
+            'has_more' => $used
+                ->whereIn('name', ['search_products', 'recommend_products'])
+                ->pluck('result.has_more')->filter(fn ($value): bool => is_bool($value))->last(),
         ];
 
         try {
             $response = $this->postJson('/responses', [
                 'model' => $model,
                 'reasoning' => ['effort' => 'low'],
-                'instructions' => 'Write the final customer-facing reply as a warm, capable human shopping assistant. Use the complete dialogue and only the verified catalog evidence supplied below. Answer the latest question directly. Do not sound like a search engine, do not merely say that options were found, do not tell the customer to choose below, and do not repeat products excluded from the current evidence. Respect singular/plural and distinguish available from unavailable items. Lead with exactly what is currently available to purchase. Never describe an unavailable product as something the business currently "has" or offers for purchase; say instead that it is listed in the catalog but sold out and cannot currently be purchased. When products contains more than one record, mention every supplied product and its correct availability; never silently omit sold-out records. When verified_no_remaining_matches is true, answer naturally that there are no other matching catalog items beyond those already discussed. Do not add any business fact absent from the evidence. Verified evidence: '.json_encode($grounding, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'instructions' => 'Write the final customer-facing reply as a warm, capable human shopping assistant. Use the complete dialogue and only the verified catalog evidence supplied below. Answer the latest question directly. Do not sound like a search engine, do not merely say that options were found, do not tell the customer to choose below, and do not repeat products excluded from the current evidence. Respect singular/plural and distinguish available from unavailable items. When catalog_result_scope is shortlist, introduce the products as a selected sample or a few suitable options, never as the complete set of available matches. When has_more is true, naturally make clear that more matching options can be shown. Never describe an unavailable product as something the business currently "has" or offers for purchase; say instead that it is listed in the catalog but sold out and cannot currently be purchased. When products contains more than one record, mention every supplied product and its correct availability; never silently omit sold-out records. When verified_no_remaining_matches is true, answer naturally that there are no other matching catalog items beyond those already discussed. Do not add any business fact absent from the evidence.'
+                    .$this->responseStyleInstructions($conversation)
+                    .' Verified evidence: '.json_encode($grounding, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 'input' => $this->history($conversation, $customerMessage),
                 'max_output_tokens' => 500,
                 'text' => ['format' => [
@@ -1541,6 +1549,25 @@ class OpenAiSalesOrchestrator
         return $history->all();
     }
 
+    private function responseStyleInstructions(Conversation $conversation): string
+    {
+        $turnId = (int) ($conversation->messages()
+            ->where('role', 'customer')
+            ->latest('id')
+            ->value('id') ?? $conversation->id);
+        $variants = [
+            'Lead with a concise direct answer, then explain the useful details.',
+            'Use a warm conversational opening, then present the verified options clearly.',
+            'Frame the answer as practical personal guidance while staying concise.',
+            'Use a fresh natural sentence structure and finish with one helpful next step.',
+        ];
+        $variant = $variants[abs($turnId) % count($variants)];
+
+        return ' Response style for this turn: '.$variant
+            .' Do not reuse a stock opening or copy the wording of an earlier answer. Vary sentence structure and transitions naturally, while preserving the exact verified facts, constraints, and meaning.'
+            .' Every search_products or recommend_products result with result_scope=shortlist is a deliberately limited selection, not the full inventory. Describe returned records as selected examples or options. If has_more=true, explicitly offer to show more. Never state or imply that a shortlist contains every currently available match.';
+    }
+
     private function instructions(Agent $agent): string
     {
         $threshold = (float) ($agent->settings['handoff_threshold'] ?? 0.72);
@@ -1889,7 +1916,7 @@ class OpenAiSalesOrchestrator
         $response = $this->postJson('/responses', [
             'model' => $fallbackModel,
             'reasoning' => ['effort' => config('services.openai.fallback_reasoning_effort')],
-            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation)
+            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->responseStyleInstructions($conversation)
                 .' This is a fresh fallback orchestration chain. Re-evaluate the latest customer turn and use tools only when authorized. Never assume that the primary model\'s proposed state-changing action was correct.',
             'input' => $this->history($conversation, $recoveryInput),
             'tools' => $this->tools->definitions($agent),
@@ -1944,7 +1971,7 @@ class OpenAiSalesOrchestrator
         $response = $this->postJson('/responses', [
             'model' => $fallbackModel,
             'reasoning' => ['effort' => config('services.openai.fallback_reasoning_effort')],
-            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation)
+            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->responseStyleInstructions($conversation)
                 .' This is the single server-authorized fallback attempt after the primary model failed validation. Produce one final strict response from the full dialogue and the server-controlled evidence in the latest user input. Do not claim that the absence of a match is a technical failure, and do not request human handoff merely because the primary draft failed.',
             'input' => $this->history($conversation, $recoveryInput),
             'max_output_tokens' => config('services.openai.max_output_tokens'),
