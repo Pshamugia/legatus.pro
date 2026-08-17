@@ -193,6 +193,8 @@ class SalesToolbox
             'ok' => true,
             'data_boundary' => $this->catalogDataBoundary(),
             'source' => $publicSearch['source'] ?? $this->catalogSource($agent),
+            'result_scope' => (bool) ($a['_return_all_matches'] ?? false) ? 'complete' : 'shortlist',
+            'returned_count' => $products->count() + $unavailableProducts->count(),
             'products' => $products->all(),
             'unavailable_products' => $unavailableProducts->all(),
             'did_you_mean' => $didYouMean,
@@ -517,6 +519,7 @@ class SalesToolbox
 
                 return $product;
             });
+        $eligibleCount = $ranked->count();
         $requestedQuantity = max(0, min(5, (int) ($a['quantity'] ?? 0)));
         $bundleTotal = null;
         $bundleComplete = null;
@@ -542,7 +545,7 @@ class SalesToolbox
             ? $this->validatedSearchSuggestion($criteria, $this->nearestCatalogSuggestion($agent, $termGroups))
             : null;
 
-        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'recommendations' => $ranked->all(), 'requested_quantity' => $requestedQuantity ?: null, 'bundle_complete' => $bundleComplete, 'bundle_total' => $bundleTotal, 'budget' => isset($a['budget']) ? (float) $a['budget'] : null, 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
+        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'result_scope' => 'shortlist', 'returned_count' => $ranked->count(), 'has_more' => $eligibleCount > $ranked->count(), 'recommendations' => $ranked->all(), 'requested_quantity' => $requestedQuantity ?: null, 'bundle_complete' => $bundleComplete, 'bundle_total' => $bundleTotal, 'budget' => isset($a['budget']) ? (float) $a['budget'] : null, 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
     }
 
     private function selectBudgetBundle(Collection $products, int $quantity, ?float $budget): Collection

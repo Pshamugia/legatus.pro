@@ -865,6 +865,35 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertLessThanOrEqual(80, collect($result['recommendations'])->sum('price'));
     }
 
+    public function test_recommendation_results_identify_themselves_as_a_limited_shortlist(): void
+    {
+        [$agent, $existing, $conversation] = $this->context(stock: 4);
+        Http::fake(['*' => Http::response('<html><body></body></html>')]);
+        $existing->update(['name' => 'Option 1', 'category' => 'General', 'search_text' => 'option general']);
+        foreach (range(2, 7) as $index) {
+            $agent->products()->create([
+                'name' => 'Option '.$index,
+                'sku' => 'SHORTLIST-'.$index,
+                'category' => 'General',
+                'search_text' => 'option general '.$index,
+                'price' => 10 + $index,
+                'stock' => 3,
+                'is_active' => true,
+                'metadata' => [],
+            ]);
+        }
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'option', 'budget' => null, 'quantity' => null, 'category' => null,
+            'mood' => null, 'occasion' => null, 'limit' => 5, 'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertSame('shortlist', $result['result_scope']);
+        $this->assertSame(5, $result['returned_count']);
+        $this->assertTrue($result['has_more']);
+        $this->assertCount(5, $result['recommendations']);
+    }
+
     public function test_verified_business_category_index_is_used_before_polluted_general_catalog_text(): void
     {
         [$agent, $unrelated, $conversation] = $this->context(stock: 3);

@@ -910,6 +910,32 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('repeated the previous assistant answer', $reason);
     }
 
+    public function test_a_limited_catalog_shortlist_cannot_be_presented_as_the_complete_inventory_count(): void
+    {
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'claimsShortlistIsComplete');
+        $orchestrator = app(OpenAiSalesOrchestrator::class);
+        $shortlist = collect([[
+            'name' => 'recommend_products',
+            'result' => [
+                'ok' => true,
+                'result_scope' => 'shortlist',
+                'returned_count' => 5,
+                'has_more' => true,
+            ],
+        ]]);
+
+        $this->assertTrue($method->invoke($orchestrator, 'There are only 5 available products.', $shortlist));
+        $this->assertTrue($method->invoke($orchestrator, 'I found 5 matching products.', $shortlist));
+        $this->assertTrue($method->invoke($orchestrator, 'ხელმისაწვდომია 5 შესაბამისი პროდუქტი.', $shortlist));
+        $this->assertFalse($method->invoke($orchestrator, 'Here are 5 selected options; I can show you more.', $shortlist));
+
+        $complete = collect([[
+            'name' => 'search_products',
+            'result' => ['ok' => true, 'result_scope' => 'complete', 'returned_count' => 5],
+        ]]);
+        $this->assertFalse($method->invoke($orchestrator, 'There are only 5 available products.', $complete));
+    }
+
     public function test_quantity_correction_reuses_the_budget_and_replaces_the_failed_bundle_size(): void
     {
         $this->seed();

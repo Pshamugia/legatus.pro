@@ -1156,10 +1156,10 @@ class OpenAiSalesOrchestrator
                 ? ($georgian
                     ? ($products->count() === 1
                         ? 'კატალოგში „'.(string) data_get($products->first(), 'name').'“ ვიპოვე — ის ხელმისაწვდომია.'
-                        : 'კატალოგში '.$products->count().' შესაბამისი ხელმისაწვდომი ვარიანტი ვიპოვე. შეგიძლიათ ქვემოთ შეარჩიოთ.')
+                        : 'კატალოგში შესაბამისი ხელმისაწვდომი პროდუქტები გვაქვს. ქვემოთ რამდენიმე ვარიანტს გიჩვენებთ; თუ გსურთ, მეტსაც მოგიძებნით.')
                     : ($products->count() === 1
                         ? 'I found '.(string) data_get($products->first(), 'name').' in the catalog, and it is available.'
-                        : 'I found '.$products->count().' matching available options in the catalog. You can choose below.'))
+                        : 'The catalog has matching available products. Here are several options; I can find more if you would like.'))
                 : ($georgian
                     ? 'კატალოგში ამ მოთხოვნის შესაბამისი ხელმისაწვდომი პროდუქტი ვერ ვიპოვე.'
                     : 'I could not find a matching available product in the verified catalog.'),
@@ -1585,6 +1585,9 @@ class OpenAiSalesOrchestrator
             return 'The response selected a product that was not returned by a successful verification tool.';
         }
         $text = (string) ($data['text'] ?? '');
+        if ($this->claimsShortlistIsComplete($text, $successful)) {
+            return 'The response presented a limited catalog shortlist as the total number of matching products.';
+        }
         if ($reason = $this->inferredToolReason($text, $successfulNames)) {
             return $reason;
         }
@@ -1609,6 +1612,26 @@ class OpenAiSalesOrchestrator
         }
 
         return null;
+    }
+
+    private function claimsShortlistIsComplete(string $text, Collection $successful): bool
+    {
+        return $successful
+            ->filter(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true)
+                && data_get($call, 'result.result_scope') === 'shortlist')
+            ->contains(function (array $call) use ($text): bool {
+                $returned = (int) data_get($call, 'result.returned_count', 0);
+                if ($returned < 1) {
+                    return false;
+                }
+
+                $number = preg_quote((string) $returned, '/');
+
+                return preg_match('/(?:\bonly\b|\bjust\b|\bexactly\b|\btotal(?:\s+of)?\b|მხოლოდ|სულ|ჯამში)\s*'.$number.'\b/iu', $text) === 1
+                    || preg_match('/(?:\bavailable\b|ხელმისაწვდომ\p{L}*)\s*(?:\p{L}+\s+){0,3}'.$number.'\b/iu', $text) === 1
+                    || preg_match('/(?:\bfound\b|ვიპოვ\p{L}*)\s*(?:\p{L}+\s+){0,2}'.$number.'\b/iu', $text) === 1
+                    || preg_match('/\b'.$number.'\s*(?:\p{L}+\s+){0,3}(?:\bonly\b|\bin total\b|მხოლოდ|სულ|ჯამში)/iu', $text) === 1;
+            });
     }
 
     private function forceHandoff(Conversation $conversation, string $reason, string $suggestedReply): void
