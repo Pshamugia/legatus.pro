@@ -967,6 +967,44 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('repeated the previous assistant answer', $reason);
     }
 
+    public function test_guardrail_rejects_an_offer_to_place_an_order_and_collect_checkout_data(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'unsupported-order-action-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+
+        $reason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => 'შეკვეთის გასაფორმებლად მომწერეთ მიმღების სახელი და გვარი, ტელეფონის ნომერი და მიწოდების მისამართი.',
+            'intent' => 'clarification', 'confidence' => .99,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ], collect());
+
+        $this->assertStringContainsString('unsupported order-fulfilment action', $reason);
+    }
+
+    public function test_guardrail_allows_directing_a_customer_to_verified_website_checkout(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'website-checkout-direction-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+
+        $reason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => 'შეკვეთის დასასრულებლად გახსენით პროდუქტის ბმული და შეავსეთ ველები ბიზნესის ვებსაიტზე.',
+            'intent' => 'clarification', 'confidence' => .99,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ], collect());
+
+        $this->assertNull($reason);
+    }
+
     public function test_a_limited_catalog_shortlist_cannot_be_presented_as_the_complete_inventory_count(): void
     {
         $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'claimsShortlistIsComplete');
