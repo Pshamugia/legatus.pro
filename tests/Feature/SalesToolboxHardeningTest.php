@@ -1309,6 +1309,153 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertLessThanOrEqual(100, collect($result['recommendations'])->max('price'));
     }
 
+    public function test_broad_occasion_matching_verified_taxonomy_uses_only_available_category_members(): void
+    {
+        [$agent, $generic, $conversation] = $this->context(stock: 3);
+        $generic->update([
+            'name' => 'Recently added generic item',
+            'category' => 'General',
+            'search_text' => 'Recently added generic item',
+        ]);
+        $available = $agent->products()->create([
+            'name' => 'Curated category item',
+            'sku' => 'CURATED-AVAILABLE',
+            'category' => 'General',
+            'search_text' => 'Curated category item',
+            'price' => 24,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $soldOut = $agent->products()->create([
+            'name' => 'Unavailable category item',
+            'sku' => 'CURATED-SOLD-OUT',
+            'category' => 'General',
+            'search_text' => 'Unavailable category item',
+            'price' => 12,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Curated occasion',
+            'name' => 'Category: Curated occasion',
+            'url' => 'https://store.example/categories/curated-occasion',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        foreach ([$available, $soldOut] as $product) {
+            $source->chunks()->create([
+                'agent_id' => $agent->id,
+                'kind' => 'product',
+                'title' => $product->name,
+                'content' => json_encode(['name' => $product->name]),
+                'content_hash' => hash('sha256', 'curated-occasion-'.$product->id),
+                'metadata' => ['product_id' => $product->id],
+            ]);
+        }
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => '',
+            'budget' => null,
+            'quantity' => null,
+            'category' => null,
+            'mood' => null,
+            'occasion' => 'Curated occasion',
+            'limit' => 5,
+            'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertSame([$available->id], collect($result['recommendations'])->pluck('id')->all());
+        $this->assertFalse(collect($result['recommendations'])->pluck('id')->contains($generic->id));
+        $this->assertFalse(collect($result['recommendations'])->pluck('id')->contains($soldOut->id));
+    }
+
+    public function test_verified_taxonomy_refreshes_live_category_availability_before_recommending(): void
+    {
+        [$agent, $generic, $conversation] = $this->context();
+        $staleAvailable = $agent->products()->create([
+            'name' => 'Stale category item',
+            'sku' => '41',
+            'category' => 'General',
+            'search_text' => 'Stale category item',
+            'price' => 15,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://bukinistebi.ge/products/stale/41'],
+        ]);
+        $liveAvailable = $agent->products()->create([
+            'name' => 'Live category item',
+            'sku' => '42',
+            'category' => 'General',
+            'search_text' => 'Live category item',
+            'price' => 18,
+            'stock' => 0,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://bukinistebi.ge/products/live/42'],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Curated occasion',
+            'name' => 'Category: Curated occasion',
+            'url' => 'https://bukinistebi.ge/categories/curated-occasion',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        foreach ([$staleAvailable, $liveAvailable] as $product) {
+            $source->chunks()->create([
+                'agent_id' => $agent->id,
+                'kind' => 'product',
+                'title' => $product->name,
+                'content' => json_encode(['name' => $product->name]),
+                'content_hash' => hash('sha256', 'live-curated-occasion-'.$product->id),
+                'metadata' => ['product_id' => $product->id],
+            ]);
+        }
+        $categoryHtml = <<<'HTML'
+                <div class="book-card">
+                  <a class="card-link" href="https://bukinistebi.ge/products/stale/41"></a>
+                  <h2 class="book-title-strong" title="Stale category item">Stale category item</h2>
+                  <span>&#8382; 15.00</span>
+                </div>
+                <div class="book-card">
+                  <a class="card-link" href="https://bukinistebi.ge/products/live/42"></a>
+                  <h2 class="book-title-strong" title="Live category item">Live category item</h2>
+                  <span>&#8382; 18.00</span>
+                  <button class="toggle-cart-btn">Add to cart</button>
+                </div>
+                HTML;
+        $this->assertCount(2, app(\App\Services\KnowledgeIngestionService::class)
+            ->storefrontProductsFromHtml($categoryHtml, 'https://bukinistebi.ge', true));
+        Http::fake([
+            'https://bukinistebi.ge/categories/curated-occasion' => Http::response($categoryHtml, 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => '',
+            'budget' => null,
+            'quantity' => null,
+            'category' => null,
+            'mood' => null,
+            'occasion' => 'Curated occasion',
+            'limit' => 5,
+            'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertSame(0, $staleAvailable->fresh()->stock);
+        $this->assertSame(1, $liveAvailable->fresh()->stock);
+        $this->assertSame([$liveAvailable->id], collect($result['recommendations'])->pluck('id')->all());
+        $this->assertFalse(collect($result['recommendations'])->pluck('id')->contains($generic->id));
+    }
+
     public function test_long_storefront_typo_suggestion_is_accepted_but_unrelated_names_are_rejected(): void
     {
         $method = new \ReflectionMethod(SalesToolbox::class, 'validatedSearchSuggestion');

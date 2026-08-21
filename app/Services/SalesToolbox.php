@@ -503,10 +503,36 @@ class SalesToolbox
             $a['category'] ?? null,
             $criteria,
         );
-        $storefrontQueries = $this->storefrontQueryCandidates($termGroups);
+        $taxonomyCriteria = $criteria;
+        $taxonomyTermGroups = $termGroups;
+
+        // Occasion/recipient is normally a soft ranking preference. When a
+        // broad request also names a verified tenant category, however, that
+        // category is authoritative product membership rather than merely a
+        // weak text signal. This keeps the behavior tenant- and
+        // industry-neutral: no language or occasion names are hard-coded.
+        if ($taxonomyProductIds === null && $termGroups === [] && $preferenceTermGroups !== []) {
+            $preferenceTaxonomyProductIds = $this->authoritativeTaxonomyProductIds(
+                $agent,
+                $preferenceTermGroups,
+                null,
+                $preferenceCriteria,
+            );
+            if ($preferenceTaxonomyProductIds !== null) {
+                $taxonomyProductIds = $preferenceTaxonomyProductIds;
+                $taxonomyCriteria = $preferenceCriteria;
+                $taxonomyTermGroups = $preferenceTermGroups;
+            }
+        }
+
+        $storefrontQueries = $this->storefrontQueryCandidates($taxonomyTermGroups);
         $liveProductIds = collect();
-        if ($taxonomyProductIds === [] && $storefrontQueries !== []) {
-            $liveSearch = $this->storefront->discoverCategory($agent, $criteria);
+        if ($taxonomyProductIds !== null && $storefrontQueries !== []) {
+            // Refresh a recognized public category before ranking it. Cached
+            // taxonomy membership tells us what belongs to the category; the
+            // live category page supplies the freshest public availability
+            // and may add newly listed products.
+            $liveSearch = $this->storefront->discoverCategory($agent, $taxonomyCriteria);
             $liveProductIds = collect($liveSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id);
         }
         if (($taxonomyProductIds === null || $taxonomyProductIds === [])
@@ -522,9 +548,9 @@ class SalesToolbox
             $liveProductIds = collect($liveSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id);
         }
 
-        $candidateProductIds = $taxonomyProductIds === [] && $liveProductIds->isNotEmpty()
-            ? $liveProductIds->unique()->values()->all()
-            : $taxonomyProductIds;
+        $candidateProductIds = $taxonomyProductIds !== null
+            ? collect($taxonomyProductIds)->merge($liveProductIds)->unique()->values()->all()
+            : null;
 
         $query = $agent->customerProducts()->where('is_active', true);
         $excludedProductIds = collect($a['exclude_product_ids'] ?? [])

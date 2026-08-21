@@ -603,7 +603,11 @@ class KnowledgeIngestionService
             $name = trim((string) ($titleNode?->getAttribute('title') ?: $titleNode?->textContent));
             $url = $this->absoluteCatalogUrl($origin, (string) $linkNode?->getAttribute('href'));
             $text = preg_replace('/\s+/u', ' ', trim((string) $card->textContent)) ?? '';
+            preg_match('/\x{20BE}\s*([0-9]+(?:[.,][0-9]{1,2})?)/u', $text, $nativePriceMatch);
             preg_match('/₾\s*([0-9]+(?:[.,][0-9]{1,2})?)/u', $text, $priceMatch);
+            if (empty($priceMatch[1]) && ! empty($nativePriceMatch[1])) {
+                $priceMatch = $nativePriceMatch;
+            }
             if ($name === '' || $url === null || empty($priceMatch[1])) {
                 continue;
             }
