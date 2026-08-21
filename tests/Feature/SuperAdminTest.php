@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Organization;
+use App\Models\AgentRun;
 use App\Models\PaddleSubscription;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -62,6 +63,41 @@ class SuperAdminTest extends TestCase
             ->assertOk()
             ->assertSee('Visible Store')
             ->assertDontSee('Hidden Store');
+    }
+
+    public function test_super_admin_sees_tenant_scoped_estimated_ai_spend_and_hybrid_usage(): void
+    {
+        config(['openai_costs.models' => [
+            'gpt-5.6-luna' => ['input' => 0.20, 'cached_input' => 0.02, 'cache_write' => 0.25, 'output' => 1.20],
+            'gpt-5.6-sol' => ['input' => 5.00, 'cached_input' => 0.50, 'cache_write' => 6.25, 'output' => 30.00],
+        ]]);
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        $organization = Organization::create(['name' => 'Measured Store', 'slug' => 'measured-store']);
+        $agent = $organization->agents()->create([
+            'name' => 'Measured Assistant', 'slug' => 'measured-assistant',
+            'business_name' => 'Measured Store', 'channels' => ['web'], 'settings' => [],
+        ]);
+        AgentRun::create([
+            'agent_id' => $agent->id,
+            'provider' => 'openai',
+            'model' => 'gpt-5.6-sol',
+            'status' => 'completed',
+            'route' => 'primary_to_fallback',
+            'fallback_reason' => 'structured_output_invalid',
+            'input_tokens' => 1_100_000,
+            'output_tokens' => 110_000,
+            'model_usage' => [
+                ['model' => 'gpt-5.6-luna', 'requests' => 1, 'input_tokens' => 1_000_000, 'cached_input_tokens' => 200_000, 'cache_write_tokens' => 100_000, 'output_tokens' => 100_000],
+                ['model' => 'gpt-5.6-sol', 'requests' => 1, 'input_tokens' => 100_000, 'cached_input_tokens' => 0, 'cache_write_tokens' => 0, 'output_tokens' => 10_000],
+            ],
+        ]);
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Estimated AI spend')
+            ->assertSee('$1.0890')
+            ->assertSee('1 Luna · 1 Sol requests · 1 fallback turns')
+            ->assertSee('No business is automatically blocked by this dashboard.');
     }
 
     public function test_super_admin_can_grant_and_revoke_complimentary_business_access(): void
