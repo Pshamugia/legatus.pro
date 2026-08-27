@@ -2001,6 +2001,29 @@ class OpenAiSalesOrchestrator
 
         $candidate = trim((string) config('services.openai.primary_model', 'gpt-5.6-luna')) ?: 'gpt-5.6-luna';
         $storedRoute = data_get($conversation->context, 'ai_model_route');
+
+        // A partial canary assignment is intentionally sticky so a customer
+        // does not jump between models mid-conversation. Once rollout reaches
+        // 100%, however, every conversation must move to the candidate model.
+        // Otherwise conversations that were assigned to Sol during an earlier
+        // canary remain on the expensive model forever, even after Luna is
+        // configured as the primary for all traffic.
+        if ($rolloutPercent === 100) {
+            $context = $conversation->context ?? [];
+            data_set($context, 'ai_model_route', [
+                'selected_model' => $candidate,
+                'established_model' => $establishedModel,
+                'candidate_model' => $candidate,
+                'rollout_percent' => 100,
+            ]);
+
+            if ($storedRoute !== data_get($context, 'ai_model_route')) {
+                $conversation->update(['context' => $context]);
+            }
+
+            return $candidate;
+        }
+
         if (is_array($storedRoute)
             && ($storedRoute['established_model'] ?? null) === $establishedModel
             && ($storedRoute['candidate_model'] ?? null) === $candidate
@@ -2019,6 +2042,7 @@ class OpenAiSalesOrchestrator
             'selected_model' => $selectedModel,
             'established_model' => $establishedModel,
             'candidate_model' => $candidate,
+            'rollout_percent' => $rolloutPercent,
         ]);
         $conversation->update(['context' => $context]);
 

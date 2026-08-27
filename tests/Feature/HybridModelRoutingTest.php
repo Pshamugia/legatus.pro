@@ -136,6 +136,40 @@ class HybridModelRoutingTest extends TestCase
         $this->assertSame('gpt-5.6-luna', data_get($conversation->fresh()->context, 'ai_model_route.selected_model'));
     }
 
+    public function test_full_rollout_moves_a_conversation_previously_pinned_to_sol_onto_luna(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'legacy-sol-canary-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => [
+                'ai_model_route' => [
+                    'selected_model' => 'gpt-5.6-sol',
+                    'established_model' => 'gpt-5.6-sol',
+                    'candidate_model' => 'gpt-5.6-luna',
+                ],
+            ],
+        ]);
+        $this->enableHybridCanary();
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+
+            return Http::response($this->strictResponse('migrated-to-luna', 'You are welcome.'));
+        });
+
+        app(SalesAgentService::class)->reply($agent, 'What can you help me with?', $conversation);
+
+        $responseRequests = $this->responseRequests();
+        $this->assertCount(1, $responseRequests);
+        $this->assertSame('gpt-5.6-luna', $responseRequests[0]->data()['model']);
+        $this->assertSame('gpt-5.6-luna', data_get($conversation->fresh()->context, 'ai_model_route.selected_model'));
+        $this->assertSame(100, data_get($conversation->fresh()->context, 'ai_model_route.rollout_percent'));
+    }
+
     public function test_invalid_luna_output_calls_sol_once_on_a_fresh_chain(): void
     {
         $this->seed();
