@@ -106,25 +106,26 @@
             <h2 style="font-size:38px;margin:10px 0">Start with chat. Add social when you need it.</h2>
             <p style="color:var(--muted)">Choose a billing period, then add automated social publishing to your Legatus Chat subscription.</p>
         </div>
-        <div class="pricing-configurator">
-            <div class="pricing-products">
-                <article class="pricing-product pricing-product-included">
-                    <span class="pricing-product-status">Included</span>
-                    <div><span class="eyebrow">Legatus Chat</span><h3>AI conversations across every channel</h3><p>Website chat, Facebook Messenger, Instagram Direct, verified catalog answers, and full admin access.</p></div>
-                </article>
-                <label class="pricing-product pricing-product-addon" for="social-addon-toggle">
-                    <input id="social-addon-toggle" type="checkbox">
-                    <span class="pricing-checkbox" aria-hidden="true"></span>
-                    <div><span class="eyebrow">Add-on</span><h3>Add Social media manager</h3><p>Schedule automatic Facebook and Instagram product posts months in advance.</p></div>
-                    <strong>+$30/month</strong>
-                </label>
-            </div>
-            <p id="pricing-selection" class="pricing-selection" aria-live="polite">Your selection: Legatus Chat</p>
-        </div>
         <div class="billing-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
-            <article class="panel billing-option" data-chat-price="$30" data-social-price="$60" data-chat-note="billed every month" data-social-note="billed every month"><span class="eyebrow">Monthly</span><h3>$30</h3><p>billed every month</p></article>
-            <article class="panel billing-option" data-chat-price="$162" data-social-price="$324" data-chat-note="billed every 6 months · save $18" data-social-note="billed every 6 months · save $36"><span class="eyebrow">6 months</span><h3>$162</h3><p>billed every 6 months · save $18</p></article>
-            <article class="panel billing-option billing-option-featured" data-chat-price="$288" data-social-price="$576" data-chat-note="billed every year · save $72" data-social-note="billed every year · save $144"><span class="eyebrow">Annual</span><h3>$288</h3><p>billed every year · save $72</p></article>
+            @foreach([
+                ['id' => 'monthly', 'label' => 'Monthly', 'chat' => '$30', 'social' => '$60', 'chat_note' => 'billed every month', 'social_note' => 'Chat + Social · billed every month', 'addon' => '+$30/month', 'featured' => false],
+                ['id' => 'six-months', 'label' => '6 months', 'chat' => '$162', 'social' => '$324', 'chat_note' => 'billed every 6 months · save $18', 'social_note' => 'Chat + Social · billed every 6 months · save $36', 'addon' => '+$162/6 months', 'featured' => false],
+                ['id' => 'annual', 'label' => 'Annual', 'chat' => '$288', 'social' => '$576', 'chat_note' => 'billed every year · save $72', 'social_note' => 'Chat + Social · billed every year · save $144', 'addon' => '+$288/year', 'featured' => true],
+            ] as $period)
+                <article class="panel billing-option{{ $period['featured'] ? ' billing-option-featured' : '' }}" data-chat-price="{{ $period['chat'] }}" data-social-price="{{ $period['social'] }}" data-chat-note="{{ $period['chat_note'] }}" data-social-note="{{ $period['social_note'] }}">
+                    <span class="eyebrow">{{ $period['label'] }}</span>
+                    <details class="billing-package-picker">
+                        <summary><span class="billing-package-name">Legatus Chat</span><span aria-hidden="true">⌄</span></summary>
+                        <label for="social-addon-{{ $period['id'] }}">
+                            <input id="social-addon-{{ $period['id'] }}" class="social-addon-toggle" type="checkbox">
+                            <span><strong>Add Social media manager</strong><small>Automated Facebook and Instagram publishing</small></span>
+                            <b>{{ $period['addon'] }}</b>
+                        </label>
+                    </details>
+                    <h3 aria-live="polite">{{ $period['chat'] }}</h3>
+                    <p>{{ $period['chat_note'] }}</p>
+                </article>
+            @endforeach
         </div>
         <article class="creative-preview panel">
             <div><span class="eyebrow">Coming soon</span><h3>Legatus Creative</h3><p>AI-created campaign copy and visuals, prepared and published for each social channel.</p></div>
@@ -139,7 +140,7 @@
 </div>
 <style>
 .launch-steps{padding:25px 0 70px}.launch-steps-copy{text-align:center;max-width:680px;margin:0 auto 28px}.launch-steps-copy h2{font-size:38px;margin:10px 0}.launch-steps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.launch-steps-grid article>span{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--lime);font-weight:800}.launch-steps-grid h3{margin:18px 0 8px}.launch-steps-grid p{color:var(--muted);font-size:14px;line-height:1.65;margin:0}
-.pricing-configurator{max-width:920px;margin:0 auto 22px}.pricing-products{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.pricing-product{position:relative;display:flex;align-items:flex-start;gap:16px;padding:22px;border:1px solid var(--line);border-radius:22px;background:#fff}.pricing-product h3{margin:7px 0 8px;font-size:20px}.pricing-product p{margin:0;color:var(--muted);font-size:14px;line-height:1.55}.pricing-product-included{border-color:#b9d8c7;background:#f5fbf7}.pricing-product-status{position:absolute;right:18px;top:18px;padding:6px 10px;border-radius:999px;background:#dff3e6;color:var(--green);font-size:11px;font-weight:800}.pricing-product-addon{cursor:pointer;padding-left:62px;transition:border-color .2s,box-shadow .2s,background .2s}.pricing-product-addon input{position:absolute;opacity:0;pointer-events:none}.pricing-checkbox{position:absolute;left:22px;top:24px;width:22px;height:22px;border:2px solid #a8b2ad;border-radius:7px;background:#fff}.pricing-product-addon:has(input:checked){border-color:var(--green);box-shadow:0 0 0 3px rgba(25,91,67,.1);background:#f5fbf7}.pricing-product-addon input:checked+.pricing-checkbox{border-color:var(--green);background:var(--green)}.pricing-product-addon input:checked+.pricing-checkbox:after{content:'✓';position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:14px;font-weight:900}.pricing-product-addon>strong{margin-left:auto;white-space:nowrap;color:var(--green)}.pricing-selection{text-align:center;margin:14px 0 0;color:var(--green);font-weight:800}.billing-option{padding:28px}.billing-option h3{font-size:38px;margin:16px 0 4px}.billing-option p{color:var(--muted)}.billing-option-featured{border:2px solid var(--green)}.creative-preview{margin-top:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#f3f4f2}.creative-preview h3{font-size:24px;margin:8px 0}.creative-preview p{margin:0;color:var(--muted)}.creative-badge{padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;font-weight:800;white-space:nowrap}
+.billing-option{padding:28px;min-width:0}.billing-option h3{font-size:38px;margin:18px 0 4px}.billing-option>p{color:var(--muted);min-height:48px}.billing-option-featured{border:2px solid var(--green)}.billing-package-picker{position:relative;margin-top:12px}.billing-package-picker summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#f8faf8;cursor:pointer;font-weight:750;list-style:none}.billing-package-picker summary::-webkit-details-marker{display:none}.billing-package-picker[open] summary{border-color:var(--green);border-radius:12px 12px 0 0}.billing-package-picker label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px;border:1px solid var(--green);border-top:0;border-radius:0 0 12px 12px;background:#fff;cursor:pointer}.billing-package-picker input{width:18px;height:18px;accent-color:var(--green)}.billing-package-picker label span{display:flex;flex-direction:column;gap:3px}.billing-package-picker label small{color:var(--muted);font-size:11px;line-height:1.35}.billing-package-picker label b{color:var(--green);font-size:12px;white-space:nowrap}.creative-preview{margin-top:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#f3f4f2}.creative-preview h3{font-size:24px;margin:8px 0}.creative-preview p{margin:0;color:var(--muted)}.creative-badge{padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;font-weight:800;white-space:nowrap}
 @media(max-width:850px){
     .hero{grid-template-columns:minmax(0,1fr);gap:42px}
     .hero>section{min-width:0}
@@ -171,10 +172,6 @@
     .launch-steps-grid{grid-template-columns:1fr}
     #pricing{padding:48px 0!important}
     #pricing h2{font-size:32px!important}
-    .pricing-products{grid-template-columns:1fr}
-    .pricing-product{padding:20px}
-    .pricing-product-addon{padding-left:58px;flex-wrap:wrap}
-    .pricing-product-addon>strong{width:100%;margin:4px 0 0}
     .billing-grid{grid-template-columns:1fr!important}
     .creative-preview{align-items:flex-start;flex-direction:column}
 }
@@ -184,27 +181,27 @@
     .proof{grid-template-columns:1fr}
 }
 </style>
-<script>
+<script nonce="{{ request()->attributes->get('csp_nonce') }}">
 document.addEventListener('DOMContentLoaded', () => {
-    const toggle = document.getElementById('social-addon-toggle');
-    const selection = document.getElementById('pricing-selection');
     const options = document.querySelectorAll('.billing-option');
 
-    if (!toggle || !selection || !options.length) return;
+    options.forEach((option) => {
+        const toggle = option.querySelector('.social-addon-toggle');
+        const packageName = option.querySelector('.billing-package-name');
+        const price = option.querySelector('h3');
+        const note = option.querySelector(':scope > p');
 
-    const updatePricing = () => {
-        const socialIncluded = toggle.checked;
-        options.forEach((option) => {
-            option.querySelector('h3').textContent = socialIncluded ? option.dataset.socialPrice : option.dataset.chatPrice;
-            option.querySelector('p').textContent = socialIncluded ? option.dataset.socialNote : option.dataset.chatNote;
-        });
-        selection.textContent = socialIncluded
-            ? 'Your selection: Legatus Chat + Social media manager'
-            : 'Your selection: Legatus Chat';
-    };
+        if (!toggle || !packageName || !price || !note) return;
 
-    toggle.addEventListener('change', updatePricing);
-    updatePricing();
+        const updatePricing = () => {
+            price.textContent = toggle.checked ? option.dataset.socialPrice : option.dataset.chatPrice;
+            note.textContent = toggle.checked ? option.dataset.socialNote : option.dataset.chatNote;
+            packageName.textContent = toggle.checked ? 'Legatus Chat + Social' : 'Legatus Chat';
+        };
+
+        toggle.addEventListener('change', updatePricing);
+        updatePricing();
+    });
 });
 </script>
 @endsection
