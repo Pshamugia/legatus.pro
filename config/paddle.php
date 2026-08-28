@@ -12,4 +12,9 @@ return [
         'six_months' => env('PADDLE_PRICE_SIX_MONTHS'),
         'yearly' => env('PADDLE_PRICE_YEARLY'),
     ],
+    'social_prices' => [
+        'monthly' => env('PADDLE_PRICE_SOCIAL_MONTHLY'),
+        'six_months' => env('PADDLE_PRICE_SOCIAL_SIX_MONTHS'),
+        'yearly' => env('PADDLE_PRICE_SOCIAL_YEARLY'),
+    ],
 ];

@@ -108,11 +108,18 @@
         </div>
         <div class="billing-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
             @foreach([
-                ['id' => 'monthly', 'label' => 'Monthly', 'chat' => '$30', 'social' => '$60', 'chat_note' => 'billed every month', 'social_note' => 'Chat + Social · billed every month', 'addon' => '+$30/month', 'featured' => false],
-                ['id' => 'six-months', 'label' => '6 months', 'chat' => '$162', 'social' => '$324', 'chat_note' => 'billed every 6 months · save $18', 'social_note' => 'Chat + Social · billed every 6 months · save $36', 'addon' => '+$162/6 months', 'featured' => false],
-                ['id' => 'annual', 'label' => 'Annual', 'chat' => '$288', 'social' => '$576', 'chat_note' => 'billed every year · save $72', 'social_note' => 'Chat + Social · billed every year · save $144', 'addon' => '+$288/year', 'featured' => true],
+                ['id' => 'monthly', 'key' => 'monthly', 'label' => 'Monthly', 'chat' => '$30', 'social' => '$60', 'chat_note' => 'billed every month', 'social_note' => 'Chat + Social · billed every month', 'addon' => '+$30/month', 'featured' => false],
+                ['id' => 'six-months', 'key' => 'six_months', 'label' => '6 months', 'chat' => '$162', 'social' => '$324', 'chat_note' => 'billed every 6 months · save $18', 'social_note' => 'Chat + Social · billed every 6 months · save $36', 'addon' => '+$162/6 months', 'featured' => false],
+                ['id' => 'annual', 'key' => 'yearly', 'label' => 'Annual', 'chat' => '$288', 'social' => '$576', 'chat_note' => 'billed every year · save $72', 'social_note' => 'Chat + Social · billed every year · save $144', 'addon' => '+$288/year', 'featured' => true],
             ] as $period)
-                <article class="panel billing-option{{ $period['featured'] ? ' billing-option-featured' : '' }}" data-chat-price="{{ $period['chat'] }}" data-social-price="{{ $period['social'] }}" data-chat-note="{{ $period['chat_note'] }}" data-social-note="{{ $period['social_note'] }}">
+                @php
+                    $checkoutRoute = auth()->check()
+                        ? route('billing.index', ['period' => $period['key'], 'package' => 'chat'])
+                        : (config('legatus.registration_enabled')
+                            ? route('register', ['period' => $period['key'], 'package' => 'chat'])
+                            : $primaryRoute);
+                @endphp
+                <article class="panel billing-option{{ $period['featured'] ? ' billing-option-featured' : '' }}" data-chat-price="{{ $period['chat'] }}" data-social-price="{{ $period['social'] }}" data-chat-note="{{ $period['chat_note'] }}" data-social-note="{{ $period['social_note'] }}" data-checkout-base="{{ $checkoutRoute }}" data-period="{{ $period['key'] }}">
                     <span class="eyebrow">{{ $period['label'] }}</span>
                     <details class="billing-package-picker">
                         <summary><span class="billing-package-name">Legatus Chat</span><span aria-hidden="true">⌄</span></summary>
@@ -124,6 +131,7 @@
                     </details>
                     <h3 aria-live="polite">{{ $period['chat'] }}</h3>
                     <p>{{ $period['chat_note'] }}</p>
+                    <a class="btn billing-checkout-link{{ $period['featured'] ? ' lime' : '' }}" href="{{ $checkoutRoute }}">Start free trial</a>
                 </article>
             @endforeach
         </div>
@@ -140,7 +148,7 @@
 </div>
 <style>
 .launch-steps{padding:25px 0 70px}.launch-steps-copy{text-align:center;max-width:680px;margin:0 auto 28px}.launch-steps-copy h2{font-size:38px;margin:10px 0}.launch-steps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.launch-steps-grid article>span{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--lime);font-weight:800}.launch-steps-grid h3{margin:18px 0 8px}.launch-steps-grid p{color:var(--muted);font-size:14px;line-height:1.65;margin:0}
-.billing-option{padding:28px;min-width:0}.billing-option h3{font-size:38px;margin:18px 0 4px}.billing-option>p{color:var(--muted);min-height:48px}.billing-option-featured{border:2px solid var(--green)}.billing-package-picker{position:relative;margin-top:12px}.billing-package-picker summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#f8faf8;cursor:pointer;font-weight:750;list-style:none}.billing-package-picker summary::-webkit-details-marker{display:none}.billing-package-picker[open] summary{border-color:var(--green);border-radius:12px 12px 0 0}.billing-package-picker label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px;border:1px solid var(--green);border-top:0;border-radius:0 0 12px 12px;background:#fff;cursor:pointer}.billing-package-picker input{width:18px;height:18px;accent-color:var(--green)}.billing-package-picker label span{display:flex;flex-direction:column;gap:3px}.billing-package-picker label small{color:var(--muted);font-size:11px;line-height:1.35}.billing-package-picker label b{color:var(--green);font-size:12px;white-space:nowrap}.creative-preview{margin-top:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#f3f4f2}.creative-preview h3{font-size:24px;margin:8px 0}.creative-preview p{margin:0;color:var(--muted)}.creative-badge{padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;font-weight:800;white-space:nowrap}
+.billing-option{padding:28px;min-width:0}.billing-option h3{font-size:38px;margin:18px 0 4px}.billing-option>p{color:var(--muted);min-height:48px}.billing-option-featured{border:2px solid var(--green)}.billing-package-picker{position:relative;margin-top:12px}.billing-package-picker summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#f8faf8;cursor:pointer;font-weight:750;list-style:none}.billing-package-picker summary::-webkit-details-marker{display:none}.billing-package-picker[open] summary{border-color:var(--green);border-radius:12px 12px 0 0}.billing-package-picker label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px;border:1px solid var(--green);border-top:0;border-radius:0 0 12px 12px;background:#fff;cursor:pointer}.billing-package-picker input{width:18px;height:18px;accent-color:var(--green)}.billing-package-picker label span{display:flex;flex-direction:column;gap:3px}.billing-package-picker label small{color:var(--muted);font-size:11px;line-height:1.35}.billing-package-picker label b{color:var(--green);font-size:12px;white-space:nowrap}.billing-checkout-link{display:block;width:100%;margin-top:14px;text-align:center}.creative-preview{margin-top:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#f3f4f2}.creative-preview h3{font-size:24px;margin:8px 0}.creative-preview p{margin:0;color:var(--muted)}.creative-badge{padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;font-weight:800;white-space:nowrap}
 @media(max-width:850px){
     .hero{grid-template-columns:minmax(0,1fr);gap:42px}
     .hero>section{min-width:0}
@@ -190,13 +198,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const packageName = option.querySelector('.billing-package-name');
         const price = option.querySelector('h3');
         const note = option.querySelector(':scope > p');
+        const checkout = option.querySelector('.billing-checkout-link');
 
-        if (!toggle || !packageName || !price || !note) return;
+        if (!toggle || !packageName || !price || !note || !checkout) return;
 
         const updatePricing = () => {
             price.textContent = toggle.checked ? option.dataset.socialPrice : option.dataset.chatPrice;
             note.textContent = toggle.checked ? option.dataset.socialNote : option.dataset.chatNote;
             packageName.textContent = toggle.checked ? 'Legatus Chat + Social' : 'Legatus Chat';
+            const checkoutUrl = new URL(option.dataset.checkoutBase, window.location.origin);
+            checkoutUrl.searchParams.set('period', option.dataset.period);
+            checkoutUrl.searchParams.set('package', toggle.checked ? 'chat_social' : 'chat');
+            checkout.href = checkoutUrl.toString();
         };
 
         toggle.addEventListener('change', updatePricing);

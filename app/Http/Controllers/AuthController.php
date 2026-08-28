@@ -32,17 +32,20 @@ class AuthController extends Controller
         return redirect()->intended(route('dashboard'));
     }
 
-    public function register()
+    public function register(Request $request)
     {
         abort_unless(config('legatus.registration_enabled'), 404);
 
-        return view('auth.register');
+        return view('auth.register', [
+            'billingPeriod' => $this->billingPeriod($request->query('period')),
+            'billingPackage' => $this->billingPackage($request->query('package')),
+        ]);
     }
 
     public function store(Request $r)
     {
         abort_unless(config('legatus.registration_enabled'), 404);
-        $data = $r->validate(['name' => 'required|max:100', 'email' => 'required|email|unique:users', 'password' => 'required|min:8|confirmed', 'business_name' => 'required|max:120']);
+        $data = $r->validate(['name' => 'required|max:100', 'email' => 'required|email|unique:users', 'password' => 'required|min:8|confirmed', 'business_name' => 'required|max:120', 'billing_period' => 'nullable|in:monthly,six_months,yearly', 'billing_package' => 'nullable|in:chat,chat_social']);
         DB::transaction(function () use ($data) {
             $user = User::create(['name' => $data['name'], 'email' => $data['email'], 'password' => Hash::make($data['password'])]);
             $org = Organization::create(['name' => $data['business_name'], 'slug' => Str::slug($data['business_name']).'-'.Str::lower(Str::random(5))]);
@@ -56,7 +59,19 @@ class AuthController extends Controller
             && filled(config('paddle.client_token'))
             && collect(config('paddle.prices'))->filter()->count() === 3;
 
-        return redirect()->route($billingConfigured ? 'billing.index' : 'onboarding');
+        if (! $billingConfigured) {
+            return redirect()->route('onboarding');
+        }
+
+        $billingSelection = [];
+        if (isset($data['billing_period']) || isset($data['billing_package'])) {
+            $billingSelection = [
+                'period' => $this->billingPeriod($data['billing_period'] ?? null),
+                'package' => $this->billingPackage($data['billing_package'] ?? null),
+            ];
+        }
+
+        return redirect()->route('billing.index', $billingSelection);
     }
 
     public function logout(Request $r)
@@ -66,5 +81,15 @@ class AuthController extends Controller
         $r->session()->regenerateToken();
 
         return redirect()->route('landing');
+    }
+
+    private function billingPeriod(mixed $value): string
+    {
+        return in_array($value, ['monthly', 'six_months', 'yearly'], true) ? $value : 'monthly';
+    }
+
+    private function billingPackage(mixed $value): string
+    {
+        return $value === 'chat_social' ? 'chat_social' : 'chat';
     }
 }

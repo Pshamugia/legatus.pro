@@ -25,6 +25,11 @@ class PaddleBillingTest extends TestCase
             'six_months' => 'pri_six_months',
             'yearly' => 'pri_yearly',
         ]);
+        config()->set('paddle.social_prices', [
+            'monthly' => 'pri_social_monthly',
+            'six_months' => 'pri_social_six_months',
+            'yearly' => 'pri_social_yearly',
+        ]);
     }
 
     public function test_registration_goes_to_billing_and_unpaid_workspace_is_gated(): void
@@ -44,6 +49,50 @@ class PaddleBillingTest extends TestCase
         $this->assertStringContainsString('frame-src', $csp);
         $this->assertMatchesRegularExpression('/<script nonce="[^"]+" src="https:\/\/cdn\.paddle\.com/', $billing->getContent());
         $this->get('/app')->assertRedirect(route('billing.index'));
+    }
+
+    public function test_selected_social_package_survives_registration_and_uses_its_price(): void
+    {
+        $this->get('/register?period=six_months&package=chat_social')
+            ->assertOk()
+            ->assertSee('name="billing_period" value="six_months"', false)
+            ->assertSee('name="billing_package" value="chat_social"', false);
+
+        $this->post('/register', [
+            'name' => 'Social Owner',
+            'email' => 'social@example.com',
+            'business_name' => 'Social Store',
+            'password' => 'password123',
+            'password_confirmation' => 'password123',
+            'billing_period' => 'six_months',
+            'billing_package' => 'chat_social',
+        ])->assertRedirect(route('billing.index', [
+            'period' => 'six_months',
+            'package' => 'chat_social',
+        ]));
+
+        $this->get('/billing?period=six_months&package=chat_social')
+            ->assertOk()
+            ->assertSee('Legatus Chat + Social')
+            ->assertSee('$324')
+            ->assertSee('data-price-id="pri_social_six_months"', false)
+            ->assertSee('id="billing-social-six_months" class="billing-social-toggle" type="checkbox" checked', false);
+    }
+
+    public function test_missing_social_price_disables_only_that_social_choice(): void
+    {
+        config()->set('paddle.social_prices.monthly', null);
+        $user = User::factory()->create();
+        $organization = Organization::create(['name' => 'Chat Store', 'slug' => 'chat-store']);
+        $organization->users()->attach($user, ['role' => 'owner']);
+
+        $response = $this->actingAs($user)->get('/billing?period=monthly&package=chat');
+
+        $response->assertOk()
+            ->assertSee('Chat checkout is available')
+            ->assertSee('data-chat-price-id="pri_monthly"', false)
+            ->assertSee('data-social-price-id=""', false)
+            ->assertSee('data-price-id="pri_monthly"', false);
     }
 
     public function test_signed_subscription_webhook_activates_access_and_is_idempotent(): void

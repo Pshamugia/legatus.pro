@@ -8,6 +8,8 @@
         <h1 style="margin-top:28px">Create your sales team.</h1>
         <form method="post" action="{{ route('register.store') }}">
             @csrf
+            <input type="hidden" name="billing_period" value="{{ old('billing_period', $billingPeriod ?? 'monthly') }}">
+            <input type="hidden" name="billing_package" value="{{ old('billing_package', $billingPackage ?? 'chat') }}">
             <label>Your name</label>
             <input name="name" required value="{{ old('name') }}">
             <label>Work email</label>
