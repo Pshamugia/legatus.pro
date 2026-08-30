@@ -53,8 +53,10 @@ class SocialMediaSchedulerTest extends TestCase
         $this->actingAs($user)->get(route('social-media.index'))
             ->assertOk()
             ->assertSee('Social media scheduler')
+            ->assertSee('Choose Facebook, Instagram, or both connected channels.')
             ->assertSee('Public Novel')
             ->assertSee('https://shop.example/images/product.jpg')
+            ->assertSee('.template-workspace[hidden]{display:none!important}', false)
             ->assertSee('Open public product');
     }
 
