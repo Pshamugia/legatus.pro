@@ -157,6 +157,48 @@ class PublicWebsiteCrawlerTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->url() === 'https://bukinistebi.ge/books/catalog-book/1');
     }
 
+    public function test_language_catalog_classifies_existing_products_without_overwriting_primary_copy(): void
+    {
+        $this->seed();
+        config(['services.openai.key' => null]);
+        $agent = Agent::firstOrFail();
+        $catalog = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Main catalog',
+            'url' => 'https://bukinistebi.ge/?lang=ka', 'status' => 'ready',
+        ]);
+        $product = $agent->products()->create([
+            'name' => 'ქართული წიგნი', 'sku' => 'LANG-1', 'description' => 'ქართული აღწერა',
+            'price' => 20, 'stock' => 3, 'image' => 'https://bukinistebi.ge/book.jpg', 'is_active' => true,
+            'metadata' => ['source_id' => $catalog->id, 'source_url' => $catalog->url, 'product_url' => 'https://bukinistebi.ge/ka/book'],
+        ]);
+        $language = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Russian',
+            'name' => 'Website language: Russian', 'url' => 'https://bukinistebi.ge/?lang=ru',
+        ]);
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), 'lang=ru')) {
+                return Http::response(
+                $this->catalogPage('Русская книга', 'LANG-1', 20, '/ru/book'),
+                200,
+                ['Content-Type' => 'text/html'],
+                );
+            }
+
+            return Http::response('<html><body>Localized product detail page.</body></html>', 200, ['Content-Type' => 'text/html']);
+        });
+
+        app(PublicWebsiteCrawler::class)->crawl($language);
+
+        $product->refresh();
+        $this->assertSame('ქართული წიგნი', $product->name);
+        $this->assertSame($catalog->id, data_get($product->metadata, 'source_id'));
+        $this->assertSame(['Russian'], data_get($product->metadata, 'languages'));
+        $this->assertSame('Русская книга', data_get($product->metadata, 'localized.Russian.name'));
+        $this->assertSame('https://bukinistebi.ge/ru/book', data_get($product->metadata, 'localized.Russian.product_url'));
+        $this->assertSame('ready', $language->fresh()->status);
+        $this->assertSame(1, $language->fresh()->items_found);
+    }
+
     public function test_taxonomy_sync_removes_legacy_passages_and_counts_shared_products(): void
     {
         $this->seed();

@@ -14,6 +14,7 @@ class SocialMediaSchedule extends Model
         'starts_on' => 'date',
         'ends_on' => 'date',
         'categories' => 'array',
+        'languages' => 'array',
         'providers' => 'array',
         'posting_times' => 'array',
         'template_snapshots' => 'array',

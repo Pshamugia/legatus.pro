@@ -34,6 +34,6 @@ class KnowledgeSource extends Model
 
     public function isListingIndex(): bool
     {
-        return in_array($this->source_scope, ['catalog', 'category'], true);
+        return in_array($this->source_scope, ['catalog', 'category', 'language'], true);
     }
 }

@@ -150,6 +150,10 @@
                     @endforeach
                 </div></fieldset>
 
+                <fieldset><legend>Website languages</legend><p class="field-help">Leave every language unchecked to use all synchronized languages. Select one or several languages to publish only their localized products and text.</p><div class="category-grid">
+                    @forelse($languages as $language)<label class="category-choice"><input type="checkbox" name="languages[]" value="{{ $language }}" @checked(in_array($language, old('languages', []), true)) @disabled(!$canManage)><span>{{ $language }}</span></label>@empty<p>Add and synchronize language URLs in Knowledge first.</p>@endforelse
+                </div></fieldset>
+
                 <fieldset><legend>Categories</legend><p class="field-help">Leave every category unchecked to rotate products from the whole public catalog.</p><div class="category-grid">
                     @forelse($categories as $category)<label class="category-choice"><input type="checkbox" name="categories[]" value="{{ $category }}" @checked(in_array($category, old('categories', []), true)) @disabled(!$canManage)><span>{{ $category }}</span></label>@empty<p>No public catalog categories are indexed yet.</p>@endforelse
                 </div></fieldset>
@@ -171,7 +175,7 @@
             <div class="section-heading"><div><span class="step">03</span><h2>Schedules</h2></div></div>
             @forelse($schedules as $schedule)
                 <article class="schedule-row">
-                    <div><strong>{{ $schedule->starts_on->format('d M Y') }} — {{ $schedule->ends_on->format('d M Y') }}</strong><p>{{ $schedule->posts_per_day }} posts/day · {{ implode(', ', $schedule->providers) }} · {{ $schedule->categories ? implode(', ', $schedule->categories) : 'All categories' }}</p>@if($schedule->posting_times)<small>{{ implode(', ', $schedule->posting_times) }} · {{ $schedule->timezone }}</small>@else<small>Automatically distributed · {{ $schedule->timezone }}</small>@endif<small>{{ $schedule->published_posts_count }}/{{ $schedule->posts_count }} published @if($schedule->failed_posts_count) · {{ $schedule->failed_posts_count }} failed @endif</small></div>
+                    <div><strong>{{ $schedule->starts_on->format('d M Y') }} — {{ $schedule->ends_on->format('d M Y') }}</strong><p>{{ $schedule->posts_per_day }} posts/day · {{ implode(', ', $schedule->providers) }} · {{ $schedule->languages ? implode(', ', $schedule->languages) : 'All languages' }} · {{ $schedule->categories ? implode(', ', $schedule->categories) : 'All categories' }}</p>@if($schedule->posting_times)<small>{{ implode(', ', $schedule->posting_times) }} · {{ $schedule->timezone }}</small>@else<small>Automatically distributed · {{ $schedule->timezone }}</small>@endif<small>{{ $schedule->published_posts_count }}/{{ $schedule->posts_count }} published @if($schedule->failed_posts_count) · {{ $schedule->failed_posts_count }} failed @endif</small></div>
                     <span class="status-pill {{ $schedule->status }}">{{ ucfirst($schedule->status) }}</span>
                     @if($canManage)<form method="post" action="{{ route('social-media.pause', $schedule) }}">@csrf @method('PATCH')<button class="text-button" type="submit">{{ $schedule->status === 'active' ? 'Pause' : 'Resume' }}</button></form><form method="post" action="{{ route('social-media.destroy', $schedule) }}">@csrf @method('DELETE')<button class="text-button danger" type="submit">Remove</button></form>@endif
                 </article>
@@ -184,7 +188,7 @@
                 @php($localScheduledFor = \Carbon\CarbonImmutable::createFromFormat('Y-m-d H:i:s', (string) $post->getRawOriginal('scheduled_for'), 'UTC')->setTimezone($post->schedule?->timezone ?: 'UTC'))
                 <article class="upcoming-row">
                     @if($post->image_url)<img src="{{ $post->image_url }}" alt="">@endif
-                    <div><strong>{{ $post->title }}</strong><p>{{ ucfirst($post->provider) }} · {{ $localScheduledFor->format('d M Y, H:i') }} {{ $post->schedule?->timezone ?: 'UTC' }}</p><a href="{{ $post->product_url }}" target="_blank" rel="noopener">Open public product ↗</a><details><summary>View prepared post text</summary><p class="prepared-caption">{{ $post->caption }}</p></details></div>
+                    <div><strong>{{ $post->title }}</strong><p>{{ ucfirst($post->provider) }}@if($post->language) · {{ $post->language }}@endif · {{ $localScheduledFor->format('d M Y, H:i') }} {{ $post->schedule?->timezone ?: 'UTC' }}</p><a href="{{ $post->product_url }}" target="_blank" rel="noopener">Open public product ↗</a><details><summary>View prepared post text</summary><p class="prepared-caption">{{ $post->caption }}</p></details></div>
                     <span class="status-pill">{{ ucfirst($post->status) }}</span>
                 </article>
             @empty<p class="empty-state">Scheduled posts will appear here.</p>@endforelse

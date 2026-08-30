@@ -35,10 +35,14 @@
         <label>2. Site search URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
         <input type="url" name="search_url" value="{{ old('search_url', data_get($agent->settings, 'catalog_search_url')) }}" placeholder="https://store.example/search">
         <p class="channel">For Bukinistebi enter https://bukinistebi.ge/search. Legatus searches this page directly and reads matching products and availability from its results.</p>
-        <label>3. Categories</label>
+        <label>3. Website languages</label>
+        <p class="channel">Add one public catalog URL for every language offered by the website. These languages become filters in Social media.</p>
+        <div id="language-fields"></div>
+        <button type="button" class="btn ghost" id="add-language" style="margin-top:10px">＋ Add language</button>
+        <label>4. Categories</label>
         <div id="category-fields"></div>
         <button type="button" class="btn ghost" id="add-category" style="margin-top:10px">＋ Add category</button>
-        <label>4. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
+        <label>5. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
         <input type="url" name="sitemap_url" value="{{ $sitemapSource?->url }}" placeholder="https://store.example/sitemap.xml">
         <button class="btn lime" style="margin-top:22px">Save structure →</button>
         <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>
@@ -122,11 +126,13 @@
     @endforelse
 </section></main></div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
-const categoryFields=document.querySelector('#category-fields'),addCategory=document.querySelector('#add-category'),structureForm=document.querySelector('#website-structure-form'),structureStatus=document.querySelector('#website-structure-status');
+const categoryFields=document.querySelector('#category-fields'),addCategory=document.querySelector('#add-category'),languageFields=document.querySelector('#language-fields'),addLanguage=document.querySelector('#add-language'),structureForm=document.querySelector('#website-structure-form'),structureStatus=document.querySelector('#website-structure-status');
 const knowledgeStatusUrl=@json(route('knowledge.status'));
 const existingCategories=@json($categorySources);
+const existingLanguages=@json($languageSources);
 let trackedSourceIds=[];
 let categoryIndex=0;
+let languageIndex=0;
 function appendCategory(category={}){
     const row=document.createElement('div');
     row.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:9px;align-items:end;margin-top:9px';
@@ -139,6 +145,18 @@ function appendCategory(category={}){
 }
 addCategory.addEventListener('click',()=>appendCategory());
 if(existingCategories.length)existingCategories.forEach(appendCategory);else appendCategory();
+function appendLanguage(language={}){
+    const row=document.createElement('div');
+    row.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:9px;align-items:end;margin-top:9px';
+    row.innerHTML=`<div><label>Language name</label><input required name="languages[${languageIndex}][name]" placeholder="e.g. Georgian"></div><div><label>Language catalog URL</label><input required type="url" name="languages[${languageIndex}][url]" placeholder="https://store.example/?lang=ka"></div><button type="button" class="btn ghost remove-language" aria-label="Remove language">×</button>`;
+    row.querySelector('.remove-language').addEventListener('click',()=>row.remove());
+    row.querySelector('input[name$="[name]"]').value=language.name||'';
+    row.querySelector('input[name$="[url]"]').value=language.url||'';
+    languageFields.appendChild(row);
+    languageIndex++;
+}
+addLanguage.addEventListener('click',()=>appendLanguage());
+if(existingLanguages.length)existingLanguages.forEach(appendLanguage);else appendLanguage();
 structureForm.addEventListener('submit',async event=>{
     event.preventDefault();
     const button=structureForm.querySelector('button[type=submit],button:not([type])');

@@ -27,6 +27,8 @@ class SocialMediaController extends Controller
                 ...((array) data_get($product->metadata, 'genres', [])),
                 ...((array) data_get($product->metadata, 'taxonomy', [])),
             ])->filter(fn ($value): bool => is_scalar($value))->map(fn ($value) => trim((string) $value))->filter()->unique(fn ($value) => Str::lower($value))->sort()->values();
+        $languages = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
+            ->pluck('taxonomy_label')->filter()->unique(fn ($value) => Str::lower(trim((string) $value)))->sort()->values();
         $schedules = $agent->socialMediaSchedules()
             ->withCount([
                 'posts',
@@ -60,7 +62,7 @@ class SocialMediaController extends Controller
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ];
 
-        return view('social-media', compact('agent', 'connections', 'categories', 'schedules', 'upcoming', 'canManage', 'templates', 'previewProduct'));
+        return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'canManage', 'templates', 'previewProduct'));
     }
 
     public function store(Request $request, TenantContext $tenant, SocialMediaScheduler $scheduler)
@@ -73,6 +75,8 @@ class SocialMediaController extends Controller
             'posts_per_day' => ['required', 'integer', 'min:1', 'max:24'],
             'categories' => ['nullable', 'array'],
             'categories.*' => ['string', 'max:255'],
+            'languages' => ['nullable', 'array'],
+            'languages.*' => ['string', 'max:150'],
             'providers' => ['required', 'array', 'min:1'],
             'providers.*' => [Rule::in(['facebook', 'instagram'])],
             'timezone' => ['required', 'timezone'],
@@ -80,6 +84,12 @@ class SocialMediaController extends Controller
             'posting_times' => ['nullable', 'array'],
             'posting_times.*' => ['required', 'date_format:H:i'],
         ]);
+
+        $configuredLanguages = $tenant->agent()->knowledgeSources()->where('source_scope', 'language')
+            ->where('status', 'ready')->pluck('taxonomy_label')->filter();
+        if (collect($data['languages'] ?? [])->diff($configuredLanguages)->isNotEmpty()) {
+            throw ValidationException::withMessages(['languages' => 'Choose only synchronized website languages.']);
+        }
 
         if ($data['timing_mode'] === 'custom') {
             $times = collect($data['posting_times'] ?? [])->map(fn ($time): string => (string) $time);

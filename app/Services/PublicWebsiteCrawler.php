@@ -26,7 +26,8 @@ class PublicWebsiteCrawler
 
         $maximumPages = max(10, min(10_000, (int) config('legatus.public_crawl_max_pages', 5000)));
         $taxonomyOnly = $this->ingestion->taxonomyForSource($source) !== [];
-        $listingOnly = $taxonomyOnly || $source->source_scope === 'catalog';
+        $classificationOnly = $taxonomyOnly || $source->source_scope === 'language';
+        $listingOnly = $classificationOnly || $source->source_scope === 'catalog';
         if ($listingOnly) {
             // A named category/genre URL is a scoped collection, not another
             // request to crawl the business's entire domain.
@@ -121,7 +122,7 @@ class PublicWebsiteCrawler
             // touched during this run retain their embeddings; only content
             // absent from a successfully completed crawl is retired here.
             $source->chunks()->where('updated_at', '<', $crawlStartedAt)->delete();
-            if ($taxonomyOnly) {
+            if ($classificationOnly) {
                 // A product may be owned by the main catalog and belong to many
                 // taxonomy sources. Product chunks are that membership mapping.
                 $productCount = $source->chunks()
@@ -150,7 +151,7 @@ class PublicWebsiteCrawler
                 'items_updated' => $updated,
                 'content_hash' => hash_final($hash),
                 'last_synced_at' => now(),
-                'index_version' => $taxonomyOnly ? 2 : (int) $source->index_version,
+                'index_version' => $classificationOnly ? 2 : (int) $source->index_version,
                 'error' => $queue === []
                     ? null
                     : "Crawl reached the configured {$maximumPages}-page safety limit.",

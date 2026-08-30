@@ -20,7 +20,7 @@ class SocialMediaScheduler
     public function create(Agent $agent, array $data): SocialMediaSchedule
     {
         $productsByProvider = collect($data['providers'])->mapWithKeys(fn (string $provider): array => [
-            $provider => $this->eligibleProducts($agent, $data['categories'] ?? [], [$provider]),
+            $provider => $this->eligibleProductVariants($agent, $data['categories'] ?? [], $data['languages'] ?? [], [$provider]),
         ]);
         foreach ($productsByProvider as $provider => $products) {
             if ($products->isEmpty()) {
@@ -39,6 +39,7 @@ class SocialMediaScheduler
                 'ends_on' => $data['ends_on'],
                 'posts_per_day' => $data['posts_per_day'],
                 'categories' => array_values($data['categories'] ?? []),
+                'languages' => array_values($data['languages'] ?? []),
                 'providers' => array_values($data['providers']),
                 'timezone' => $data['timezone'],
                 'posting_times' => $data['posting_times'] ?? null,
@@ -58,14 +59,15 @@ class SocialMediaScheduler
                 foreach ($slots as $slot) {
                     foreach ($data['providers'] as $provider) {
                         $products = $productsByProvider[$provider];
-                        $product = $products[$productIndexes[$provider] % $products->count()];
+                        $variant = $products[$productIndexes[$provider] % $products->count()];
                         $productIndexes[$provider]++;
                         $schedule->posts()->create($this->postAttributes(
                             $agent,
-                            $product,
+                            $variant['product'],
                             $provider,
                             $slot,
                             $templateSnapshots[$provider],
+                            $variant['language'],
                         ));
                     }
                 }
@@ -107,6 +109,28 @@ class SocialMediaScheduler
             ->values();
     }
 
+    private function eligibleProductVariants(Agent $agent, array $categories, array $languages, array $providers): Collection
+    {
+        $products = $this->eligibleProducts($agent, $categories, $providers);
+        $wanted = collect($languages)->map(fn ($value): string => trim((string) $value))->filter();
+
+        if ($wanted->isEmpty()) {
+            $wanted = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
+                ->pluck('taxonomy_label')->filter()->values();
+        }
+        if ($wanted->isEmpty()) {
+            return $products->map(fn ($product): array => ['product' => $product, 'language' => null]);
+        }
+
+        return $products->flatMap(function ($product) use ($wanted): array {
+            $localized = (array) data_get($product->metadata, 'localized', []);
+
+            return $wanted->filter(fn (string $language): bool => isset($localized[$language]))
+                ->map(fn (string $language): array => ['product' => $product, 'language' => $language])
+                ->values()->all();
+        })->shuffle()->values();
+    }
+
     private function dailyTimes(CarbonImmutable $day, int $count): array
     {
         $startMinute = 9 * 60;
@@ -141,24 +165,35 @@ class SocialMediaScheduler
         })->all();
     }
 
-    private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot, array $template): array
+    private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot, array $template, ?string $language = null): array
     {
-        $url = (string) data_get($product->metadata, 'product_url');
-        $image = $product->publicImageUrl();
-        $description = trim(strip_tags((string) $product->description));
+        $localizedMap = (array) data_get($product->metadata, 'localized', []);
+        $localized = $language ? (array) ($localizedMap[$language] ?? []) : [];
+        $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
+        $image = $localized['image'] ?? $product->publicImageUrl();
+        $title = (string) ($localized['name'] ?? $product->name);
+        $description = trim(strip_tags((string) ($localized['description'] ?? $product->description)));
         $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 700, '…');
+
+        $renderProduct = clone $product;
+        $renderProduct->name = $title;
+        $renderProduct->category = $localized['category'] ?? $product->category;
+        $renderProduct->description = $description;
+        $renderProduct->metadata = array_replace($product->metadata ?? [], ['product_url' => $url]);
+        $renderProduct->image = $image;
 
         return [
             'agent_id' => $agent->id,
             'product_id' => $product->id,
             'provider' => $provider,
+            'language' => $language,
             'status' => 'scheduled',
             'scheduled_for' => $slot,
-            'title' => $product->name,
+            'title' => $title,
             'description' => $description ?: null,
             'product_url' => $url,
             'image_url' => $this->publicHttpUrl($image) ? $image : null,
-            'caption' => $this->renderer->render($provider, $template, $agent, $product),
+            'caption' => $this->renderer->render($provider, $template, $agent, $renderProduct),
         ];
     }
 

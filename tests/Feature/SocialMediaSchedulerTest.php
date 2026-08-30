@@ -266,6 +266,55 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertDatabaseCount('social_media_schedules', 0);
     }
 
+    public function test_social_schedule_filters_and_snapshots_the_selected_website_language(): void
+    {
+        [$user, $agent] = $this->tenant('localized-social-post');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Russian',
+            'name' => 'Website language: Russian', 'url' => 'https://shop.example/?lang=ru',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $attributes = $this->product('ქართული წიგნი', 'Books', 3);
+        $attributes['metadata']['localized'] = [
+            'Russian' => [
+                'name' => 'Русская книга', 'category' => 'Книги', 'description' => 'Русское описание.',
+                'product_url' => 'https://shop.example/ru/book', 'image' => 'https://shop.example/images/russian-book.jpg',
+            ],
+        ];
+        $attributes['metadata']['languages'] = ['Russian'];
+        $agent->products()->create($attributes);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['Russian'],
+        ])->assertRedirect(route('social-media.index'));
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $post = $schedule->posts()->sole();
+        $this->assertSame(['Russian'], $schedule->languages);
+        $this->assertSame('Russian', $post->language);
+        $this->assertSame('Русская книга', $post->title);
+        $this->assertSame('Русское описание.', $post->description);
+        $this->assertSame('https://shop.example/ru/book', $post->product_url);
+        $this->assertSame('https://shop.example/images/russian-book.jpg', $post->image_url);
+        $this->assertStringContainsString('Русская книга', $post->caption);
+
+        Http::fake([
+            'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'localized-container'])->push(['id' => 'localized-post']),
+        ]);
+        $post->update(['status' => 'queued']);
+        (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/ig-1/media?')
+            && $request['image_url'] === 'https://shop.example/images/russian-book.jpg'
+            && str_contains((string) $request['caption'], 'Русская книга'));
+        $this->assertSame('published', $post->fresh()->status);
+
+        $this->actingAs($user)->get(route('social-media.index'))->assertOk()
+            ->assertSee('Website languages')->assertSee('Russian');
+    }
+
     public function test_due_posts_are_claimed_once_and_published_through_the_correct_graph_endpoints(): void
     {
         Queue::fake();

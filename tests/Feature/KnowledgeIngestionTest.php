@@ -625,10 +625,14 @@ HTML;
                 ['name' => 'Denim trousers', 'url' => 'https://shop.example/category/denim'],
                 ['name' => 'Pastry', 'url' => 'https://shop.example/category/pastry'],
             ],
+            'languages' => [
+                ['name' => 'Georgian', 'url' => 'https://shop.example/?lang=ka'],
+                ['name' => 'Russian', 'url' => 'https://shop.example/?lang=ru'],
+            ],
             'sitemap_url' => 'https://shop.example/sitemap.xml',
         ]);
 
-        $response->assertOk()->assertJsonCount(5, 'source_ids');
+        $response->assertOk()->assertJsonCount(7, 'source_ids');
         $this->assertDatabaseHas('knowledge_sources', [
             'agent_id' => $agent->id, 'source_scope' => 'catalog', 'url' => 'https://shop.example/products',
         ]);
@@ -638,9 +642,22 @@ HTML;
         $this->assertDatabaseHas('knowledge_sources', [
             'agent_id' => $agent->id, 'source_scope' => 'sitemap', 'url' => 'https://shop.example/sitemap.xml',
         ]);
+        $this->assertDatabaseHas('knowledge_sources', [
+            'agent_id' => $agent->id, 'source_scope' => 'language',
+            'taxonomy_label' => 'Georgian', 'url' => 'https://shop.example/?lang=ka',
+        ]);
+        $this->assertDatabaseHas('knowledge_sources', [
+            'agent_id' => $agent->id, 'source_scope' => 'language',
+            'taxonomy_label' => 'Russian', 'url' => 'https://shop.example/?lang=ru',
+        ]);
         $this->assertSame('https://shop.example/find', data_get($agent->fresh()->settings, 'catalog_search_url'));
         $this->assertNull(data_get($agent->fresh()->settings, 'catalog_suggest_url'));
         Queue::assertNothingPushed();
+
+        $this->actingAs($user)->get(route('knowledge.index'))->assertOk()
+            ->assertSee('Website languages')
+            ->assertSee('https:\/\/shop.example\/?lang=ka', false)
+            ->assertSee('https:\/\/shop.example\/?lang=ru', false);
     }
 
     public function test_business_can_save_manual_delivery_text_and_terms_url(): void

@@ -501,6 +501,26 @@ class KnowledgeIngestionService
                     $values['metadata']['source_id'] = data_get($existing->metadata, 'source_id');
                     $values['metadata']['source_url'] = data_get($existing->metadata, 'source_url');
                 }
+                if ($source->source_scope === 'language' && filled($source->taxonomy_label)) {
+                    $language = trim((string) $source->taxonomy_label);
+                    $metadata = $existing->metadata ?? [];
+                    $metadata['languages'] = collect((array) data_get($metadata, 'languages', []))
+                        ->push($language)->unique(fn (string $value): string => Str::lower($value))->values()->all();
+                    $metadata['localized'][$language] = [
+                        'name' => $values['name'],
+                        'category' => $values['category'],
+                        'description' => $values['description'],
+                        'product_url' => data_get($values, 'metadata.product_url'),
+                        'image' => $values['image'],
+                    ];
+                    $values['metadata'] = array_replace_recursive($metadata, $values['metadata']);
+                    $values['metadata']['source_id'] = data_get($existing->metadata, 'source_id');
+                    $values['metadata']['source_url'] = data_get($existing->metadata, 'source_url');
+                    $values['metadata']['product_url'] = data_get($existing->metadata, 'product_url');
+                    foreach (['name', 'category', 'description', 'search_text'] as $field) {
+                        $values[$field] = $existing->{$field};
+                    }
+                }
                 foreach (['genres', 'taxonomy'] as $metadataKey) {
                     $values['metadata'][$metadataKey] = collect((array) data_get($existing->metadata, $metadataKey, []))
                         ->merge((array) data_get($values, "metadata.{$metadataKey}", []))
@@ -518,6 +538,17 @@ class KnowledgeIngestionService
                 $existing->update($values);
                 $updated++;
             } else {
+                if ($source->source_scope === 'language' && filled($source->taxonomy_label)) {
+                    $language = trim((string) $source->taxonomy_label);
+                    $values['metadata']['languages'] = [$language];
+                    $values['metadata']['localized'][$language] = [
+                        'name' => $values['name'],
+                        'category' => $values['category'],
+                        'description' => $values['description'],
+                        'product_url' => data_get($values, 'metadata.product_url'),
+                        'image' => $values['image'],
+                    ];
+                }
                 $existing = $source->agent->products()->create($values);
                 $created++;
             }

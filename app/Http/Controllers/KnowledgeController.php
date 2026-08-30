@@ -38,10 +38,14 @@ class KnowledgeController extends Controller
             })
             ->filter()
             ->values();
+        $languageSources = $sources->where('source_scope', 'language')->map(fn (KnowledgeSource $source): array => [
+            'name' => $source->taxonomy_label ?: $source->name,
+            'url' => $source->url,
+        ])->values();
 
         $deliveryText = $deliverySource?->chunks()->where('kind', 'policy')->value('content');
 
-        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources', 'deliverySource', 'deliveryText', 'termsSource'));
+        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources', 'languageSources', 'deliverySource', 'deliveryText', 'termsSource'));
     }
 
     public function status(TenantContext $tenant)
@@ -174,13 +178,20 @@ class KnowledgeController extends Controller
             'categories' => 'nullable|array',
             'categories.*.name' => 'required_with:categories.*.url|nullable|string|max:150',
             'categories.*.url' => 'required_with:categories.*.name|nullable|url|max:2000',
+            'languages' => 'nullable|array',
+            'languages.*.name' => 'required_with:languages.*.url|nullable|string|max:150',
+            'languages.*.url' => 'required_with:languages.*.name|nullable|url|max:2000',
         ]);
         $categories = collect($data['categories'] ?? [])
             ->filter(fn (array $category): bool => filled($category['name'] ?? null) && filled($category['url'] ?? null))
             ->unique(fn (array $category): string => mb_strtolower(trim($category['name'])).'|'.trim($category['url']))
             ->values();
+        $languages = collect($data['languages'] ?? [])
+            ->filter(fn (array $language): bool => filled($language['name'] ?? null) && filled($language['url'] ?? null))
+            ->unique(fn (array $language): string => mb_strtolower(trim($language['name'])).'|'.trim($language['url']))
+            ->values();
         $agent = $tenant->agent();
-        $sourceIds = DB::transaction(function () use ($agent, $data, $categories, $ingestion): array {
+        $sourceIds = DB::transaction(function () use ($agent, $data, $categories, $languages, $ingestion): array {
             $sources = [];
             $settings = $agent->settings ?? [];
             $settings['catalog_search_url'] = filled($data['search_url'] ?? null) ? trim($data['search_url']) : null;
@@ -216,6 +227,25 @@ class KnowledgeController extends Controller
                 ]);
                 if (! $source->exists) {
                     $source->fill(['status' => 'pending', 'progress' => 0]);
+                }
+                $source->save();
+                $sources[] = $source->id;
+            }
+
+            foreach ($languages as $language) {
+                $label = trim($language['name']);
+                $source = $agent->knowledgeSources()->firstOrNew([
+                    'source_scope' => 'language',
+                    'taxonomy_label' => $label,
+                ]);
+                $url = trim($language['url']);
+                $urlChanged = ! $source->exists || $source->url !== $url;
+                $source->fill([
+                    'type' => 'url', 'name' => "Website language: {$label}",
+                    'url' => $url,
+                ]);
+                if ($urlChanged) {
+                    $source->fill(['status' => 'pending', 'progress' => 0, 'error' => null]);
                 }
                 $source->save();
                 $sources[] = $source->id;
