@@ -18,7 +18,7 @@ class DispatchSocialMediaPosts extends Command
         $ids = DB::transaction(function (): array {
             $posts = SocialMediaPost::query()
                 ->where('status', 'scheduled')
-                ->where('scheduled_for', '<=', now())
+                ->where('scheduled_for', '<=', now('UTC'))
                 ->whereHas('schedule', fn ($query) => $query->where('status', 'active'))
                 ->orderBy('scheduled_for')
                 ->lockForUpdate()

@@ -66,6 +66,7 @@ class SocialMediaController extends Controller
     public function store(Request $request, TenantContext $tenant, SocialMediaScheduler $scheduler)
     {
         $tenant->authorize(['owner', 'admin']);
+        $request->merge(['timing_mode' => $request->input('timing_mode', 'auto')]);
         $data = $request->validate([
             'starts_on' => ['required', 'date', 'after_or_equal:today'],
             'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
@@ -75,7 +76,29 @@ class SocialMediaController extends Controller
             'providers' => ['required', 'array', 'min:1'],
             'providers.*' => [Rule::in(['facebook', 'instagram'])],
             'timezone' => ['required', 'timezone'],
+            'timing_mode' => ['required', Rule::in(['auto', 'custom'])],
+            'posting_times' => ['nullable', 'array'],
+            'posting_times.*' => ['required', 'date_format:H:i'],
         ]);
+
+        if ($data['timing_mode'] === 'custom') {
+            $times = collect($data['posting_times'] ?? [])->map(fn ($time): string => (string) $time);
+            if ($times->count() !== (int) $data['posts_per_day']) {
+                throw ValidationException::withMessages(['posting_times' => 'Choose one posting time for every daily post.']);
+            }
+            if ($times->unique()->count() !== $times->count()) {
+                throw ValidationException::withMessages(['posting_times' => 'Each daily posting time must be unique.']);
+            }
+            if ($data['starts_on'] === now($data['timezone'])->toDateString()) {
+                $minimum = now($data['timezone'])->addMinutes(2)->format('H:i');
+                if ($times->contains(fn (string $time): bool => $time < $minimum)) {
+                    throw ValidationException::withMessages(['posting_times' => 'For a schedule starting today, every posting time must still be in the future.']);
+                }
+            }
+            $data['posting_times'] = $times->sort()->values()->all();
+        } else {
+            $data['posting_times'] = null;
+        }
 
         $agent = $tenant->agent();
         $active = $agent->channelConnections()->whereIn('provider', $data['providers'])->where('status', 'active')->pluck('provider');

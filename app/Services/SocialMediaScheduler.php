@@ -41,6 +41,7 @@ class SocialMediaScheduler
                 'categories' => array_values($data['categories'] ?? []),
                 'providers' => array_values($data['providers']),
                 'timezone' => $data['timezone'],
+                'posting_times' => $data['posting_times'] ?? null,
                 'template_snapshots' => $templateSnapshots,
                 'status' => 'active',
             ]);
@@ -51,7 +52,10 @@ class SocialMediaScheduler
                 ->mapWithKeys(fn (string $provider): array => [$provider => 0])
                 ->all();
             for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
-                foreach ($this->dailyTimes($day, (int) $data['posts_per_day']) as $slot) {
+                $slots = isset($data['posting_times'])
+                    ? $this->customDailyTimes($day, $data['posting_times'])
+                    : $this->dailyTimes($day, (int) $data['posts_per_day']);
+                foreach ($slots as $slot) {
                     foreach ($data['providers'] as $provider) {
                         $products = $productsByProvider[$provider];
                         $product = $products[$productIndexes[$provider] % $products->count()];
@@ -124,6 +128,16 @@ class SocialMediaScheduler
             $minute = (int) round($startMinute + ($step * $index));
 
             return $day->setTime(intdiv($minute, 60), $minute % 60)->utc();
+        })->all();
+    }
+
+    /** @param list<string> $times */
+    private function customDailyTimes(CarbonImmutable $day, array $times): array
+    {
+        return collect($times)->map(function (string $time) use ($day): CarbonImmutable {
+            [$hour, $minute] = array_map('intval', explode(':', $time));
+
+            return $day->setTime($hour, $minute)->utc();
         })->all();
     }
 

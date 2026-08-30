@@ -8,6 +8,7 @@ use App\Models\SocialMediaPost;
 use App\Models\User;
 use App\Services\MetaGraphClient;
 use App\Services\SocialMediaTemplateRenderer;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -211,6 +212,60 @@ class SocialMediaSchedulerTest extends TestCase
         );
     }
 
+    public function test_business_can_schedule_exact_daily_times_in_its_timezone(): void
+    {
+        [$user, $agent] = $this->tenant('custom-posting-times');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Timed Product', 'General', 3));
+        $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => $date,
+            'ends_on' => $date,
+            'posts_per_day' => 2,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+            'timing_mode' => 'custom',
+            'posting_times' => ['14:30', '02:55'],
+        ])->assertRedirect(route('social-media.index'));
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->assertSame(['02:55', '14:30'], $schedule->posting_times);
+        $this->assertSame([
+            CarbonImmutable::parse("{$date} 02:55", 'Asia/Tbilisi')->utc()->format('Y-m-d H:i:s'),
+            CarbonImmutable::parse("{$date} 14:30", 'Asia/Tbilisi')->utc()->format('Y-m-d H:i:s'),
+        ], $schedule->posts()->orderBy('scheduled_for')->get()->map(
+            fn (SocialMediaPost $post) => $post->getRawOriginal('scheduled_for')
+        )->all());
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('02:55, 14:30')
+            ->assertSee('02:55 Asia/Tbilisi')
+            ->assertSee('14:30 Asia/Tbilisi');
+    }
+
+    public function test_custom_daily_times_must_match_post_count_and_be_unique(): void
+    {
+        [$user, $agent] = $this->tenant('invalid-posting-times');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Validation Product', 'General', 3));
+        $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
+
+        $payload = [
+            'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 2,
+            'providers' => ['facebook'], 'timezone' => 'Asia/Tbilisi',
+            'timing_mode' => 'custom', 'posting_times' => ['10:00'],
+        ];
+        $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), $payload)
+            ->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posting_times');
+
+        $payload['posting_times'] = ['10:00', '10:00'];
+        $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), $payload)
+            ->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posting_times');
+        $this->assertDatabaseCount('social_media_schedules', 0);
+    }
+
     public function test_due_posts_are_claimed_once_and_published_through_the_correct_graph_endpoints(): void
     {
         Queue::fake();
@@ -224,7 +279,7 @@ class SocialMediaSchedulerTest extends TestCase
         foreach (['facebook', 'instagram'] as $provider) {
             $schedule->posts()->create([
                 'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => $provider,
-                'status' => 'scheduled', 'scheduled_for' => now()->subMinute(), 'title' => $product->name,
+                'status' => 'scheduled', 'scheduled_for' => now('UTC')->subMinute(), 'title' => $product->name,
                 'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
                 'image_url' => $product->publicImageUrl(), 'caption' => 'Verified caption',
             ]);
