@@ -98,11 +98,12 @@ class PublicWebsiteCrawler
                 // Named category/genre sources are lightweight product indexes.
                 // The listing pages already define membership, so crawling and
                 // embedding every linked detail page would duplicate the site.
+                $this->enrichMatchedProduct($source, $url, $body);
                 if (! $listingOnly) {
                     $this->storeReadablePage($source, $url, $body, $products !== []);
                 }
 
-                foreach ($this->discoverLinks($body, $url, $products, $listingOnly) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 
@@ -188,20 +189,6 @@ class PublicWebsiteCrawler
             ->where('metadata->product_url', $url)
             ->first();
         if ($matchedProduct) {
-            $description = Str::limit($text, 4000, '');
-            $metadata = $matchedProduct->metadata ?? [];
-            $originalPrice = $this->ingestion->storefrontOriginalPriceFromHtml($html);
-            if ($originalPrice !== null && $originalPrice > (float) $matchedProduct->price) {
-                $metadata['original_price'] = $originalPrice;
-            }
-            $matchedProduct->update([
-                'description' => $description,
-                'search_text' => trim(implode(' ', array_filter([
-                    $matchedProduct->search_text,
-                    $description,
-                ]))),
-                'metadata' => $metadata,
-            ]);
             $productPage = true;
         }
 
@@ -221,7 +208,46 @@ class PublicWebsiteCrawler
     }
 
     /** @return list<string> */
-    private function discoverLinks(string $html, string $pageUrl, array $products, bool $taxonomyOnly = false): array
+    private function enrichMatchedProduct(KnowledgeSource $source, string $url, string $html): void
+    {
+        $product = $source->agent->products()
+            ->where('metadata->source_id', $source->id)
+            ->where('metadata->product_url', $url)
+            ->first();
+        if (! $product) {
+            return;
+        }
+
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        foreach ($xpath->query('//script|//style|//noscript|//svg|//nav|//footer') as $node) {
+            $node->parentNode?->removeChild($node);
+        }
+        $description = Str::limit(preg_replace('/\s+/u', ' ', trim((string) $dom->textContent)) ?? '', 4000, '');
+        if ($description === '') {
+            return;
+        }
+
+        $metadata = $product->metadata ?? [];
+        $originalPrice = $this->ingestion->storefrontOriginalPriceFromHtml($html);
+        if ($originalPrice !== null && $originalPrice > (float) $product->price) {
+            $metadata['original_price'] = $originalPrice;
+        }
+        $product->update([
+            'description' => $description,
+            'search_text' => trim(implode(' ', array_filter([$product->search_text, $description]))),
+            'metadata' => $metadata,
+        ]);
+    }
+
+    private function discoverLinks(
+        string $html,
+        string $pageUrl,
+        array $products,
+        bool $listingOnly = false,
+        bool $taxonomyOnly = false,
+    ): array
     {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
@@ -234,7 +260,7 @@ class PublicWebsiteCrawler
             }
         }
 
-        $linkQuery = $taxonomyOnly
+        $linkQuery = $listingOnly
             ? '//a[@href and (contains(concat(" ", normalize-space(@rel), " "), " next ") or contains(concat(" ", normalize-space(@class), " "), " pagination ") or @data-page)]'
             : '//a[@href]';
         foreach ($xpath->query($linkQuery) as $node) {

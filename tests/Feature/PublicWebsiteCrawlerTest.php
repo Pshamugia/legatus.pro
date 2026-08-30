@@ -122,6 +122,41 @@ class PublicWebsiteCrawlerTest extends TestCase
             || str_contains($request->url(), '/products/thriller/'));
     }
 
+    public function test_main_catalog_enriches_missing_descriptions_from_discovered_product_urls(): void
+    {
+        $this->seed();
+        config(['services.openai.key' => null, 'legatus.public_crawl_max_pages' => 20]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Main catalog',
+            'url' => 'https://bukinistebi.ge/books',
+            'source_scope' => 'catalog',
+        ]);
+
+        Http::fake(function ($request) {
+            return match ($request->url()) {
+                'https://bukinistebi.ge/books' => Http::response(
+                    $this->catalogPage('Catalog Book', 'C-1', 20, '/books/catalog-book/1'),
+                    200,
+                    ['Content-Type' => 'text/html'],
+                ),
+                'https://bukinistebi.ge/books/catalog-book/1' => Http::response(
+                    '<html><title>Catalog Book</title><main><h1>Catalog Book</h1><p>The complete public product description comes from its detail URL.</p></main></html>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                ),
+                default => Http::response('', 404, ['Content-Type' => 'text/html'],),
+            };
+        });
+
+        app(PublicWebsiteCrawler::class)->crawl($source);
+
+        $product = $agent->products()->where('sku', 'C-1')->firstOrFail();
+        $this->assertStringContainsString('complete public product description', (string) $product->description);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://bukinistebi.ge/books/catalog-book/1');
+    }
+
     public function test_taxonomy_sync_removes_legacy_passages_and_counts_shared_products(): void
     {
         $this->seed();
