@@ -82,8 +82,7 @@ class SocialMediaScheduler
             ->get()
             ->filter(function ($product) use ($wanted, $instagram): bool {
                 $url = data_get($product->metadata, 'product_url');
-                $image = data_get($product->metadata, 'image');
-                if (! $this->publicHttpUrl($url) || ($instagram && ! $this->publicHttpUrl($image))) {
+                if (! $this->publicHttpUrl($url) || ($instagram && $product->publicImageUrl() === null)) {
                     return false;
                 }
                 if ($wanted->isEmpty()) {
@@ -131,7 +130,7 @@ class SocialMediaScheduler
     private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot, array $template): array
     {
         $url = (string) data_get($product->metadata, 'product_url');
-        $image = data_get($product->metadata, 'image');
+        $image = $product->publicImageUrl();
         $description = trim(strip_tags((string) $product->description));
         $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 700, '…');
 

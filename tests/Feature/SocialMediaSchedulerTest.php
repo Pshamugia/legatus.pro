@@ -51,7 +51,11 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame(6, $schedule->posts->where('provider', 'instagram')->count());
 
         $this->actingAs($user)->get(route('social-media.index'))
-            ->assertOk()->assertSee('Social media scheduler')->assertSee('Public Novel')->assertSee('Open public product');
+            ->assertOk()
+            ->assertSee('Social media scheduler')
+            ->assertSee('Public Novel')
+            ->assertSee('https://shop.example/images/product.jpg')
+            ->assertSee('Open public product');
     }
 
     public function test_business_saves_and_snapshots_distinct_facebook_and_instagram_templates(): void
@@ -170,7 +174,7 @@ class SocialMediaSchedulerTest extends TestCase
         [$user, $agent] = $this->tenant('missing-image');
         $this->connections($agent);
         $attributes = $this->product('No Image Product', 'General', 2);
-        $attributes['metadata']['image'] = null;
+        $attributes['image'] = null;
         $agent->products()->create($attributes);
 
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
@@ -185,7 +189,7 @@ class SocialMediaSchedulerTest extends TestCase
         [$user, $agent] = $this->tenant('provider-eligibility');
         $this->connections($agent);
         $withoutImage = $this->product('Facebook Link Product', 'General', 2);
-        $withoutImage['metadata']['image'] = null;
+        $withoutImage['image'] = null;
         $facebookOnlyProduct = $agent->products()->create($withoutImage);
         $sharedProduct = $agent->products()->create($this->product('Shared Image Product', 'General', 2));
 
@@ -220,7 +224,7 @@ class SocialMediaSchedulerTest extends TestCase
                 'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => $provider,
                 'status' => 'scheduled', 'scheduled_for' => now()->subMinute(), 'title' => $product->name,
                 'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
-                'image_url' => data_get($product->metadata, 'image'), 'caption' => 'Verified caption',
+                'image_url' => $product->publicImageUrl(), 'caption' => 'Verified caption',
             ]);
         }
 
@@ -336,11 +340,10 @@ class SocialMediaSchedulerTest extends TestCase
 
         return [
             'name' => $name, 'category' => $category, 'description' => 'Verified public description.',
-            'price' => 20, 'stock' => $stock, 'is_active' => true,
+            'price' => 20, 'stock' => $stock, 'image' => 'https://shop.example/images/product.jpg', 'is_active' => true,
             'metadata' => [
                 'product_url' => "https://shop.example/products/{$slug}",
                 'source_url' => 'https://shop.example/catalog',
-                'image' => 'https://shop.example/images/product.jpg',
                 'genres' => [$category],
             ],
         ];

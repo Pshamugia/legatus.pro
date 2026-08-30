@@ -15,4 +15,14 @@ class Product extends Model
     {
         return $this->belongsTo(Agent::class);
     }
+
+    public function publicImageUrl(): ?string
+    {
+        $url = $this->image ?: data_get($this->metadata, 'image');
+
+        return is_string($url) && filter_var($url, FILTER_VALIDATE_URL)
+            && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
+                ? $url
+                : null;
+    }
 }

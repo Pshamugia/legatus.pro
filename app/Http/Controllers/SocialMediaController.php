@@ -39,9 +39,8 @@ class SocialMediaController extends Controller
         $templates = $templateService->configurations($agent);
         $sample = $products->first(function ($product): bool {
             $url = data_get($product->metadata, 'product_url');
-            $image = data_get($product->metadata, 'image');
 
-            return $product->stock > 0 && $this->publicHttpUrl($url) && $this->publicHttpUrl($image);
+            return $product->stock > 0 && $this->publicHttpUrl($url) && $product->publicImageUrl() !== null;
         }) ?? $products->first(fn ($product): bool => $product->stock > 0 && $this->publicHttpUrl(data_get($product->metadata, 'product_url')));
         $previewProduct = $sample ? [
             'title' => (string) $sample->name,
@@ -49,7 +48,7 @@ class SocialMediaController extends Controller
             'price' => number_format((float) $sample->price, 2, '.', ' ').' '.strtoupper((string) data_get($sample->metadata, 'currency', data_get($agent->organization?->settings, 'currency', 'GEL'))),
             'category' => (string) $sample->category,
             'url' => (string) data_get($sample->metadata, 'product_url'),
-            'image' => $this->publicHttpUrl(data_get($sample->metadata, 'image')) ? (string) data_get($sample->metadata, 'image') : null,
+            'image' => $sample->publicImageUrl(),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
             'title' => 'Product title',

@@ -26,7 +26,7 @@ class PublishSocialMediaPost implements ShouldQueue
 
         $product = $post->product;
         $currentUrl = (string) data_get($product?->metadata, 'product_url');
-        $currentImage = (string) data_get($product?->metadata, 'image');
+        $currentImage = (string) $product?->publicImageUrl();
         $productIsPublishable = $product
             && $product->agent_id === $post->agent_id
             && $product->is_active
