@@ -55,7 +55,9 @@ class SocialMediaController extends Controller
             'price' => number_format((float) $sample->price, 2, '.', ' ').' '.strtoupper((string) data_get($sample->metadata, 'currency', data_get($agent->organization?->settings, 'currency', 'GEL'))),
             'category' => (string) data_get($localizedPreview, 'category', $sample->category),
             'url' => (string) data_get($localizedPreview, 'product_url', data_get($sample->metadata, 'product_url')),
-            'image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
+            // Preserve the catalog's curated/branded image. The localized
+            // crawl image is only a fallback when the catalog has none.
+            'image' => $sample->publicImageUrl() ?: data_get($localizedPreview, 'image'),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
             'title' => 'Product title',

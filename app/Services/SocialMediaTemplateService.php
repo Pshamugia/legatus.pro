@@ -11,6 +11,7 @@ use Illuminate\Support\Str;
 class SocialMediaTemplateService
 {
     public const PROVIDERS = ['facebook', 'instagram'];
+    public const IMAGE_STYLES = ['original', 'framed', 'editorial', 'dark', 'brand'];
 
     public function __construct(private readonly SocialMediaTemplateRenderer $renderer) {}
 
@@ -30,6 +31,7 @@ class SocialMediaTemplateService
                 'body_template' => $template->body_template,
                 'delivery_enabled' => (bool) $template->delivery_enabled,
                 'delivery_text' => $template->delivery_text,
+                'image_style' => in_array($template->image_style, self::IMAGE_STYLES, true) ? $template->image_style : 'original',
                 'version' => (int) $template->version,
             ] : [
                 'id' => null,
@@ -37,6 +39,7 @@ class SocialMediaTemplateService
                 'body_template' => $this->defaultBody($agent, $provider),
                 'delivery_enabled' => $delivery !== '',
                 'delivery_text' => $delivery,
+                'image_style' => 'original',
                 'version' => 0,
             ]];
         })->all();
@@ -58,6 +61,9 @@ class SocialMediaTemplateService
                     'delivery_text' => filled($templates[$provider]['delivery_text'] ?? null)
                         ? trim((string) $templates[$provider]['delivery_text'])
                         : null,
+                    'image_style' => in_array($templates[$provider]['image_style'] ?? null, self::IMAGE_STYLES, true)
+                        ? $templates[$provider]['image_style']
+                        : 'original',
                     'version' => $existing ? ((int) $existing->version + 1) : 1,
                     'updated_by_user_id' => $user->id,
                 ];
@@ -85,6 +91,7 @@ class SocialMediaTemplateService
                 'body_template' => $configuration['body_template'],
                 'delivery_enabled' => $configuration['delivery_enabled'],
                 'delivery_text' => $configuration['delivery_text'],
+                'image_style' => $configuration['image_style'],
                 'snapshotted_at' => now()->toIso8601String(),
             ]];
         })->all();

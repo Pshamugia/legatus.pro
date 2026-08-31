@@ -144,9 +144,17 @@ class MetaGraphClient
             ->json();
     }
 
-    public function publishFacebookPost(ChannelConnection $connection, string $message, string $link): array
+    public function publishFacebookPost(ChannelConnection $connection, string $message, string $link, ?string $imageUrl = null): array
     {
         throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
+
+        if (filled($imageUrl)) {
+            return $this->authorizedRequest($connection->access_token, retry: false)
+                ->post($this->url($connection->external_account_id.'/photos'), [
+                    'caption' => Str::limit($message, 5900, '')."\n\n".$link,
+                    'url' => $imageUrl,
+                ])->throw()->json();
+        }
 
         return $this->authorizedRequest($connection->access_token, retry: false)
             ->post($this->url($connection->external_account_id.'/feed'), [

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\SocialMediaTemplateService;
 use App\Services\TenantContext;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class SocialMediaTemplateController extends Controller
 {
@@ -17,10 +18,12 @@ class SocialMediaTemplateController extends Controller
             'templates.facebook.body_template' => ['required', 'string', 'max:5000'],
             'templates.facebook.delivery_enabled' => ['nullable', 'boolean'],
             'templates.facebook.delivery_text' => ['nullable', 'string', 'max:600'],
+            'templates.facebook.image_style' => ['nullable', Rule::in(SocialMediaTemplateService::IMAGE_STYLES)],
             'templates.instagram' => ['required', 'array'],
             'templates.instagram.body_template' => ['required', 'string', 'max:1800'],
             'templates.instagram.delivery_enabled' => ['nullable', 'boolean'],
             'templates.instagram.delivery_text' => ['nullable', 'string', 'max:600'],
+            'templates.instagram.image_style' => ['nullable', Rule::in(SocialMediaTemplateService::IMAGE_STYLES)],
         ]);
 
         $templates->save($tenant->agent(), $request->user(), $data['templates']);

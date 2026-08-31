@@ -28,7 +28,8 @@ class PublishSocialMediaPost implements ShouldQueue
         $localizedMap = (array) data_get($product?->metadata, 'localized', []);
         $localized = $post->language ? (array) ($localizedMap[$post->language] ?? []) : [];
         $currentUrl = (string) ($localized['product_url'] ?? data_get($product?->metadata, 'product_url'));
-        $currentImage = (string) ($localized['image'] ?? $product?->publicImageUrl());
+        $currentImage = (string) ($product?->publicImageUrl() ?: ($localized['image'] ?? null));
+        $publishImage = $this->publicHttpUrl((string) $post->image_url) ? (string) $post->image_url : $currentImage;
         $productIsPublishable = $product
             && $product->agent_id === $post->agent_id
             && $product->is_active
@@ -57,12 +58,12 @@ class PublishSocialMediaPost implements ShouldQueue
                 $renderProduct->category = $localized['category'] ?? $product->category;
                 $renderProduct->description = $description;
                 $renderProduct->metadata = array_replace($product->metadata ?? [], ['product_url' => $currentUrl]);
-                $renderProduct->image = $currentImage;
+                $renderProduct->image = $publishImage;
                 $post->update([
                     'title' => $title,
                     'description' => $description ?: null,
                     'product_url' => $currentUrl,
-                    'image_url' => $this->publicHttpUrl($currentImage) ? $currentImage : null,
+                    'image_url' => $this->publicHttpUrl($publishImage) ? $publishImage : null,
                     'caption' => $renderer->render($post->provider, $template, $post->agent, $renderProduct),
                 ]);
                 $post->refresh();
@@ -90,7 +91,7 @@ class PublishSocialMediaPost implements ShouldQueue
         try {
             $result = $post->provider === 'instagram'
                 ? $meta->publishInstagramPost($connection, $post->caption, (string) $post->image_url)
-                : $meta->publishFacebookPost($connection, $post->caption, $post->product_url);
+                : $meta->publishFacebookPost($connection, $post->caption, $post->product_url, (string) $post->image_url);
             $post->update([
                 'status' => 'published',
                 'provider_post_id' => (string) ($result['id'] ?? ''),

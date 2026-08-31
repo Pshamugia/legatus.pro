@@ -14,6 +14,7 @@ use App\Http\Controllers\MetaWebhookController;
 use App\Http\Controllers\PaddleWebhookController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\SocialMediaController;
+use App\Http\Controllers\SocialMediaImageController;
 use App\Http\Controllers\SocialMediaTemplateController;
 use App\Http\Controllers\SuperAdminController;
 use App\Http\Controllers\WidgetController;
@@ -31,6 +32,8 @@ Route::view('/privacy', 'privacy')->name('privacy');
 Route::view('/terms', 'terms')->name('terms');
 Route::view('/refund-policy', 'refund-policy')->name('refund-policy');
 Route::view('/data-deletion', 'data-deletion')->name('data-deletion');
+Route::get('/media/social/{filename}', [SocialMediaImageController::class, 'show'])
+    ->where('filename', '[a-f0-9]{64}\\.jpg')->name('social-media.image');
 Route::withoutMiddleware([
     EncryptCookies::class,
     AddQueuedCookiesToResponse::class,

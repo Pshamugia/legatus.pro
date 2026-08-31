@@ -34,7 +34,9 @@ class PublicWebsiteCrawler
             $maximumPages = min($maximumPages, max(10, (int) config('legatus.taxonomy_crawl_max_pages', 250)));
         }
         if ($source->source_scope === 'language') {
-            $maximumPages = min($maximumPages, 75);
+            // Language indexes also visit product pages for localized
+            // descriptions. Keep each crawl inside shared-host worker limits.
+            $maximumPages = min($maximumPages, 15);
         }
         $maximumProducts = max(1, min(10_000, (int) config('legatus.commerce_max_catalog_products', 10000)));
         $crawlStartedAt = now();

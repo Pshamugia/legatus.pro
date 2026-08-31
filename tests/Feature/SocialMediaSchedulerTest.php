@@ -8,10 +8,12 @@ use App\Models\SocialMediaPost;
 use App\Models\User;
 use App\Services\MetaGraphClient;
 use App\Services\SocialMediaTemplateRenderer;
+use App\Services\SocialMediaImageDesigner;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class SocialMediaSchedulerTest extends TestCase
@@ -34,6 +36,7 @@ class SocialMediaSchedulerTest extends TestCase
         $selected = $agent->products()->create($this->product('Public Novel', 'Novel', 3));
         $agent->products()->create($this->product('Poetry Book', 'Poetry', 4));
 
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
         $this->actingAs($user)->post(route('social-media.store'), [
             'starts_on' => now()->toDateString(),
             'ends_on' => now()->addDay()->toDateString(),
@@ -56,9 +59,34 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Social media scheduler')
             ->assertSee('Choose Facebook, Instagram, or both connected channels.')
             ->assertSee('Public Novel')
+            ->assertSee('Classic frame')
             ->assertSee('https://shop.example/images/product.jpg')
             ->assertSee('.template-workspace[hidden]{display:none!important}', false)
             ->assertSee('Open public product');
+    }
+
+    public function test_selected_image_design_is_rendered_as_a_public_cached_jpeg(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD is required for social image rendering.');
+        }
+
+        Storage::fake('public');
+        $source = imagecreatetruecolor(2, 2);
+        imagefill($source, 0, 0, imagecolorallocate($source, 210, 80, 50));
+        ob_start();
+        imagepng($source);
+        $png = (string) ob_get_clean();
+        imagedestroy($source);
+        Http::fake(['https://shop.example/product.png' => Http::response($png, 200, ['Content-Type' => 'image/png'])]);
+
+        $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/product.png', 'framed');
+
+        $this->assertStringContainsString('/media/social/', $url);
+        $files = Storage::disk('public')->files('social-media');
+        $this->assertCount(1, $files);
+        $this->assertSame("\xFF\xD8", substr(Storage::disk('public')->get($files[0]), 0, 2));
+        $this->get($url)->assertOk()->assertHeader('Content-Type', 'image/jpeg');
     }
 
     public function test_business_saves_and_snapshots_distinct_facebook_and_instagram_templates(): void
@@ -72,11 +100,13 @@ class SocialMediaSchedulerTest extends TestCase
                 'facebook' => [
                     'body_template' => "📘 {product_title}\n{product_description}\n🚚 {delivery}\nBuy: {product_url}",
                     'delivery_enabled' => true,
+                    'image_style' => 'framed',
                     'delivery_text' => 'Delivery in 1–2 business days.',
                 ],
                 'instagram' => [
                     'body_template' => "📸 {product_title}\n{category}\n🚚 {delivery}\nDetails: {product_url}",
                     'delivery_enabled' => false,
+                    'image_style' => 'brand',
                     'delivery_text' => 'This must not appear.',
                 ],
             ],
@@ -87,12 +117,14 @@ class SocialMediaSchedulerTest extends TestCase
             'provider' => 'facebook',
             'version' => 1,
             'delivery_enabled' => true,
+            'image_style' => 'framed',
         ]);
         $this->assertDatabaseHas('social_media_templates', [
             'agent_id' => $agent->id,
             'provider' => 'instagram',
             'version' => 1,
             'delivery_enabled' => false,
+            'image_style' => 'brand',
         ]);
 
         $this->actingAs($user)->post(route('social-media.store'), [
@@ -112,6 +144,8 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertStringNotContainsString('This must not appear.', $instagram->caption);
         $this->assertSame(1, data_get($schedule->template_snapshots, 'facebook.version'));
         $this->assertSame(1, data_get($schedule->template_snapshots, 'instagram.version'));
+        $this->assertSame('framed', data_get($schedule->template_snapshots, 'facebook.image_style'));
+        $this->assertSame('brand', data_get($schedule->template_snapshots, 'instagram.image_style'));
     }
 
     public function test_template_editor_rejects_unknown_fields_and_is_tenant_scoped(): void
@@ -298,7 +332,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('Русская книга', $post->title);
         $this->assertSame('Русское описание.', $post->description);
         $this->assertSame('https://shop.example/ru/book', $post->product_url);
-        $this->assertSame('https://shop.example/images/russian-book.jpg', $post->image_url);
+        $this->assertSame('https://shop.example/images/product.jpg', $post->image_url);
         $this->assertStringContainsString('Русская книга', $post->caption);
 
         Http::fake([
@@ -307,7 +341,7 @@ class SocialMediaSchedulerTest extends TestCase
         $post->update(['status' => 'queued']);
         (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/ig-1/media?')
-            && $request['image_url'] === 'https://shop.example/images/russian-book.jpg'
+            && $request['image_url'] === 'https://shop.example/images/product.jpg'
             && str_contains((string) $request['caption'], 'Русская книга'));
         $this->assertSame('published', $post->fresh()->status);
 
@@ -339,7 +373,7 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PublishSocialMediaPost::class, 2);
 
         Http::fake([
-            'https://graph.facebook.test/*/feed*' => Http::response(['id' => 'fb-post-1']),
+            'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'fb-post-1']),
             'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'container-1'])->push(['id' => 'ig-post-1']),
         ]);
         foreach (SocialMediaPost::query()->get() as $post) {
@@ -348,7 +382,9 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'status' => 'published', 'provider_post_id' => 'fb-post-1']);
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'instagram', 'status' => 'published', 'provider_post_id' => 'ig-post-1']);
-        Http::assertSent(fn ($request) => str_contains($request->url(), '/page-1/feed') && $request['link'] === 'https://shop.example/products/scheduled-product');
+        Http::assertSent(fn ($request) => str_contains($request->url(), '/page-1/photos')
+            && $request['url'] === 'https://shop.example/images/product.jpg'
+            && str_contains((string) $request['caption'], 'https://shop.example/products/scheduled-product'));
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media?') && $request['image_url'] === 'https://shop.example/images/product.jpg');
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
     }

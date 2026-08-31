@@ -15,6 +15,7 @@ class SocialMediaScheduler
     public function __construct(
         private readonly SocialMediaTemplateService $templates,
         private readonly SocialMediaTemplateRenderer $renderer,
+        private readonly SocialMediaImageDesigner $images,
     ) {}
 
     public function create(Agent $agent, array $data): SocialMediaSchedule
@@ -172,7 +173,8 @@ class SocialMediaScheduler
         $localizedMap = (array) data_get($product->metadata, 'localized', []);
         $localized = $language ? (array) ($localizedMap[$language] ?? []) : [];
         $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
-        $image = $localized['image'] ?? $product->publicImageUrl();
+        $sourceImage = $product->publicImageUrl() ?: ($localized['image'] ?? null);
+        $image = $sourceImage ? $this->images->render($sourceImage, (string) ($template['image_style'] ?? 'original')) : null;
         $title = (string) ($localized['name'] ?? $product->name);
         $descriptionValue = $language && array_key_exists('description', $localized)
             ? $localized['description']
