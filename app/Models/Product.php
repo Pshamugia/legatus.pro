@@ -31,6 +31,30 @@ class Product extends Model
         return $this->validatedPublicImageUrl($url);
     }
 
+    public function socialDescription(?string $language = null, ?string $preparedFallback = null): ?string
+    {
+        $localized = (array) data_get($this->metadata, 'localized', []);
+        $candidates = [];
+        if (filled($language)) {
+            $candidates[] = data_get($localized, $language.'.description');
+        }
+        $candidates[] = $preparedFallback;
+        $candidates[] = $this->description;
+        if (! filled($language)) {
+            foreach ($localized as $variant) {
+                $candidates[] = data_get($variant, 'description');
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            if (is_scalar($candidate) && filled(trim(strip_tags((string) $candidate)))) {
+                return trim((string) $candidate);
+            }
+        }
+
+        return null;
+    }
+
     private function validatedPublicImageUrl(mixed $url): ?string
     {
 

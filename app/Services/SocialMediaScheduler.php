@@ -180,9 +180,7 @@ class SocialMediaScheduler
             : ($catalogImage ?: ($localized['image'] ?? null));
         $image = $sourceImage ? $this->images->render($sourceImage, $style) : null;
         $title = (string) ($localized['name'] ?? $product->name);
-        $descriptionValue = $language && array_key_exists('description', $localized)
-            ? $localized['description']
-            : $product->description;
+        $descriptionValue = $product->socialDescription($language);
         $description = trim(strip_tags((string) $descriptionValue));
         $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 700, '…');
 

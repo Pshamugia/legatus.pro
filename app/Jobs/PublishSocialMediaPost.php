@@ -49,10 +49,10 @@ class PublishSocialMediaPost implements ShouldQueue
         if (is_array($template)) {
             try {
                 $title = (string) ($localized['name'] ?? $product->name);
-                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $product->description))) ?? '', 700, '…');
-                if (array_key_exists('description', $localized)) {
-                    $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $localized['description']))) ?? '', 700, '…');
-                }
+                // Never erase the immutable description prepared for this post
+                // when a later language sync leaves its localized field blank.
+                $descriptionValue = $product->socialDescription($post->language, $post->description);
+                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 700, '…');
                 $renderProduct = clone $product;
                 $renderProduct->name = $title;
                 $renderProduct->category = $localized['category'] ?? $product->category;

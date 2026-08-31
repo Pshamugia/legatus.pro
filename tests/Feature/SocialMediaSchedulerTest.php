@@ -54,6 +54,8 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertCount(12, $schedule->posts);
         $this->assertSame([$selected->id], $schedule->posts->pluck('product_id')->unique()->values()->all());
         $this->assertTrue($schedule->posts->every(fn ($post) => str_contains($post->caption, 'https://shop.example/products/public-novel')));
+        $this->assertTrue($schedule->posts->every(fn ($post) => $post->description === 'Verified public description.'));
+        $this->assertTrue($schedule->posts->every(fn ($post) => str_contains($post->caption, 'Verified public description.')));
         $this->assertSame(6, $schedule->posts->where('provider', 'facebook')->count());
         $this->assertSame(6, $schedule->posts->where('provider', 'instagram')->count());
 
@@ -62,6 +64,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Social media scheduler')
             ->assertSee('Choose Facebook, Instagram, or both connected channels.')
             ->assertSee('Public Novel')
+            ->assertSee('Verified public description.')
             ->assertSee('Classic frame')
             ->assertSee('Catalog design')
             ->assertSee('Catalog design preview')
@@ -411,6 +414,45 @@ class SocialMediaSchedulerTest extends TestCase
             && str_contains((string) $request['caption'], 'https://shop.example/products/scheduled-product'));
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media?') && $request['image_url'] === 'https://shop.example/images/product.jpg');
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
+    }
+
+    public function test_publishing_never_erases_a_prepared_description_when_localized_data_becomes_blank(): void
+    {
+        [, $agent] = $this->tenant('prepared-description');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Localized Product', 'General', 1));
+        $metadata = $product->metadata;
+        $metadata['localized']['Georgian'] = [
+            'name' => 'ლოკალიზებული პროდუქტი',
+            'description' => '',
+            'product_url' => data_get($metadata, 'product_url'),
+        ];
+        $product->update(['description' => null, 'metadata' => $metadata]);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['instagram'], 'timezone' => 'UTC', 'status' => 'active',
+            'template_snapshots' => ['instagram' => [
+                'body_template' => "{product_title}\n{product_description}\n{product_url}",
+                'delivery_enabled' => false, 'delivery_text' => null, 'image_style' => 'raw',
+            ]],
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'instagram',
+            'language' => 'Georgian', 'status' => 'queued', 'scheduled_for' => now(),
+            'title' => 'ლოკალიზებული პროდუქტი', 'description' => 'მომზადებული სრული აღწერა.',
+            'product_url' => data_get($metadata, 'product_url'), 'image_url' => $product->publicImageUrl(),
+            'caption' => 'Old caption',
+        ]);
+        Http::fake([
+            'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'description-container'])->push(['id' => 'description-post']),
+        ]);
+
+        (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+
+        $this->assertSame('მომზადებული სრული აღწერა.', $post->fresh()->description);
+        $this->assertStringContainsString('მომზადებული სრული აღწერა.', $post->fresh()->caption);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/media?')
+            && str_contains((string) $request['caption'], 'მომზადებული სრული აღწერა.'));
     }
 
     public function test_schedule_actions_cannot_cross_tenant_boundaries(): void

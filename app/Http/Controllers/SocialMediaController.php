@@ -40,8 +40,7 @@ class SocialMediaController extends Controller
             ->orderBy('scheduled_for')->limit(12)->get();
         $canManage = in_array($tenant->role(), ['owner', 'admin'], true);
         $templates = $templateService->configurations($agent);
-        $sampleCandidates = $products->sortByDesc(fn ($product): int => filled(trim((string) $product->description))
-            || collect((array) data_get($product->metadata, 'localized', []))->contains(fn ($variant): bool => filled(trim((string) data_get($variant, 'description')))) ? 1 : 0);
+        $sampleCandidates = $products->sortByDesc(fn ($product): int => $product->socialDescription() !== null ? 1 : 0);
         $sample = $sampleCandidates->first(function ($product): bool {
             $url = data_get($product->metadata, 'product_url');
 
@@ -53,7 +52,7 @@ class SocialMediaController extends Controller
                 && $this->publicHttpUrl(data_get($variant, 'product_url'))) : null;
         $previewProduct = $sample ? [
             'title' => (string) data_get($localizedPreview, 'name', $sample->name),
-            'description' => Str::limit(trim(preg_replace('/\s+/u', ' ', strip_tags((string) data_get($localizedPreview, 'description', $sample->description))) ?? ''), 400, '…'),
+            'description' => Str::limit(trim(preg_replace('/\s+/u', ' ', strip_tags((string) $sample->socialDescription())) ?? ''), 400, '…'),
             'price' => number_format((float) $sample->price, 2, '.', ' ').' '.strtoupper((string) data_get($sample->metadata, 'currency', data_get($agent->organization?->settings, 'currency', 'GEL'))),
             'category' => (string) data_get($localizedPreview, 'category', $sample->category),
             'url' => (string) data_get($localizedPreview, 'product_url', data_get($sample->metadata, 'product_url')),
