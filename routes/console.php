@@ -35,6 +35,6 @@ Schedule::command('queue:work database --queue=channels,default --stop-when-empt
     // runInBackground(). Cron already provides the outer process, so execute
     // the bounded worker directly and use the scheduler lock for overlap.
     ->withoutOverlapping(10);
-Schedule::command('queue:work database --queue=knowledge --stop-when-empty --max-jobs=1 --max-time=45 --timeout=45 --tries=1 --memory=128')
+Schedule::command('queue:work database --queue=knowledge --stop-when-empty --max-jobs=1 --max-time=150 --timeout=150 --tries=1 --memory=128')
     ->everyFiveMinutes()
     ->withoutOverlapping(10);

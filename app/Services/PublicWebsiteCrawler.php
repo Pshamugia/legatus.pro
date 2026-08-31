@@ -104,7 +104,7 @@ class PublicWebsiteCrawler
                     $this->storeReadablePage($source, $url, $body, $products !== []);
                 }
 
-                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $classificationOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 

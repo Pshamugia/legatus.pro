@@ -14,7 +14,7 @@ class CrawlPublicWebsite implements ShouldBeUniqueUntilProcessing, ShouldQueue
 {
     use Queueable;
 
-    public int $timeout = 45;
+    public int $timeout = 150;
 
     public int $tries = 1;
 
@@ -32,14 +32,14 @@ class CrawlPublicWebsite implements ShouldBeUniqueUntilProcessing, ShouldQueue
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(30)->expireAfter(60)];
+        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(30)->expireAfter(180)];
     }
 
     public function handle(PublicWebsiteCrawler $crawler): void
     {
         $source = KnowledgeSource::find($this->sourceId);
 
-        if ($source?->type === 'url' && $source->isRefreshable() && (int) $source->progress <= 1) {
+        if ($source?->type === 'url' && $source->isRefreshable()) {
             $crawler->crawl($source);
         }
     }

@@ -172,7 +172,10 @@ class SocialMediaScheduler
         $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
         $image = $localized['image'] ?? $product->publicImageUrl();
         $title = (string) ($localized['name'] ?? $product->name);
-        $description = trim(strip_tags((string) ($localized['description'] ?? $product->description)));
+        $descriptionValue = $language && array_key_exists('description', $localized)
+            ? $localized['description']
+            : $product->description;
+        $description = trim(strip_tags((string) $descriptionValue));
         $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 700, '…');
 
         $renderProduct = clone $product;
