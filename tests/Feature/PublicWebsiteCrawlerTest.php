@@ -184,7 +184,11 @@ class PublicWebsiteCrawlerTest extends TestCase
                 );
             }
 
-            return Http::response('<html><body>Localized product detail page.</body></html>', 200, ['Content-Type' => 'text/html']);
+            return Http::response(
+                '<html><body><nav>Navigation must not be copied.</nav><h3>Описание</h3><p>Подробное русское описание книги.</p><h3>Детали</h3><p>48 страниц</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            );
         });
 
         app(PublicWebsiteCrawler::class)->crawl($language);
@@ -195,6 +199,8 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertSame(['Russian'], data_get($product->metadata, 'languages'));
         $this->assertSame('Русская книга', data_get($product->metadata, 'localized.Russian.name'));
         $this->assertSame('https://bukinistebi.ge/ru/book', data_get($product->metadata, 'localized.Russian.product_url'));
+        $this->assertSame('Подробное русское описание книги.', data_get($product->metadata, 'localized.Russian.description'));
+        $this->assertStringNotContainsString('Navigation', data_get($product->metadata, 'localized.Russian.description'));
         $this->assertSame('ready', $language->fresh()->status);
         $this->assertSame(1, $language->fresh()->items_found);
     }

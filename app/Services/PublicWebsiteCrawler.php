@@ -33,6 +33,9 @@ class PublicWebsiteCrawler
             // request to crawl the business's entire domain.
             $maximumPages = min($maximumPages, max(10, (int) config('legatus.taxonomy_crawl_max_pages', 250)));
         }
+        if ($source->source_scope === 'language') {
+            $maximumPages = min($maximumPages, 75);
+        }
         $maximumProducts = max(1, min(10_000, (int) config('legatus.commerce_max_catalog_products', 10000)));
         $crawlStartedAt = now();
         $queue = [$startUrl];
@@ -104,7 +107,7 @@ class PublicWebsiteCrawler
                     $this->storeReadablePage($source, $url, $body, $products !== []);
                 }
 
-                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $classificationOnly) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 
@@ -215,6 +218,16 @@ class PublicWebsiteCrawler
             ->where('metadata->source_id', $source->id)
             ->where('metadata->product_url', $url)
             ->first();
+        if (! $product && $source->source_scope === 'language' && filled($source->taxonomy_label)) {
+            $language = trim((string) $source->taxonomy_label);
+            $productIds = $source->chunks()->where('kind', 'product')->get(['metadata'])
+                ->pluck('metadata.product_id')->filter()->unique()->values();
+            $product = $source->agent->products()->whereIn('id', $productIds)->get()->first(function ($candidate) use ($language, $url): bool {
+                $localized = (array) data_get($candidate->metadata, 'localized', []);
+
+                return data_get($localized[$language] ?? [], 'product_url') === $url;
+            });
+        }
         if (! $product) {
             return;
         }
@@ -225,8 +238,16 @@ class PublicWebsiteCrawler
         foreach ($xpath->query('//script|//style|//noscript|//svg|//nav|//footer') as $node) {
             $node->parentNode?->removeChild($node);
         }
-        $description = Str::limit(preg_replace('/\s+/u', ' ', trim((string) $dom->textContent)) ?? '', 4000, '');
+        $description = $this->productDescriptionFromHtml($html, $dom);
         if ($description === '') {
+            return;
+        }
+
+        if ($source->source_scope === 'language' && filled($source->taxonomy_label)) {
+            $metadata = $product->metadata ?? [];
+            $metadata['localized'][trim((string) $source->taxonomy_label)]['description'] = $description;
+            $product->update(['metadata' => $metadata]);
+
             return;
         }
 
@@ -240,6 +261,20 @@ class PublicWebsiteCrawler
             'search_text' => trim(implode(' ', array_filter([$product->search_text, $description]))),
             'metadata' => $metadata,
         ]);
+    }
+
+    private function productDescriptionFromHtml(string $html, \DOMDocument $dom): string
+    {
+        if (preg_match('/<h[1-6][^>]*>\s*(?:აღწერა|description|описание)\s*<\/h[1-6]>(.*?)(?=<h[1-6]\b|<footer\b|$)/isu', $html, $matches)) {
+            $section = preg_replace('/<script\b[^>]*>.*?<\/script>|<style\b[^>]*>.*?<\/style>/isu', ' ', $matches[1]) ?? '';
+            $text = html_entity_decode(strip_tags($section), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $text = preg_replace('/\s+/u', ' ', trim($text)) ?? '';
+            if (mb_strlen($text) >= 20) {
+                return Str::limit($text, 4000, '');
+            }
+        }
+
+        return Str::limit(preg_replace('/\s+/u', ' ', trim((string) $dom->textContent)) ?? '', 4000, '');
     }
 
     private function discoverLinks(

@@ -24,7 +24,7 @@ class SocialMediaScheduler
         ]);
         foreach ($productsByProvider as $provider => $products) {
             if ($products->isEmpty()) {
-                $requirement = $provider === 'instagram' ? 'public links and images' : 'public links';
+                $requirement = $provider === 'instagram' ? 'descriptions, public links and images' : 'descriptions and public links';
                 throw ValidationException::withMessages([
                     'categories' => 'No products with usable '.$requirement.' were found for '.ucfirst($provider).' in this selection.',
                 ]);
@@ -119,13 +119,15 @@ class SocialMediaScheduler
                 ->pluck('taxonomy_label')->filter()->values();
         }
         if ($wanted->isEmpty()) {
-            return $products->map(fn ($product): array => ['product' => $product, 'language' => null]);
+            return $products->filter(fn ($product): bool => filled(trim((string) $product->description)))
+                ->map(fn ($product): array => ['product' => $product, 'language' => null])->values();
         }
 
         return $products->flatMap(function ($product) use ($wanted): array {
             $localized = (array) data_get($product->metadata, 'localized', []);
 
-            return $wanted->filter(fn (string $language): bool => isset($localized[$language]))
+            return $wanted->filter(fn (string $language): bool => isset($localized[$language])
+                    && filled(trim((string) data_get($localized[$language], 'description'))))
                 ->map(fn (string $language): array => ['product' => $product, 'language' => $language])
                 ->values()->all();
         })->shuffle()->values();
