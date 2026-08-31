@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 class SocialMediaTemplateService
 {
     public const PROVIDERS = ['facebook', 'instagram'];
-    public const IMAGE_STYLES = ['original', 'framed', 'editorial', 'dark', 'brand'];
+    public const IMAGE_STYLES = ['original', 'raw', 'framed', 'editorial', 'dark', 'brand'];
 
     public function __construct(private readonly SocialMediaTemplateRenderer $renderer) {}
 

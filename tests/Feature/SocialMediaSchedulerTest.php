@@ -60,6 +60,8 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Choose Facebook, Instagram, or both connected channels.')
             ->assertSee('Public Novel')
             ->assertSee('Classic frame')
+            ->assertSee('Catalog design')
+            ->assertSee('Plain photo')
             ->assertSee('https://shop.example/images/product.jpg')
             ->assertSee('.template-workspace[hidden]{display:none!important}', false)
             ->assertSee('Open public product');
@@ -87,6 +89,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertCount(1, $files);
         $this->assertSame("\xFF\xD8", substr(Storage::disk('public')->get($files[0]), 0, 2));
         $this->get($url)->assertOk()->assertHeader('Content-Type', 'image/jpeg');
+        $this->assertSame('https://shop.example/product.png', app(SocialMediaImageDesigner::class)->render('https://shop.example/product.png', 'raw'));
     }
 
     public function test_business_saves_and_snapshots_distinct_facebook_and_instagram_templates(): void

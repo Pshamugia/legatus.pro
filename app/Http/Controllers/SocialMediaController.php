@@ -58,6 +58,7 @@ class SocialMediaController extends Controller
             // Preserve the catalog's curated/branded image. The localized
             // crawl image is only a fallback when the catalog has none.
             'image' => $sample->publicImageUrl() ?: data_get($localizedPreview, 'image'),
+            'raw_image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
             'title' => 'Product title',
@@ -66,6 +67,7 @@ class SocialMediaController extends Controller
             'category' => 'Category',
             'url' => 'https://business.example/product',
             'image' => null,
+            'raw_image' => null,
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ];
 

@@ -9,7 +9,7 @@ class SocialMediaImageDesigner
 {
     public function render(string $sourceUrl, string $style): string
     {
-        if ($style === 'original' || ! extension_loaded('gd')) {
+        if (in_array($style, ['original', 'raw'], true) || ! extension_loaded('gd')) {
             return $sourceUrl;
         }
 
