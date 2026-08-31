@@ -174,7 +174,7 @@ class SocialMediaScheduler
         $localized = $language ? (array) ($localizedMap[$language] ?? []) : [];
         $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
         $style = (string) ($template['image_style'] ?? 'original');
-        $catalogImage = $product->publicImageUrl();
+        $catalogImage = $product->catalogDesignImageUrl() ?: $product->publicImageUrl();
         $sourceImage = $style === 'raw'
             ? ($localized['image'] ?? $catalogImage)
             : ($catalogImage ?: ($localized['image'] ?? null));

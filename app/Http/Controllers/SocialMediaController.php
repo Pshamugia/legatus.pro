@@ -44,7 +44,8 @@ class SocialMediaController extends Controller
         $sample = $sampleCandidates->first(function ($product): bool {
             $url = data_get($product->metadata, 'product_url');
 
-            return $product->stock > 0 && $this->publicHttpUrl($url) && $product->publicImageUrl() !== null;
+            return $product->stock > 0 && $this->publicHttpUrl($url)
+                && ($product->catalogDesignImageUrl() !== null || $product->publicImageUrl() !== null);
         }) ?? $sampleCandidates->first(fn ($product): bool => $product->stock > 0 && $this->publicHttpUrl(data_get($product->metadata, 'product_url')));
         $localizedPreview = $sample ? collect((array) data_get($sample->metadata, 'localized', []))
             ->first(fn ($variant): bool => filled(trim((string) data_get($variant, 'description')))
@@ -57,7 +58,7 @@ class SocialMediaController extends Controller
             'url' => (string) data_get($localizedPreview, 'product_url', data_get($sample->metadata, 'product_url')),
             // Preserve the catalog's curated/branded image. The localized
             // crawl image is only a fallback when the catalog has none.
-            'image' => $sample->publicImageUrl() ?: data_get($localizedPreview, 'image'),
+            'image' => $sample->catalogDesignImageUrl() ?: $sample->publicImageUrl() ?: data_get($localizedPreview, 'image'),
             'raw_image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [

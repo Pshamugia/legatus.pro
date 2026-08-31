@@ -34,6 +34,9 @@ class SocialMediaSchedulerTest extends TestCase
         [$user, $agent] = $this->tenant('scheduler-owner');
         $this->connections($agent);
         $selected = $agent->products()->create($this->product('Public Novel', 'Novel', 3));
+        $selected->update(['metadata' => array_replace($selected->metadata, [
+            'image' => 'https://shop.example/images/catalog-design.jpg',
+        ])]);
         $agent->products()->create($this->product('Poetry Book', 'Poetry', 4));
 
         Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
@@ -64,6 +67,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
             ->assertSee('https://shop.example/images/product.jpg')
+            ->assertSee('https://shop.example/images/catalog-design.jpg')
             ->assertSee('.template-workspace[hidden]{display:none!important}', false)
             ->assertSee('Open public product');
     }

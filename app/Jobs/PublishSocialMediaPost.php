@@ -28,7 +28,7 @@ class PublishSocialMediaPost implements ShouldQueue
         $localizedMap = (array) data_get($product?->metadata, 'localized', []);
         $localized = $post->language ? (array) ($localizedMap[$post->language] ?? []) : [];
         $currentUrl = (string) ($localized['product_url'] ?? data_get($product?->metadata, 'product_url'));
-        $currentImage = (string) ($product?->publicImageUrl() ?: ($localized['image'] ?? null));
+        $currentImage = (string) ($product?->catalogDesignImageUrl() ?: $product?->publicImageUrl() ?: ($localized['image'] ?? null));
         $publishImage = $this->publicHttpUrl((string) $post->image_url) ? (string) $post->image_url : $currentImage;
         $productIsPublishable = $product
             && $product->agent_id === $post->agent_id
