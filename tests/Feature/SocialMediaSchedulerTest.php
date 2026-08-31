@@ -61,6 +61,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Public Novel')
             ->assertSee('Classic frame')
             ->assertSee('Catalog design')
+            ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
             ->assertSee('https://shop.example/images/product.jpg')
             ->assertSee('.template-workspace[hidden]{display:none!important}', false)
