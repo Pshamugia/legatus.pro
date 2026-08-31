@@ -520,6 +520,10 @@ class KnowledgeIngestionService
                     foreach (['name', 'category', 'description', 'search_text'] as $field) {
                         $values[$field] = $existing->{$field};
                     }
+                    // A language URL localizes copy and its own product-page
+                    // image only. Never replace the primary catalog artwork;
+                    // social templates may rely on that curated composition.
+                    $values['image'] = $existing->image;
                 }
                 foreach (['genres', 'taxonomy'] as $metadataKey) {
                     $values['metadata'][$metadataKey] = collect((array) data_get($existing->metadata, $metadataKey, []))
@@ -1043,8 +1047,8 @@ class KnowledgeIngestionService
                 ->timeout(max(1, $timeout))
                 ->retry(max(1, $retries), 300)
                 ->withoutRedirecting()->withHeaders(array_merge([
-                'User-Agent' => 'LegatusKnowledgeBot/1.0',
-            ], $headers))->get($url);
+                    'User-Agent' => 'LegatusKnowledgeBot/1.0',
+                ], $headers))->get($url);
             if ($response->redirect()) {
                 $location = $response->header('Location');
                 if (! $location) {

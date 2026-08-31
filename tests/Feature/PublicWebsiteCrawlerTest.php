@@ -146,7 +146,7 @@ class PublicWebsiteCrawlerTest extends TestCase
                     200,
                     ['Content-Type' => 'text/html'],
                 ),
-                default => Http::response('', 404, ['Content-Type' => 'text/html'],),
+                default => Http::response('', 404, ['Content-Type' => 'text/html']),
             };
         });
 
@@ -178,9 +178,9 @@ class PublicWebsiteCrawlerTest extends TestCase
         Http::fake(function ($request) {
             if (str_contains($request->url(), 'lang=ru')) {
                 return Http::response(
-                $this->catalogPage('Русская книга', 'LANG-1', 20, '/ru/book'),
-                200,
-                ['Content-Type' => 'text/html'],
+                    $this->catalogPage('Русская книга', 'LANG-1', 20, '/ru/book'),
+                    200,
+                    ['Content-Type' => 'text/html'],
                 );
             }
 
@@ -200,6 +200,7 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertSame('Русская книга', data_get($product->metadata, 'localized.Russian.name'));
         $this->assertSame('https://bukinistebi.ge/ru/book', data_get($product->metadata, 'localized.Russian.product_url'));
         $this->assertSame('Подробное русское описание книги.', data_get($product->metadata, 'localized.Russian.description'));
+        $this->assertSame('https://bukinistebi.ge/book.jpg', $product->image);
         $this->assertStringNotContainsString('Navigation', data_get($product->metadata, 'localized.Russian.description'));
         $this->assertSame('ready', $language->fresh()->status);
         $this->assertSame(1, $language->fresh()->items_found);

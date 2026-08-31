@@ -81,7 +81,7 @@
                                             <input type="radio" name="templates[{{ $provider }}][image_style]" value="{{ $style }}" data-image-style="{{ $provider }}" @checked(old("templates.{$provider}.image_style", $configuration['image_style']) === $style) @disabled(!$canManage)>
                                             <span class="style-swatch {{ $style }}">
                                                 @if($previewProduct['image'])
-                                                    <img src="{{ $style === 'raw' ? ($previewProduct['raw_image'] ?: $previewProduct['image']) : $previewProduct['image'] }}" alt="{{ $label }} preview">
+                                                    <img src="{{ $previewProduct['style_images'][$style] ?: $previewProduct['image'] }}" alt="{{ $label }} preview">
                                                 @else
                                                     <i></i>
                                                 @endif
@@ -111,14 +111,14 @@
                                 </header>
                                 @if($provider === 'instagram')
                                     <div class="preview-image square image-style-{{ $configuration['image_style'] }}" data-preview-image="{{ $provider }}">
-                                        @if($previewProduct['image'])<img src="{{ $previewProduct['image'] }}" data-catalog-src="{{ $previewProduct['image'] }}" data-raw-src="{{ $previewProduct['raw_image'] ?: $previewProduct['image'] }}" alt="Preview of {{ $previewProduct['title'] }}">@else<span>Public product image</span>@endif
+                                        @if($previewProduct['image'])<img src="{{ $previewProduct['style_images'][$configuration['image_style']] ?: $previewProduct['image'] }}" alt="Preview of {{ $previewProduct['title'] }}">@else<span>Public product image</span>@endif
                                     </div>
                                     <p class="preview-copy" data-preview-copy="{{ $provider }}"></p>
                                     <small class="instagram-note">Instagram caption URLs appear as text and may not be clickable.</small>
                                 @else
                                     <p class="preview-copy" data-preview-copy="{{ $provider }}"></p>
                                     <div class="preview-image wide image-style-{{ $configuration['image_style'] }}" data-preview-image="{{ $provider }}">
-                                        @if($previewProduct['image'])<img src="{{ $previewProduct['image'] }}" data-catalog-src="{{ $previewProduct['image'] }}" data-raw-src="{{ $previewProduct['raw_image'] ?: $previewProduct['image'] }}" alt="Preview of {{ $previewProduct['title'] }}">@else<span>Link preview image</span>@endif
+                                        @if($previewProduct['image'])<img src="{{ $previewProduct['style_images'][$configuration['image_style']] ?: $previewProduct['image'] }}" alt="Preview of {{ $previewProduct['title'] }}">@else<span>Link preview image</span>@endif
                                     </div>
                                     <a class="facebook-link-card" href="{{ $previewProduct['url'] }}" target="_blank" rel="noopener">
                                         <small data-preview-domain></small><strong>{{ $previewProduct['title'] }}</strong><span>View product</span>
@@ -335,7 +335,7 @@
         preview.className = preview.className.replace(/image-style-[a-z]+/g, '').trim();
         preview.classList.add(`image-style-${input.value}`);
         const image = preview.querySelector('img');
-        if (image) image.src = input.value === 'raw' ? image.dataset.rawSrc : image.dataset.catalogSrc;
+        if (image) image.src = product.style_images?.[input.value] || product.image;
     }));
     document.querySelectorAll('[data-insert-token]').forEach((button) => button.addEventListener('click', () => {
         const textarea = document.querySelector(`[data-template-body="${button.dataset.tokenProvider}"]`);

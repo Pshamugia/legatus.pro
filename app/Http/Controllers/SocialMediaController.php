@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SocialMediaSchedule;
+use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateService;
 use App\Services\TenantContext;
@@ -13,7 +14,7 @@ use Illuminate\Validation\ValidationException;
 
 class SocialMediaController extends Controller
 {
-    public function index(TenantContext $tenant, SocialMediaTemplateService $templateService)
+    public function index(TenantContext $tenant, SocialMediaTemplateService $templateService, SocialMediaImageDesigner $imageDesigner)
     {
         $agent = $tenant->agent();
         $connections = $agent->channelConnections()
@@ -71,6 +72,15 @@ class SocialMediaController extends Controller
             'raw_image' => null,
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ];
+
+        $previewSource = $previewProduct['image'];
+        $previewProduct['style_images'] = collect(SocialMediaTemplateService::IMAGE_STYLES)
+            ->mapWithKeys(fn (string $style): array => [
+                $style => $previewSource ? $imageDesigner->render(
+                    $style === 'raw' ? ($previewProduct['raw_image'] ?: $previewSource) : $previewSource,
+                    $style,
+                ) : null,
+            ])->all();
 
         return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'canManage', 'templates', 'previewProduct'));
     }

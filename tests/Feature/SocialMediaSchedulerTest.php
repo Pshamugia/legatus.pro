@@ -7,8 +7,8 @@ use App\Models\Organization;
 use App\Models\SocialMediaPost;
 use App\Models\User;
 use App\Services\MetaGraphClient;
-use App\Services\SocialMediaTemplateRenderer;
 use App\Services\SocialMediaImageDesigner;
+use App\Services\SocialMediaTemplateRenderer;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -87,7 +87,7 @@ class SocialMediaSchedulerTest extends TestCase
         imagedestroy($source);
         Http::fake(['https://shop.example/product.png' => Http::response($png, 200, ['Content-Type' => 'image/png'])]);
 
-        $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/product.png', 'framed');
+        $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/product.png', 'original');
 
         $this->assertStringContainsString('/media/social/', $url);
         $files = Storage::disk('public')->files('social-media');
@@ -95,6 +95,22 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame("\xFF\xD8", substr(Storage::disk('public')->get($files[0]), 0, 2));
         $this->get($url)->assertOk()->assertHeader('Content-Type', 'image/jpeg');
         $this->assertSame('https://shop.example/product.png', app(SocialMediaImageDesigner::class)->render('https://shop.example/product.png', 'raw'));
+    }
+
+    public function test_catalog_design_keeps_an_already_prepared_square_artwork_intact(): void
+    {
+        $source = imagecreatetruecolor(400, 400);
+        imagefilledrectangle($source, 0, 0, 399, 399, imagecolorallocate($source, 248, 248, 246));
+        imagefilledrectangle($source, 120, 35, 360, 365, imagecolorallocate($source, 80, 60, 45));
+        ob_start();
+        imagepng($source);
+        $png = (string) ob_get_clean();
+        imagedestroy($source);
+        Http::fake(['https://shop.example/prepared.png' => Http::response($png, 200, ['Content-Type' => 'image/png'])]);
+
+        $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/prepared.png', 'original');
+
+        $this->assertSame('https://shop.example/prepared.png', $url);
     }
 
     public function test_business_saves_and_snapshots_distinct_facebook_and_instagram_templates(): void

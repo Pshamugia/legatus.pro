@@ -23,7 +23,7 @@ class Product extends Model
         return $this->validatedPublicImageUrl($url);
     }
 
-    /** The original social/catalog composition used before raw image precedence changed. */
+    /** Curated catalogue artwork, falling back to the primary product photo. */
     public function catalogDesignImageUrl(): ?string
     {
         $url = data_get($this->metadata, 'image') ?: $this->image;
