@@ -52,18 +52,16 @@ class OnboardingCommerceAuthorityTest extends TestCase
 
         $this->actingAs($owner)->get(route('onboarding'))
             ->assertOk()
-            ->assertSee('data-authoritative-commerce-catalog', false)
-            ->assertSee('Verified live catalog is your live source of truth')
-            ->assertSee('is not re-imported while this connection is active')
-            ->assertSee('Saved reference')
-            ->assertSee('live commerce catalog · source of truth')
-            ->assertSee('authoritative');
+            ->assertSee('data-catalog-status="live"', false)
+            ->assertSee('data-commerce-status="active"', false)
+            ->assertSee('Verified live catalog')
+            ->assertSee('Live API connected');
 
         Http::preventStrayRequests();
 
         $this->actingAs($owner)->post(route('onboarding.store'), $this->validOnboarding([
             'catalog_url' => 'https://example.com/human-catalog',
-        ]))->assertRedirect(route('channels.index'))
+        ]))->assertRedirect(route('onboarding').'#channels')
             ->assertSessionHasNoErrors()
             ->assertSessionHas('warnings', [])
             ->assertSessionHas('success', 'Setup saved. Your live store connection remains the authoritative product catalog.');
@@ -91,7 +89,7 @@ class OnboardingCommerceAuthorityTest extends TestCase
 
         $this->actingAs($owner)->post(route('onboarding.store'), $this->validOnboarding([
             'catalog_url' => 'https://example.com/human-catalog',
-        ]))->assertRedirect(route('channels.index'))
+        ]))->assertRedirect(route('onboarding').'#channels')
             ->assertSessionHas('warnings', []);
 
         Http::assertSent(fn ($request): bool => $request->url() === 'https://example.com/human-catalog');

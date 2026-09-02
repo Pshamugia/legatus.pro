@@ -93,7 +93,7 @@ class WorkspaceManagementTest extends TestCase
 
         $this->actingAs($user)->withSession([TenantContext::SESSION_KEY => $first->id])
             ->post(route('workspaces.switch', $second))
-            ->assertRedirect(route('dashboard'))
+            ->assertRedirect(route('onboarding'))
             ->assertSessionHas(TenantContext::SESSION_KEY, $second->id)
             ->assertSessionHas('status', 'Switched to Second Business.');
 
@@ -161,7 +161,7 @@ class WorkspaceManagementTest extends TestCase
         $this->post(route('login.store'), [
             'email' => 'multi@example.com',
             'password' => 'password123',
-        ])->assertRedirect(route('dashboard'));
+        ])->assertRedirect(route('onboarding'));
         $this->assertAuthenticatedAs($user);
         $this->get(route('dashboard'))
             ->assertOk()

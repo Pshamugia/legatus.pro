@@ -28,7 +28,7 @@
             <a href="#pricing">Pricing</a>
             <a href="#contact">Contact</a>
             @auth
-                <a href="{{ route('dashboard') }}">Live dashboard</a>
+                <a href="{{ route('onboarding') }}">Business setup</a>
             @else
                 <a href="{{ route('login') }}">Sign in</a>
             @endauth

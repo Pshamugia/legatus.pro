@@ -26,7 +26,6 @@ class WorkspaceNavigationUiTest extends TestCase
             'onboarding',
             'knowledge.index',
             'inbox.index',
-            'channels.index',
             'analytics.index',
             'settings.index',
             'workspaces.index',
@@ -40,12 +39,31 @@ class WorkspaceNavigationUiTest extends TestCase
                 ->assertSee('data-workspace-switcher="bukinistebi.ge"', false)
                 ->assertSee('Workspace on Legatus')
                 ->assertSee('Business setup')
+                ->assertDontSee('>Overview<', false)
+                ->assertDontSee('>Channels<', false)
                 ->assertSee('+ Add business')
                 ->assertSee('Manage businesses')
                 ->assertSee(route('workspaces.index'), false)
                 ->assertSee('method="post" action="'.route('logout').'"', false)
                 ->assertSee(route('workspaces.switch', $other), false);
         }
+    }
+
+    public function test_business_setup_uses_workspace_navigation_and_omits_duplicate_knowledge_editor(): void
+    {
+        $user = User::factory()->create(['name' => 'Workspace Owner']);
+        $active = $this->workspace($user, 'bukinistebi.ge');
+
+        $this->actingAs($user)->withSession([TenantContext::SESSION_KEY => $active->id])
+            ->get(route('onboarding'))
+            ->assertOk()
+            ->assertSee('aria-label="Workspace navigation"', false)
+            ->assertSee('Customer channels')
+            ->assertSee('Website chat')
+            ->assertSee('Facebook and Instagram')
+            ->assertDontSee('Catalog and business knowledge')
+            ->assertDontSee('Previously connected URL')
+            ->assertDontSee('Connected data');
     }
 
     public function test_guest_authentication_screens_keep_the_public_navigation_visible(): void

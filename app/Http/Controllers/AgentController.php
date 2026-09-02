@@ -62,7 +62,7 @@ class AgentController extends Controller
         return view('dashboard', compact('agent', 'conversations', 'metrics', 'products', 'channelStatuses'));
     }
 
-    public function onboarding(TenantContext $tenant)
+    public function onboarding(TenantContext $tenant, ChannelController $channels)
     {
         $tenant->authorize(['owner', 'admin']);
         $agent = $tenant->agent();
@@ -71,7 +71,10 @@ class AgentController extends Controller
             'commerceConnection',
         ]);
 
-        return view('onboarding', compact('agent'));
+        return view('onboarding', [
+            'agent' => $agent,
+            ...$channels->setupViewData($tenant),
+        ]);
     }
 
     public function store(Request $r, TenantContext $tenant, KnowledgeIngestionService $ingestion)
@@ -119,8 +122,10 @@ class AgentController extends Controller
             : null;
         $settings = array_merge($agent->settings ?? [], [
             'website' => $data['website'] ?? null,
-            'catalog_url' => $data['catalog_url'] ?? null,
         ]);
+        if ($r->exists('catalog_url')) {
+            $settings['catalog_url'] = $data['catalog_url'] ?? null;
+        }
         if ($widgetTheme !== null) {
             $settings['widget_theme'] = $widgetTheme;
         }
@@ -133,12 +138,12 @@ class AgentController extends Controller
             $settings['widget_allowed_origins'] = [];
         }
 
-        DB::transaction(function () use ($agent, $data, $settings): void {
+        DB::transaction(function () use ($agent, $data, $settings, $r): void {
             $agent->organization()->update(['name' => $data['business_name']]);
             $agent->update([
                 'name' => trim($data['agent_name']),
                 'business_name' => $data['business_name'],
-                'description' => $data['description'] ?? null,
+                'description' => $r->exists('description') ? ($data['description'] ?? null) : $agent->description,
                 'settings' => $settings,
             ]);
         });
@@ -203,7 +208,7 @@ class AgentController extends Controller
             default => 'Setup saved.',
         };
 
-        return redirect()->route('channels.index')
+        return redirect(route('onboarding').'#channels')
             ->with('success', $success)
             ->with('warnings', $warnings);
     }

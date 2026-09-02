@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -17,7 +18,7 @@ class AuthController extends Controller
         return view('auth.login');
     }
 
-    public function authenticate(Request $r)
+    public function authenticate(Request $r, TenantContext $tenant)
     {
         $data = $r->validate(['email' => 'required|email', 'password' => 'required']);
         if (! config('legatus.demo_login_enabled') && in_array(Str::lower($data['email']), ['demo@legatus.ai', 'operator@legatus.ai'], true)) {
@@ -29,7 +30,11 @@ class AuthController extends Controller
 
         $r->session()->regenerate();
 
-        return redirect()->intended(route('dashboard'));
+        $home = in_array($tenant->role($r->user()), ['owner', 'admin'], true)
+            ? route('onboarding')
+            : route('inbox.index');
+
+        return redirect()->intended($home);
     }
 
     public function register(Request $request)

@@ -21,15 +21,14 @@ class WebsiteWidgetAvailabilityTest extends TestCase
         $this->actingAs($user)
             ->withSession([TenantContext::SESSION_KEY => $organization->id])
             ->patch(route('channels.widget.update'), ['enabled' => false])
-            ->assertRedirect(route('channels.index'))
+            ->assertRedirect(route('onboarding').'#channels')
             ->assertSessionHas('channel_success');
 
         $this->assertSame(['facebook'], $agent->fresh()->channels);
-        $this->get(route('channels.index'))
+        $this->get(route('onboarding'))
             ->assertOk()
-            ->assertSee('data-widget-status="disabled"', false)
-            ->assertSee('Website chat is hidden and cannot answer customers')
-            ->assertSee('Turn website chat ON')
+            ->assertSee('Hidden from website visitors')
+            ->assertSee('Turn on')
             ->assertSee('widget/'.$agent->slug.'.js');
 
         $disabledScript = $this->get(route('widget.script', $agent))
@@ -48,7 +47,7 @@ class WebsiteWidgetAvailabilityTest extends TestCase
         $this->assertDatabaseCount('conversations', 0);
 
         $this->patch(route('channels.widget.update'), ['enabled' => true])
-            ->assertRedirect(route('channels.index'));
+            ->assertRedirect(route('onboarding').'#channels');
 
         $this->assertSame(['web', 'facebook'], $agent->fresh()->channels);
         $enabledScript = $this->get(route('widget.script', $agent))
@@ -83,7 +82,7 @@ class WebsiteWidgetAvailabilityTest extends TestCase
         $this->actingAs($owner)
             ->withSession([TenantContext::SESSION_KEY => $secondOrganization->id])
             ->patch(route('channels.widget.update'), ['enabled' => false])
-            ->assertRedirect(route('channels.index'));
+            ->assertRedirect(route('onboarding').'#channels');
 
         $this->assertTrue($firstAgent->fresh()->websiteWidgetEnabled());
         $secondAgent->refresh();
@@ -92,10 +91,8 @@ class WebsiteWidgetAvailabilityTest extends TestCase
 
         $this->actingAs($viewer)
             ->withSession([TenantContext::SESSION_KEY => $secondOrganization->id])
-            ->get(route('channels.index'))
-            ->assertOk()
-            ->assertSee('Only an owner or admin can change this.')
-            ->assertDontSee('aria-label="Turn website chat on"', false);
+            ->get(route('onboarding'))
+            ->assertForbidden();
 
         $this->assertNotSame($firstOrganization->id, $secondOrganization->id);
     }
@@ -114,7 +111,7 @@ class WebsiteWidgetAvailabilityTest extends TestCase
                 'catalog_url' => '',
                 'description' => 'Updated safely.',
             ])
-            ->assertRedirect(route('channels.index'));
+            ->assertRedirect(route('onboarding').'#channels');
 
         $agent->refresh();
         $this->assertSame(['facebook'], $agent->channels);

@@ -46,7 +46,7 @@ class OnboardingWidgetThemeTest extends TestCase
             'widget_theme_preset' => 'custom',
             'widget_theme_primary' => '#123456',
             'widget_theme_accent' => '#abcdef',
-        ]))->assertRedirect(route('channels.index'))
+        ]))->assertRedirect(route('onboarding').'#channels')
             ->assertSessionHasNoErrors();
 
         $agent->refresh();
@@ -67,7 +67,7 @@ class OnboardingWidgetThemeTest extends TestCase
         ]);
 
         $this->actingAs($owner)->post(route('onboarding.store'), $this->validOnboarding())
-            ->assertRedirect(route('channels.index'))
+            ->assertRedirect(route('onboarding').'#channels')
             ->assertSessionHasNoErrors();
         $this->assertSame([
             'preset' => 'custom',
@@ -79,7 +79,7 @@ class OnboardingWidgetThemeTest extends TestCase
             'widget_theme_preset' => 'ocean',
             'widget_theme_primary' => '#fff;background:red',
             'widget_theme_accent' => 'not-a-color',
-        ]))->assertRedirect(route('channels.index'))
+        ]))->assertRedirect(route('onboarding').'#channels')
             ->assertSessionHasNoErrors();
         $this->assertSame([
             'preset' => 'ocean',

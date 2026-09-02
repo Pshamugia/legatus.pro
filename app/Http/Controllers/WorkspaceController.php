@@ -76,7 +76,7 @@ class WorkspaceController extends Controller
         $organization = $tenant->activate($workspace, $request->user());
         $request->session()->regenerate();
 
-        return to_route('dashboard')->with('status', "Switched to {$organization->name}.");
+        return to_route('onboarding')->with('status', "Switched to {$organization->name}.");
     }
 
     public function destroy(

@@ -10,7 +10,7 @@
     </style>
 </head>
 <body><main class="shell">
-    <header class="top"><div class="brand"><span class="mark">L</span>Legatus</div><div><h1>Super Admin</h1><p>Businesses, plans, and payment status</p></div><div class="actions"><a class="btn" href="{{ route('dashboard') }}">Workspace →</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn">Log out</button></form></div></header>
+    <header class="top"><div class="brand"><span class="mark">L</span>Legatus</div><div><h1>Super Admin</h1><p>Businesses, plans, and payment status</p></div><div class="actions"><a class="btn" href="{{ route('onboarding') }}">Workspace →</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn">Log out</button></form></div></header>
     @if(session('status'))<div class="notice">{{ session('status') }}</div>@endif
     <section class="metrics">
         <div class="metric"><span>Total businesses</span><strong>{{ number_format($metrics['businesses']) }}</strong></div>

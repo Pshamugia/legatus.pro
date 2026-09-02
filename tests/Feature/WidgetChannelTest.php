@@ -88,7 +88,7 @@ class WidgetChannelTest extends TestCase
     {
         $this->seed();
         $this->actingAs(User::first());
-        $this->get('/app/channels')
+        $this->get('/onboarding')
             ->assertOk()
             ->assertSee('widget/legatus-demo.js')
             ->assertSee('Copy script')
@@ -100,20 +100,19 @@ class WidgetChannelTest extends TestCase
             ->assertDontSee('webhook URL', false);
     }
 
-    public function test_channels_page_has_a_three_step_setup_and_no_manual_credentials(): void
+    public function test_business_setup_contains_clear_channel_blocks_and_no_manual_credentials(): void
     {
         $this->seed();
         $this->actingAs(User::first());
 
-        $this->get('/app/channels')
+        $this->get('/onboarding')
             ->assertOk()
-            ->assertSeeInOrder(['Teach', 'Add to website', 'Connect Meta'])
+            ->assertSeeInOrder(['Customer channels', 'Website chat', 'Facebook and Instagram'])
             ->assertSee('Facebook Messenger')
             ->assertSee('Instagram Direct')
-            ->assertSee('Connect Facebook')
-            ->assertSee('Connect Instagram')
+            ->assertSee('Connect Facebook and Instagram')
             ->assertSee(route('channels.meta.connect', ['provider' => 'meta']), false)
-            ->assertSee("Meta's official page", false)
+            ->assertSee('official page')
             ->assertDontSee('Paste token')
             ->assertDontSee('Webhook URL');
     }
@@ -135,7 +134,7 @@ class WidgetChannelTest extends TestCase
             'last_webhook_at' => now()->subMinute(),
         ]);
 
-        $this->get('/app/channels')
+        $this->get('/onboarding')
             ->assertOk()
             ->assertSee('data-channel="facebook" data-status="connected"', false)
             ->assertSee('Bukinistebi.ge')
@@ -166,11 +165,19 @@ class WidgetChannelTest extends TestCase
             'last_error' => 'Graph rejected access_token=secret-provider-value',
         ]);
 
-        $this->get('/app/channels')
+        $this->get('/onboarding')
             ->assertOk()
             ->assertSee('data-channel="instagram" data-status="error"', false)
-            ->assertSee('Connection needs attention')
+            ->assertSee('Needs attention')
             ->assertSee('Reconnect')
             ->assertDontSee('secret-provider-value');
+    }
+
+    public function test_legacy_channels_url_redirects_to_the_channel_section_in_business_setup(): void
+    {
+        $this->seed();
+        $this->actingAs(User::first());
+
+        $this->get('/app/channels')->assertRedirect('/onboarding#channels');
     }
 }

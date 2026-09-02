@@ -35,7 +35,7 @@ class CommerceChannelManagementTest extends TestCase
             'metadata' => ['source_id' => $source->id],
         ]);
 
-        $this->actingAs($user)->get(route('channels.index'))
+        $this->actingAs($user)->get(route('onboarding'))
             ->assertOk()
             ->assertSee('data-catalog-status="available"', false)
             ->assertSee('✓ Catalog available')
@@ -49,7 +49,7 @@ class CommerceChannelManagementTest extends TestCase
     {
         [$user] = $this->tenant('empty-catalog-store', 'owner');
 
-        $this->actingAs($user)->get(route('channels.index'))
+        $this->actingAs($user)->get(route('onboarding'))
             ->assertOk()
             ->assertSee('data-catalog-status="missing"', false)
             ->assertSee('Catalog not added');
@@ -97,7 +97,7 @@ class CommerceChannelManagementTest extends TestCase
             'is_active' => true,
         ]);
 
-        $this->actingAs($user)->get(route('channels.index'))
+        $this->actingAs($user)->get(route('onboarding'))
             ->assertOk()
             ->assertSee('data-catalog-status="live"', false)
             ->assertSee('✓ Live API connected')
@@ -240,11 +240,8 @@ class CommerceChannelManagementTest extends TestCase
         $this->actingAs($viewer)->delete(route('channels.commerce.disconnect'))->assertForbidden();
         $this->assertDatabaseHas('commerce_connections', ['id' => $connection->id, 'key_id' => 'viewer-key']);
 
-        $this->actingAs($viewer)->get(route('channels.index'))
-            ->assertOk()
-            ->assertSee('Only a business owner or admin can change the connection.')
-            ->assertDontSee('name="secret"', false)
-            ->assertDontSee(route('channels.commerce.disconnect'), false);
+        $this->actingAs($viewer)->get(route('onboarding'))
+            ->assertForbidden();
     }
 
     /** @return array{User, Agent} */

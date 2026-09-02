@@ -36,7 +36,7 @@ class OnboardingGoldenPathTest extends TestCase
             ->assertSee('name="business_name"', false)
             ->assertSee('name="agent_name"', false);
 
-        $this->actingAs($user)->post('/onboarding', ['business_name' => 'Golden Store', 'agent_name' => 'ანა', 'website' => 'https://example.com/store', 'catalog_url' => 'https://example.com/all-products', 'description' => 'A polished demo business.', 'catalog' => $catalog])->assertRedirect('/app/channels');
+        $this->actingAs($user)->post('/onboarding', ['business_name' => 'Golden Store', 'agent_name' => 'ანა', 'website' => 'https://example.com/store', 'catalog_url' => 'https://example.com/all-products', 'description' => 'A polished demo business.', 'catalog' => $catalog])->assertRedirect('/onboarding#channels');
 
         $agent = Agent::findOrFail($agentId);
         $this->assertSame('ანა', $agent->name);
@@ -60,12 +60,12 @@ class OnboardingGoldenPathTest extends TestCase
             ->assertSee('value="Golden Store"', false)
             ->assertSee('value="ანა"', false)
             ->assertSee('value="https://example.com/store"', false)
-            ->assertSee('value="https://example.com/all-products"', false)
-            ->assertSee('A polished demo business.')
-            ->assertSee('catalog.csv')
-            ->assertSee('example.com product catalog')
-            ->assertSee('example.com')
-            ->assertSee('Browsers cannot prefill a file input');
+            ->assertSee('Customer channels')
+            ->assertSee('Website chat')
+            ->assertSee('Facebook and Instagram')
+            ->assertDontSee('Catalog and business knowledge')
+            ->assertDontSee('Previously connected URL')
+            ->assertDontSee('Browsers cannot prefill a file input');
 
         $this->actingAs($user)->get(route('dashboard'))
             ->assertOk()
@@ -94,7 +94,7 @@ class OnboardingGoldenPathTest extends TestCase
             'agent_name' => 'თამარი',
             'website' => 'https://example.com/products',
             'catalog_url' => 'https://example.com/products',
-        ])->assertRedirect('/app/channels');
+        ])->assertRedirect('/onboarding#channels');
 
         $agent = $user->organizations()->firstOrFail()->agents()->firstOrFail();
         $this->assertSame(1, $agent->knowledgeSources()->count());
@@ -120,7 +120,7 @@ class OnboardingGoldenPathTest extends TestCase
             'business_name' => 'Catalog Store',
             'agent_name' => 'Nia',
             'catalog_url' => 'https://example.com/broken-catalog',
-        ])->assertRedirect('/app/channels')
+        ])->assertRedirect('/onboarding#channels')
             ->assertSessionHas('success', 'Setup saved, but one or more sources still need attention.')
             ->assertSessionHas('warnings', fn (array $warnings): bool => count($warnings) === 1 && str_contains($warnings[0], 'URL could not be learned'));
 
@@ -132,11 +132,10 @@ class OnboardingGoldenPathTest extends TestCase
             'status' => 'failed',
         ]);
 
-        $this->actingAs($user)->get('/app/channels')
+        $this->actingAs($user)->get(route('knowledge.index'))
             ->assertOk()
-            ->assertSee('Source needs attention')
-            ->assertSee('URL could not be learned')
-            ->assertDontSee('Legatus is ready');
+            ->assertSee('Connected knowledge')
+            ->assertSee('failed');
     }
 
     public function test_setup_shows_legacy_saved_urls_and_rejects_unsafe_catalog_addresses(): void
@@ -159,9 +158,12 @@ class OnboardingGoldenPathTest extends TestCase
 
         $this->actingAs($user)->get('/onboarding')
             ->assertOk()
-            ->assertSee('Previously connected URL')
-            ->assertSee('https://example.com/legacy-products')
-            ->assertSee('data-catalog-url="https://example.com/legacy-products"', false);
+            ->assertDontSee('Previously connected URL')
+            ->assertDontSee('data-catalog-url="https://example.com/legacy-products"', false);
+
+        $this->actingAs($user)->get(route('knowledge.index'))
+            ->assertOk()
+            ->assertSee('Legacy complete list');
 
         foreach (['ftp://example.com/catalog', 'https://user:secret@example.com/catalog'] as $unsafeUrl) {
             $this->actingAs($user)->post('/onboarding', [
@@ -192,7 +194,7 @@ class OnboardingGoldenPathTest extends TestCase
             'business_name' => 'Unstructured Store',
             'agent_name' => 'Nia',
             'catalog_url' => 'https://example.com/catalog-page',
-        ])->assertRedirect('/app/channels')
+        ])->assertRedirect('/onboarding#channels')
             ->assertSessionHas('warnings', [])
             ->assertSessionHas('success', 'Setup saved and learned example.com product catalog.');
 

@@ -15,7 +15,7 @@
             <span class="eyebrow">Subscription status</span>
             <h2 style="font-size:32px;margin:12px 0 8px">{{ $subscription->status === 'trialing' ? 'Free trial active' : 'Subscription active' }}</h2>
             @if($subscription->trial_ends_at)<p style="color:var(--muted);margin:0 0 24px">Your trial ends {{ $subscription->trial_ends_at->format('M j, Y H:i') }}. Billing starts automatically afterward.</p>@endif
-            <a class="btn lime" style="display:inline-block;min-width:240px" href="{{ route('dashboard') }}">Go to admin dashboard</a>
+            <a class="btn lime" style="display:inline-block;min-width:240px" href="{{ route('onboarding') }}">Go to business setup</a>
         </div>
     @else
         @if(request('checkout') === 'complete')<div class="panel" id="activation-pending" style="margin-bottom:20px;text-align:center">Payment details received. Activating your workspace…</div>@endif

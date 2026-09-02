@@ -144,7 +144,7 @@ class PaddleBillingTest extends TestCase
         $this->actingAs($user)->get('/billing')
             ->assertOk()
             ->assertSee('Free trial active')
-            ->assertSee('Go to admin dashboard')
+            ->assertSee('Go to business setup')
             ->assertDontSee('Start free trial')
             ->assertDontSee('$162');
         $this->actingAs($user)->get('/app')->assertOk();
@@ -177,7 +177,7 @@ class PaddleBillingTest extends TestCase
         $this->actingAs($user)->get('/billing?checkout=complete')
             ->assertOk()
             ->assertSee('Payment details received. Activating your workspace')
-            ->assertSee("window.setTimeout(() => window.location.reload(), 2000)", false);
+            ->assertSee('window.setTimeout(() => window.location.reload(), 2000)', false);
     }
 
     public function test_invalid_webhook_signature_is_rejected_without_persisting(): void

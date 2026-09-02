@@ -12,6 +12,11 @@ class ChannelController extends Controller
 {
     public function index(TenantContext $tenant)
     {
+        return redirect(route('onboarding').'#channels');
+    }
+
+    public function setupViewData(TenantContext $tenant): array
+    {
         $agent = $tenant->agent();
         $snippet = '<script src="'.route('widget.script', $agent).'" async></script>';
         $connections = method_exists($agent, 'channelConnections')
@@ -68,7 +73,7 @@ class ChannelController extends Controller
             ->unique()
             ->values();
 
-        return view('channels', compact(
+        return compact(
             'agent',
             'snippet',
             'metaChannels',
@@ -82,7 +87,7 @@ class ChannelController extends Controller
             'catalogConnectionState',
             'canManageChannels',
             'widgetEnabled',
-        ));
+        );
     }
 
     public function updateWidget(Request $request, TenantContext $tenant)
@@ -108,7 +113,7 @@ class ChannelController extends Controller
             $agent->update(['channels' => $channels->unique()->values()->all()]);
         });
 
-        return redirect()->route('channels.index')->with(
+        return redirect(route('onboarding').'#channels')->with(
             'channel_success',
             $enabled
                 ? 'Website chat is ON. The existing script will show the widget again.'

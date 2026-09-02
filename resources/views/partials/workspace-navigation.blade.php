@@ -21,6 +21,7 @@
         ? route('workspaces.index')
         : route('settings.index');
     $navigationAddBusinessUrl = $addBusinessUrl ?? $workspaceIndexUrl;
+    $navigationHomeUrl = $navigationCanManage ? route('onboarding') : route('inbox.index');
 @endphp
 
 @once
@@ -33,11 +34,10 @@
 
 @if($navigationVariant === 'topbar')
     <header class="app-workspace-topbar">
-        <a class="brand app-business-brand" data-active-business="{{ $navigationBusinessName }}" href="{{ route('dashboard') }}" aria-label="{{ $navigationBusinessName }} dashboard">
+        <a class="brand app-business-brand" data-active-business="{{ $navigationBusinessName }}" href="{{ $navigationHomeUrl }}" aria-label="{{ $navigationBusinessName }} workspace">
             <span class="mark" aria-hidden="true">{{ mb_strtoupper(mb_substr($navigationBusinessName, 0, 1)) }}</span>
             <span class="app-business-brand-copy"><strong>{{ $navigationBusinessName }}</strong><small>Workspace on Legatus</small></span>
         </a>
-        <a class="app-topbar-link" href="{{ route('dashboard') }}">Dashboard</a>
         @if($navigationUser?->isSuperAdmin())<a class="app-topbar-link" href="{{ route('super-admin.index') }}">Super Admin</a>@endif
         @if($navigationCanManage)<a class="app-topbar-link" href="{{ route('onboarding') }}">Business setup</a>@endif
         @include('partials.workspace-switcher')
@@ -49,7 +49,7 @@
     </header>
 @else
     <aside class="side app-side">
-        <a class="brand app-business-brand" data-active-business="{{ $navigationBusinessName }}" href="{{ route('dashboard') }}" aria-label="{{ $navigationBusinessName }} dashboard">
+        <a class="brand app-business-brand" data-active-business="{{ $navigationBusinessName }}" href="{{ $navigationHomeUrl }}" aria-label="{{ $navigationBusinessName }} workspace">
             <span class="mark" aria-hidden="true">{{ mb_strtoupper(mb_substr($navigationBusinessName, 0, 1)) }}</span>
             <span class="app-business-brand-copy"><strong>{{ $navigationBusinessName }}</strong><small>Workspace on Legatus</small></span>
         </a>
@@ -57,12 +57,10 @@
 
         <nav class="menu app-primary-nav" aria-label="Workspace navigation">
             @if($navigationUser?->isSuperAdmin())<a href="{{ route('super-admin.index') }}"><span class="app-nav-glyph">SA</span> Super Admin</a>@endif
-            <a @class(['active' => $navigationActive === 'dashboard']) href="{{ route('dashboard') }}"><span class="app-nav-glyph">OV</span> Overview</a>
             @if($navigationCanManage)<a @class(['active' => $navigationActive === 'onboarding']) href="{{ route('onboarding') }}"><span class="app-nav-glyph">SU</span> Business setup</a>@endif
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}"><span class="app-nav-glyph">IN</span> Inbox @if($navigationInboxCount)<span class="app-nav-count">{{ $navigationInboxCount }}</span>@endif</a>
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}"><span class="app-nav-glyph">KN</span> Knowledge</a>
             <a @class(['active' => $navigationActive === 'products']) href="{{ route('dashboard') }}#products"><span class="app-nav-glyph">PR</span> Products @if($navigationProductCount)<span class="app-nav-count">{{ $navigationProductCount }}</span>@endif</a>
-            <a @class(['active' => $navigationActive === 'channels']) href="{{ route('channels.index') }}"><span class="app-nav-glyph">CH</span> Channels</a>
             <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}"><span class="app-nav-glyph">SM</span> Social media</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}"><span class="app-nav-glyph">AN</span> Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}"><span class="app-nav-glyph">ST</span> Settings</a>
@@ -83,7 +81,7 @@
 
     <header class="app-mobile-nav">
         <div class="app-mobile-controls">
-            <a class="brand app-business-brand" data-active-business="{{ $navigationBusinessName }}" href="{{ route('dashboard') }}" aria-label="{{ $navigationBusinessName }} dashboard">
+            <a class="brand app-business-brand" data-active-business="{{ $navigationBusinessName }}" href="{{ $navigationHomeUrl }}" aria-label="{{ $navigationBusinessName }} workspace">
                 <span class="mark" aria-hidden="true">{{ mb_strtoupper(mb_substr($navigationBusinessName, 0, 1)) }}</span>
                 <span class="app-business-brand-copy"><strong>{{ $navigationBusinessName }}</strong><small>Workspace on Legatus</small></span>
             </a>
@@ -95,12 +93,10 @@
             </form>
         </div>
         <nav class="app-mobile-links" aria-label="Workspace navigation">
-            <a @class(['active' => $navigationActive === 'dashboard']) href="{{ route('dashboard') }}">Overview</a>
             @if($navigationCanManage)<a @class(['active' => $navigationActive === 'onboarding']) href="{{ route('onboarding') }}">Setup</a>@endif
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}">Inbox @if($navigationInboxCount)({{ $navigationInboxCount }})@endif</a>
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}">Knowledge</a>
             <a @class(['active' => $navigationActive === 'products']) href="{{ route('dashboard') }}#products">Products</a>
-            <a @class(['active' => $navigationActive === 'channels']) href="{{ route('channels.index') }}">Channels</a>
             <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}">Social media</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}">Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}">Settings</a>
