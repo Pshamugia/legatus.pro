@@ -88,6 +88,7 @@ class SocialMediaController extends Controller
     {
         $tenant->authorize(['owner', 'admin']);
         $request->merge(['timing_mode' => $request->input('timing_mode', 'auto')]);
+        $request->merge(['copy_mode' => $request->input('copy_mode', 'original')]);
         $data = $request->validate([
             'starts_on' => ['required', 'date', 'after_or_equal:today'],
             'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
@@ -102,6 +103,8 @@ class SocialMediaController extends Controller
             'timing_mode' => ['required', Rule::in(['auto', 'custom'])],
             'posting_times' => ['nullable', 'array'],
             'posting_times.*' => ['required', 'date_format:H:i'],
+            'copy_mode' => ['required', Rule::in(['original', 'ai'])],
+            'ai_tone' => ['nullable', Rule::requiredIf($request->input('copy_mode') === 'ai'), Rule::in(['simple', 'creative', 'academic'])],
         ]);
 
         $configuredLanguages = $tenant->agent()->knowledgeSources()->where('source_scope', 'language')
@@ -134,6 +137,12 @@ class SocialMediaController extends Controller
         $missing = collect($data['providers'])->diff($active);
         if ($missing->isNotEmpty()) {
             throw ValidationException::withMessages(['providers' => 'Connect the selected Facebook/Instagram accounts before creating a schedule.']);
+        }
+
+        if ($data['copy_mode'] === 'ai' && ((int) $data['posts_per_day'] * count($data['providers'])) > 3) {
+            throw ValidationException::withMessages([
+                'posts_per_day' => 'AI Copywriter is limited to 3 generated posts per business per day across all selected channels.',
+            ]);
         }
 
         $scheduler->create($agent, $data);

@@ -35,6 +35,11 @@ class SocialMediaScheduler
         $templateSnapshots = $this->templates->snapshots($agent, $data['providers']);
 
         return DB::transaction(function () use ($agent, $data, $productsByProvider, $templateSnapshots): SocialMediaSchedule {
+            if (($data['copy_mode'] ?? 'original') === 'ai') {
+                Agent::query()->whereKey($agent->id)->lockForUpdate()->firstOrFail();
+                $this->assertAiDailyCapacity($agent, $data);
+            }
+
             $schedule = $agent->socialMediaSchedules()->create([
                 'starts_on' => $data['starts_on'],
                 'ends_on' => $data['ends_on'],
@@ -45,6 +50,8 @@ class SocialMediaScheduler
                 'timezone' => $data['timezone'],
                 'posting_times' => $data['posting_times'] ?? null,
                 'template_snapshots' => $templateSnapshots,
+                'copy_mode' => $data['copy_mode'] ?? 'original',
+                'ai_tone' => ($data['copy_mode'] ?? 'original') === 'ai' ? $data['ai_tone'] : null,
                 'status' => 'active',
             ]);
 
@@ -156,6 +163,26 @@ class SocialMediaScheduler
 
             return $day->setTime(intdiv($minute, 60), $minute % 60)->utc();
         })->all();
+    }
+
+    private function assertAiDailyCapacity(Agent $agent, array $data): void
+    {
+        $newPostsPerDay = (int) $data['posts_per_day'] * count($data['providers']);
+        $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
+        $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
+
+        for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
+            $existing = $agent->socialMediaPosts()
+                ->where('scheduled_for', '>=', $day->utc())
+                ->where('scheduled_for', '<', $day->addDay()->utc())
+                ->whereHas('schedule', fn ($query) => $query->where('copy_mode', 'ai'))
+                ->count();
+            if (($existing + $newPostsPerDay) > 3) {
+                throw ValidationException::withMessages([
+                    'posts_per_day' => 'This business already has AI-generated posts scheduled for '.$day->toDateString().'. The daily maximum is 3 across Facebook and Instagram.',
+                ]);
+            }
+        }
     }
 
     /** @param list<string> $times */

@@ -66,6 +66,10 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Public Novel')
             ->assertSee('Verified public description.')
             ->assertSee('Classic frame')
+            ->assertSee('AI Copywriter')
+            ->assertSee('Original content')
+            ->assertSee('Informative')
+            ->assertSee('Maximum 3 generated posts per business each day.')
             ->assertSee('Catalog design')
             ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
@@ -325,6 +329,120 @@ class SocialMediaSchedulerTest extends TestCase
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), $payload)
             ->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posting_times');
         $this->assertDatabaseCount('social_media_schedules', 0);
+    }
+
+    public function test_ai_copywriter_schedule_is_limited_to_three_channel_posts_per_business_day(): void
+    {
+        [$user, $agent] = $this->tenant('ai-daily-limit');
+        $this->connections($agent);
+        $agent->products()->create($this->product('AI Product', 'General', 5));
+        $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 3,
+            'providers' => ['facebook'], 'timezone' => 'Asia/Tbilisi',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ])->assertRedirect(route('social-media.index'));
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->assertSame('ai', $schedule->copy_mode);
+        $this->assertSame('creative', $schedule->ai_tone);
+        $this->assertCount(3, $schedule->posts);
+
+        $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
+            'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 1,
+            'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
+            'copy_mode' => 'ai', 'ai_tone' => 'simple',
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posts_per_day');
+
+        $this->assertSame(1, $agent->socialMediaSchedules()->count());
+    }
+
+    public function test_ai_copywriter_rejects_more_than_three_generated_channel_posts_in_one_schedule(): void
+    {
+        [$user, $agent] = $this->tenant('ai-request-limit');
+        $this->connections($agent);
+        $agent->products()->create($this->product('AI Product', 'General', 5));
+
+        $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 2, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
+            'copy_mode' => 'ai', 'ai_tone' => 'academic',
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posts_per_day');
+
+        $this->assertDatabaseCount('social_media_schedules', 0);
+    }
+
+    public function test_luna_generates_a_verified_image_aware_caption_once_before_meta_publish(): void
+    {
+        [, $agent] = $this->tenant('ai-publisher');
+        $this->connections($agent);
+        config()->set('services.openai.key', 'test-openai-key');
+        config()->set('services.openai.social_media_model', 'gpt-5.6-luna');
+        $product = $agent->products()->create($this->product('Luna Product', 'General', 2));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'academic',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Prepared fallback caption',
+        ]);
+        $generated = 'Thoughtful Luna caption 📚 '.data_get($product->metadata, 'product_url');
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $generated])]]]],
+                'usage' => ['input_tokens' => 100, 'output_tokens' => 30],
+            ]),
+            'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'ai-facebook-post']),
+        ]);
+
+        (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+
+        $fresh = $post->fresh();
+        $this->assertSame('published', $fresh->status);
+        $this->assertSame($generated, $fresh->caption);
+        $this->assertSame('gpt-5.6-luna', $fresh->ai_model);
+        $this->assertNotNull($fresh->ai_generation_attempted_at);
+        $this->assertNotNull($fresh->ai_generated_at);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/responses'
+            && $request['model'] === 'gpt-5.6-luna'
+            && data_get($request->data(), 'input.0.content.1.type') === 'input_image'
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Do not invent benefits'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photos')
+            && str_contains((string) $request['caption'], $generated));
+    }
+
+    public function test_failed_ai_generation_is_not_repeated_or_sent_to_meta(): void
+    {
+        [, $agent] = $this->tenant('ai-generation-failure');
+        $this->connections($agent);
+        config()->set('services.openai.key', 'test-openai-key');
+        $product = $agent->products()->create($this->product('Failure Product', 'General', 1));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'simple',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Prepared fallback caption',
+        ]);
+        Http::fake(['https://api.openai.com/v1/responses' => Http::response(['error' => ['message' => 'Unavailable']], 503)]);
+
+        $job = new PublishSocialMediaPost($post->id);
+        $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+        $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+
+        $this->assertSame('failed', $post->fresh()->status);
+        $this->assertNotNull($post->fresh()->ai_generation_attempted_at);
+        $this->assertNull($post->fresh()->ai_generated_at);
+        Http::assertSentCount(1);
     }
 
     public function test_social_schedule_filters_and_snapshots_the_selected_website_language(): void

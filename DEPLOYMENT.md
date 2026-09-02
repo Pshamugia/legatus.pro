@@ -41,6 +41,7 @@ OPENAI_MODEL=gpt-5.6-sol
 # Hybrid rollout is opt-in. Keep false for the established Sol-only behavior.
 OPENAI_PRIMARY_MODEL=gpt-5.6-luna
 OPENAI_FALLBACK_MODEL=gpt-5.6-sol
+OPENAI_SOCIAL_MEDIA_MODEL=gpt-5.6-luna
 OPENAI_HYBRID_ENABLED=false
 OPENAI_HYBRID_ROLLOUT_PERCENT=5
 OPENAI_FALLBACK_ENABLED=true

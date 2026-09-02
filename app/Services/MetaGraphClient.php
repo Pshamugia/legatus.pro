@@ -149,9 +149,11 @@ class MetaGraphClient
         throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
 
         if (filled($imageUrl)) {
+            $caption = str_contains($message, $link) ? $message : $message."\n\n".$link;
+
             return $this->authorizedRequest($connection->access_token, retry: false)
                 ->post($this->url($connection->external_account_id.'/photos'), [
-                    'caption' => Str::limit($message, 5900, '')."\n\n".$link,
+                    'caption' => Str::limit($caption, 5900, ''),
                     'url' => $imageUrl,
                 ])->throw()->json();
         }

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\SocialMediaPost;
 use App\Services\MetaGraphClient;
+use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaTemplateRenderer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -17,8 +18,9 @@ class PublishSocialMediaPost implements ShouldQueue
 
     public function __construct(public int $postId) {}
 
-    public function handle(MetaGraphClient $meta, SocialMediaTemplateRenderer $renderer): void
+    public function handle(MetaGraphClient $meta, SocialMediaTemplateRenderer $renderer, ?SocialMediaAiCopywriter $copywriter = null): void
     {
+        $copywriter ??= app(SocialMediaAiCopywriter::class);
         $post = SocialMediaPost::query()->with(['schedule', 'agent.organization', 'product'])->find($this->postId);
         if (! $post || $post->status !== 'queued' || $post->schedule?->status !== 'active') {
             return;
@@ -46,7 +48,42 @@ class PublishSocialMediaPost implements ShouldQueue
         }
 
         $template = data_get($post->schedule->template_snapshots, $post->provider);
-        if (is_array($template)) {
+        if ($post->schedule->copy_mode === 'ai') {
+            if ($post->ai_generated_at === null) {
+                if ($post->ai_generation_attempted_at !== null) {
+                    $post->update(['status' => 'failed', 'failure_reason' => 'AI Copywriter did not complete its first generation attempt.']);
+
+                    return;
+                }
+                $title = (string) ($localized['name'] ?? $product->name);
+                $descriptionValue = $product->socialDescription($post->language, $post->description);
+                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 700, '…');
+                $post->update([
+                    'title' => $title,
+                    'description' => $description ?: null,
+                    'product_url' => $currentUrl,
+                    'image_url' => $this->publicHttpUrl($publishImage) ? $publishImage : null,
+                ]);
+                $post->refresh();
+                $post->update(['ai_generation_attempted_at' => now()]);
+                try {
+                    $post->update([
+                        'caption' => $copywriter->generate($post),
+                        'ai_generated_at' => now(),
+                        'ai_model' => (string) config('services.openai.social_media_model', 'gpt-5.6-luna'),
+                        'failure_reason' => null,
+                    ]);
+                    $post->refresh();
+                } catch (\Throwable $exception) {
+                    $post->update([
+                        'status' => 'failed',
+                        'failure_reason' => Str::limit('AI Copywriter: '.$exception->getMessage(), 2000, ''),
+                    ]);
+
+                    return;
+                }
+            }
+        } elseif (is_array($template)) {
             try {
                 $title = (string) ($localized['name'] ?? $product->name);
                 // Never erase the immutable description prepared for this post
