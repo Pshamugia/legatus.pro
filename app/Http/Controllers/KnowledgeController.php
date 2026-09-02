@@ -32,15 +32,21 @@ class KnowledgeController extends Controller
                 }
 
                 return [
+                    'id' => $source->id,
                     'name' => $source->taxonomy_label ?: implode(', ', $taxonomy),
                     'url' => $source->url,
+                    'status' => $source->status,
+                    'refreshable' => $source->isRefreshable(),
                 ];
             })
             ->filter()
             ->values();
         $languageSources = $sources->where('source_scope', 'language')->map(fn (KnowledgeSource $source): array => [
+            'id' => $source->id,
             'name' => $source->taxonomy_label ?: $source->name,
             'url' => $source->url,
+            'status' => $source->status,
+            'refreshable' => $source->isRefreshable(),
         ])->values();
 
         $deliveryText = $deliverySource?->chunks()->where('kind', 'policy')->value('content');

@@ -41,6 +41,7 @@ class WorkspaceNavigationUiTest extends TestCase
                 ->assertSee('Business setup')
                 ->assertDontSee('>Overview<', false)
                 ->assertDontSee('>Channels<', false)
+                ->assertDontSee('>Products<', false)
                 ->assertSee('+ Add business')
                 ->assertSee('Manage businesses')
                 ->assertSee(route('workspaces.index'), false)

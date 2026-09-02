@@ -60,7 +60,6 @@
             @if($navigationCanManage)<a @class(['active' => $navigationActive === 'onboarding']) href="{{ route('onboarding') }}"><span class="app-nav-glyph">SU</span> Business setup</a>@endif
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}"><span class="app-nav-glyph">IN</span> Inbox @if($navigationInboxCount)<span class="app-nav-count">{{ $navigationInboxCount }}</span>@endif</a>
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}"><span class="app-nav-glyph">KN</span> Knowledge</a>
-            <a @class(['active' => $navigationActive === 'products']) href="{{ route('dashboard') }}#products"><span class="app-nav-glyph">PR</span> Products @if($navigationProductCount)<span class="app-nav-count">{{ $navigationProductCount }}</span>@endif</a>
             <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}"><span class="app-nav-glyph">SM</span> Social media</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}"><span class="app-nav-glyph">AN</span> Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}"><span class="app-nav-glyph">ST</span> Settings</a>
@@ -96,7 +95,6 @@
             @if($navigationCanManage)<a @class(['active' => $navigationActive === 'onboarding']) href="{{ route('onboarding') }}">Setup</a>@endif
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}">Inbox @if($navigationInboxCount)({{ $navigationInboxCount }})@endif</a>
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}">Knowledge</a>
-            <a @class(['active' => $navigationActive === 'products']) href="{{ route('dashboard') }}#products">Products</a>
             <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}">Social media</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}">Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}">Settings</a>

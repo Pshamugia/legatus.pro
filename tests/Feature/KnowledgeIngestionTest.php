@@ -10,8 +10,8 @@ use App\Services\EmbeddingService;
 use App\Services\KnowledgeIngestionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -591,6 +591,27 @@ HTML;
             ->assertSee('Thriller');
     }
 
+    public function test_knowledge_actions_are_attached_to_their_editable_source_and_duplicate_list_is_removed(): void
+    {
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Thriller',
+            'name' => 'Category: Thriller',
+            'url' => 'https://shop.example/thriller',
+            'status' => 'ready',
+        ]);
+
+        $this->actingAs($user)->get(route('knowledge.index'))
+            ->assertOk()
+            ->assertSee('sync-source-'.$source->id, false)
+            ->assertSee('remove-source-'.$source->id, false)
+            ->assertDontSee('Connected knowledge');
+    }
+
     public function test_live_knowledge_status_is_tenant_scoped_and_excludes_heavy_chunks(): void
     {
         $this->seed();
@@ -690,7 +711,7 @@ HTML;
             ->assertSee('Delivery information')
             ->assertSee('თბილისში მიწოდება უფასოა')
             ->assertSee('https://shop.example/terms')
-            ->assertSee('Manual policy');
+            ->assertSee('form="remove-source-'.$delivery->id.'"', false);
     }
 
     public function test_saving_website_structure_updates_single_catalog_and_existing_category(): void
@@ -892,10 +913,7 @@ HTML;
 
         $response = $this->actingAs($user)->get(route('knowledge.index'))
             ->assertOk()
-            ->assertSee('Demo fixture snapshot')
-            ->assertSee('Static fixture · no source payload')
-            ->assertSee('Lexical search available · static fixture has no semantic index')
-            ->assertDontSee('↻ Sync')
+            ->assertDontSee('Connected knowledge')
             ->assertDontSee('<span class="pill">ready</span>', false);
 
         foreach ($sources as $source) {

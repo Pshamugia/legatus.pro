@@ -1,69 +1,51 @@
 @extends('layouts.app') @section('title','Knowledge · Legatus') @section('body')
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">
-#connected-knowledge .knowledge-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
-#connected-knowledge .knowledge-heading .channel{line-height:1.5;text-align:right}
-#connected-knowledge .knowledge-source-row{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:start;gap:13px}
-#connected-knowledge .knowledge-source-copy{min-width:0}
-#connected-knowledge .knowledge-source-copy>p{max-width:none;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.55}
-#connected-knowledge .knowledge-source-copy>p:first-of-type{color:#596a64}
-#connected-knowledge .knowledge-source-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;max-width:330px}
-#connected-knowledge .knowledge-source-actions .channel{white-space:nowrap;margin-right:4px}
-#connected-knowledge .knowledge-source-actions form{margin:0}
-#connected-knowledge .knowledge-source-copy .progress{width:min(100%,360px)!important;margin-top:9px}
-@media(max-width:1050px){
-    #connected-knowledge .knowledge-source-row{grid-template-columns:40px minmax(0,1fr)}
-    #connected-knowledge .knowledge-source-actions{grid-column:2;justify-content:flex-start;max-width:none}
-}
-@media(max-width:600px){
-    #connected-knowledge .knowledge-source-row{grid-template-columns:1fr}
-    #connected-knowledge .knowledge-source-row>.avatar{display:none}
-    #connected-knowledge .knowledge-source-actions{grid-column:1}
-    #connected-knowledge .knowledge-heading .channel{text-align:left}
-}
+.knowledge-main{max-width:1180px;width:100%;margin:0 auto}.knowledge-section{margin-top:22px!important;padding:0!important;overflow:hidden}.knowledge-section__head{padding:22px 24px;border-bottom:1px solid var(--line)}.knowledge-section__head h3{margin:4px 0 6px;font-size:21px}.knowledge-section__head p{margin:0;color:var(--muted);font-size:12px}.knowledge-section__body{padding:24px}.knowledge-group{margin-top:22px;padding:18px;border:1px solid var(--line);border-radius:15px;background:#f8faf7}.knowledge-group:first-child{margin-top:0}.knowledge-group__title{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:12px}.knowledge-group__title label{margin:0;font-size:14px}.knowledge-group__title p{margin:4px 0 0;color:var(--muted);font-size:11px}.source-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.source-controls .pill{font-size:9px}.source-controls button{padding:7px 9px!important;font-size:10px}.source-controls .remove-source{color:#a43b32}.structured-row{padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff}.structured-row+.structured-row{margin-top:9px}.structured-row__fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:9px}.structured-row__fields label{margin-top:0}.structured-row__footer{display:flex;justify-content:flex-end;margin-top:8px}.policy-grid>div{padding:18px;border:1px solid var(--line);border-radius:15px;background:#f8faf7}.knowledge-action-forms{display:none}@media(max-width:700px){.knowledge-group__title{align-items:flex-start;flex-direction:column}.structured-row__fields{grid-template-columns:1fr}.source-controls{justify-content:flex-start}.knowledge-section__body{padding:16px}.policy-grid>div{padding:14px}}
 </style>
 <div class="dash-shell">@include('partials.workspace-navigation', ['active' => 'knowledge'])
-<main class="main"><div class="topline"><div><span class="eyebrow">Business brain</span><h1>Knowledge sources</h1><p style="color:var(--muted);margin:4px 0">Teach Legatus about your products, policies, and brand.</p></div><a class="btn ghost" href="{{ $agent ? route('chat.show',$agent) : route('dashboard') }}">Test knowledge ↗</a></div>
+<main class="main knowledge-main"><div class="topline"><div><span class="eyebrow">Business brain</span><h1>Knowledge sources</h1><p style="color:var(--muted);margin:4px 0">Teach Legatus about your products, policies, and brand.</p></div><a class="btn ghost" href="{{ $agent ? route('chat.show',$agent) : route('onboarding') }}">Test knowledge ↗</a></div>
 @if(session('success'))<div class="panel" style="margin-top:20px;border-color:#a9d6b4;color:#267244">✓ {{ session('success') }}</div>@endif @if(session('error'))<div class="panel" style="margin-top:20px;border-color:#e6afa9;color:#a43b32">{{ session('error') }}</div>@endif
-<section class="panel" style="margin-top:24px">
-    <h3>Website catalog structure</h3>
-    <p class="channel">Connect the complete product catalog once, then map each business-specific category by its own name and URL.</p>
+<section class="panel knowledge-section">
+    <div class="knowledge-section__head"><span class="eyebrow">Catalog</span><h3>Website catalog structure</h3><p>Connect the complete product catalog once, then map each business-specific category by its own name and URL.</p></div>
+    <div class="knowledge-section__body">
     <form id="website-structure-form" method="post" action="{{ route('knowledge.store') }}">
         @csrf
         <input type="hidden" name="mode" value="website_structure">
-        <label>1. Site catalog URL <span style="color:var(--muted);font-weight:400">(all products)</span></label>
-        <input type="url" name="catalog_url" required value="{{ $catalogSource?->url }}" placeholder="https://store.example/products">
-        <label>2. Site search URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
-        <input type="url" name="search_url" value="{{ old('search_url', data_get($agent->settings, 'catalog_search_url')) }}" placeholder="https://store.example/search">
-        <p class="channel">For Bukinistebi enter https://bukinistebi.ge/search. Legatus searches this page directly and reads matching products and availability from its results.</p>
-        <label>3. Website languages</label>
-        <p class="channel">Add one public catalog URL for every language offered by the website. These languages become filters in Social media.</p>
-        <div id="language-fields"></div>
-        <button type="button" class="btn ghost" id="add-language" style="margin-top:10px">＋ Add language</button>
-        <label>4. Categories</label>
-        <div id="category-fields"></div>
-        <button type="button" class="btn ghost" id="add-category" style="margin-top:10px">＋ Add category</button>
-        <label>5. Sitemap URL <span style="color:var(--muted);font-weight:400">(optional)</span></label>
-        <input type="url" name="sitemap_url" value="{{ $sitemapSource?->url }}" placeholder="https://store.example/sitemap.xml">
+        <div class="knowledge-group" @if($catalogSource) data-source-row="{{ $catalogSource->id }}" @endif>
+            <div class="knowledge-group__title"><div><label>1. Site catalog URL</label><p>All products</p></div>@include('partials.knowledge-source-controls', ['source' => $catalogSource])</div>
+            <input type="url" name="catalog_url" required value="{{ $catalogSource?->url }}" placeholder="https://store.example/products">
+        </div>
+        <div class="knowledge-group">
+            <div class="knowledge-group__title"><div><label>2. Site search URL</label><p>Optional direct search endpoint</p></div></div>
+            <input type="url" name="search_url" value="{{ old('search_url', data_get($agent->settings, 'catalog_search_url')) }}" placeholder="https://store.example/search">
+        </div>
+        <div class="knowledge-group"><div class="knowledge-group__title"><div><label>3. Website languages</label><p>Add one public catalog URL for every website language.</p></div><button type="button" class="btn ghost" id="add-language">＋ Add language</button></div><div id="language-fields"></div></div>
+        <div class="knowledge-group"><div class="knowledge-group__title"><div><label>4. Categories</label><p>Give every category its public name and URL.</p></div><button type="button" class="btn ghost" id="add-category">＋ Add category</button></div><div id="category-fields"></div></div>
+        <div class="knowledge-group" @if($sitemapSource) data-source-row="{{ $sitemapSource->id }}" @endif>
+            <div class="knowledge-group__title"><div><label>5. Sitemap URL</label><p>Optional</p></div>@include('partials.knowledge-source-controls', ['source' => $sitemapSource])</div>
+            <input type="url" name="sitemap_url" value="{{ $sitemapSource?->url }}" placeholder="https://store.example/sitemap.xml">
+        </div>
         <button class="btn lime" style="margin-top:22px">Save structure →</button>
         <span id="website-structure-status" class="channel" style="display:block;margin-top:12px" aria-live="polite"></span>
     </form>
+    </div>
 </section>
-<section class="panel" style="margin-top:24px">
-    <h3>Delivery and business policies</h3>
-    <p class="channel">Give the assistant one authoritative delivery text and one public page for your terms, returns, payments, and other business rules.</p>
+<section class="panel knowledge-section">
+    <div class="knowledge-section__head"><span class="eyebrow">Business rules</span><h3>Delivery and business policies</h3><p>Give the assistant one authoritative delivery text and one public page for your terms, returns, payments, and other business rules.</p></div>
+    <div class="knowledge-section__body">
     <form method="post" action="{{ route('knowledge.store') }}">
         @csrf
         <input type="hidden" name="mode" value="business_policies">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px" class="policy-grid">
-            <div>
-                <span class="eyebrow">Delivery</span>
+            <div @if($deliverySource) data-source-row="{{ $deliverySource->id }}" @endif>
+                <div class="knowledge-group__title"><span class="eyebrow">Delivery</span>@include('partials.knowledge-source-controls', ['source' => $deliverySource])</div>
                 <label>Title</label>
                 <input name="delivery_title" required maxlength="150" value="{{ old('delivery_title', $deliverySource?->name ?? 'Delivery policy') }}" placeholder="Delivery policy">
                 <label>Delivery information</label>
                 <textarea name="delivery_text" required maxlength="10000" rows="8" placeholder="Write delivery areas, price, timing, working days, and exceptions.">{{ old('delivery_text', $deliveryText) }}</textarea>
             </div>
-            <div>
-                <span class="eyebrow">Terms &amp; Policies</span>
+            <div @if($termsSource) data-source-row="{{ $termsSource->id }}" @endif>
+                <div class="knowledge-group__title"><span class="eyebrow">Terms &amp; Policies</span>@include('partials.knowledge-source-controls', ['source' => $termsSource])</div>
                 <label>Title</label>
                 <input name="terms_title" required maxlength="150" value="{{ old('terms_title', $termsSource?->name ?? 'Terms and policies') }}" placeholder="Terms and policies">
                 <label>Public URL</label>
@@ -73,58 +55,15 @@
         </div>
         <button class="btn lime" style="margin-top:22px">Save policies →</button>
     </form>
+    </div>
 </section>
 <style>.policy-grid textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;resize:vertical}@media(max-width:800px){.policy-grid{grid-template-columns:1fr!important}}</style>
-<section class="panel" id="connected-knowledge" style="margin-top:18px">
-    <div class="knowledge-heading">
-        <h3>Connected knowledge</h3>
-        <span class="channel" id="knowledge-live-summary">Live catalog search enabled · synchronization runs in the background</span>
-    </div>
-    @forelse($sources as $source)
-        @php($fixture = ! $source->isRefreshable() && $source->type !== 'text')
-        <div class="conversation knowledge-source-row" data-source-row="{{ $source->id }}">
-            <span class="avatar" style="width:40px;height:40px;background:{{ $source->status==='ready'?'#e8f7d8':'#f3eee1' }};color:var(--ink)">{{ strtoupper(substr($source->type,0,1)) }}</span>
-            <div class="copy knowledge-source-copy">
-                <strong data-source-name>{{ $source->name }}</strong>
-                @if($fixture)<span class="tag">Demo fixture snapshot</span>@else<span class="pill" data-source-status>{{ $source->status }}</span>@endif
-                @if($source->type === 'url')
-                    <p><b>{{ $source->status === 'processing' ? 'Synchronizing in the background' : 'Public-site knowledge ready' }}</b> · <span data-source-items>{{ number_format($source->items_found) }}</span> products indexed</p>
-                @else
-                    <p>{{ $source->items_found }} indexed in last sync · {{ $source->items_created }} created · {{ $source->items_updated }} updated</p>
-                @endif
-                @if($source->type === 'url')
-                    <p class="channel" style="margin-top:4px">{{ $source->status === 'processing' ? 'Legatus is following sitemaps, catalog pages, product details and business-policy pages in the background.' : 'Products, descriptions, prices, sale data and public business policies are refreshed from this website.' }}</p>
-                @endif
-                <p class="channel" style="margin-top:4px">
-                    @if($fixture)
-                        Lexical search available · static fixture has no semantic index
-                    @elseif($source->status === 'ready')
-                        Semantic and lexical search active
-                    @elseif($source->status === 'processing')
-                        Search is available now · semantic enrichment continues in the background
-                    @else
-                        Lexical search available
-                    @endif
-                </p>
-                <div class="progress" style="background:#edf1ed;width:260px"><i data-source-progress style="width:{{ $source->progress }}%"></i></div>
-                <p class="channel" data-source-error style="margin-top:4px;color:#a43b32">{{ $source->error }}</p>
-            </div>
-            <div class="knowledge-source-actions">
-                <span class="channel">{{ $fixture ? 'Static fixture · no source payload' : ($source->last_synced_at?->diffForHumans() ?? 'Not synced') }}</span>
-                @if($source->isRefreshable())
-                    <form class="async-source-action" data-action="sync" method="post" action="{{ route('knowledge.sync',$source) }}">@csrf<button class="btn ghost" style="padding:8px 11px">↻ Sync</button></form>
-                @elseif($source->type === 'text')
-                    <span class="tag">Manual policy</span>
-                @else
-                    <span class="tag">Not refreshable</span>
-                @endif
-                <form class="async-source-action" data-action="remove" method="post" action="{{ route('knowledge.destroy',$source) }}">@csrf @method('DELETE')<button class="btn ghost" style="padding:8px 11px;color:#a43b32">Remove</button></form>
-            </div>
-        </div>
-    @empty
-        <div style="text-align:center;padding:45px;color:var(--muted)"><div style="font-size:34px">◇</div><b>No knowledge sources yet</b><p>Add your catalog URL, delivery information, and terms above.</p></div>
-    @endforelse
-</section></main></div>
+<div class="knowledge-action-forms" aria-hidden="true">
+    @foreach($sources as $source)
+        @if($source->isRefreshable())<form id="sync-source-{{ $source->id }}" class="async-source-action" data-source-id="{{ $source->id }}" data-action="sync" method="post" action="{{ route('knowledge.sync',$source) }}">@csrf</form>@endif
+        <form id="remove-source-{{ $source->id }}" class="async-source-action" data-source-id="{{ $source->id }}" data-action="remove" method="post" action="{{ route('knowledge.destroy',$source) }}">@csrf @method('DELETE')</form>
+    @endforeach
+</div></main></div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 const categoryFields=document.querySelector('#category-fields'),addCategory=document.querySelector('#add-category'),languageFields=document.querySelector('#language-fields'),addLanguage=document.querySelector('#add-language'),structureForm=document.querySelector('#website-structure-form'),structureStatus=document.querySelector('#website-structure-status');
 const knowledgeStatusUrl=@json(route('knowledge.status'));
@@ -135,9 +74,11 @@ let categoryIndex=0;
 let languageIndex=0;
 function appendCategory(category={}){
     const row=document.createElement('div');
-    row.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:9px;align-items:end;margin-top:9px';
-    row.innerHTML=`<div><label>Category name</label><input required name="categories[${categoryIndex}][name]" placeholder="e.g. Thriller"></div><div><label>Category URL</label><input required type="url" name="categories[${categoryIndex}][url]" placeholder="https://store.example/category/thriller"></div><button type="button" class="btn ghost remove-category" aria-label="Remove category">×</button>`;
-    row.querySelector('.remove-category').addEventListener('click',()=>row.remove());
+    row.className='structured-row';
+    if(category.id)row.dataset.sourceRow=category.id;
+    const savedActions=category.id?`<div class="source-controls"><span class="pill" data-source-status>${category.status||'ready'}</span>${category.refreshable?`<button type="submit" class="btn ghost" form="sync-source-${category.id}">↻ Sync</button>`:''}<button type="submit" class="btn ghost remove-source" form="remove-source-${category.id}">Remove</button></div>`:`<button type="button" class="btn ghost remove-category" aria-label="Remove category">×</button>`;
+    row.innerHTML=`<div class="structured-row__fields"><div><label>Category name</label><input required name="categories[${categoryIndex}][name]" placeholder="e.g. Thriller"></div><div><label>Category URL</label><input required type="url" name="categories[${categoryIndex}][url]" placeholder="https://store.example/category/thriller"></div></div><div class="structured-row__footer">${savedActions}</div>`;
+    row.querySelector('.remove-category')?.addEventListener('click',()=>row.remove());
     row.querySelector('input[name$="[name]"]').value=category.name||'';
     row.querySelector('input[name$="[url]"]').value=category.url||'';
     categoryFields.appendChild(row);
@@ -147,9 +88,11 @@ addCategory.addEventListener('click',()=>appendCategory());
 if(existingCategories.length)existingCategories.forEach(appendCategory);else appendCategory();
 function appendLanguage(language={}){
     const row=document.createElement('div');
-    row.style.cssText='display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:9px;align-items:end;margin-top:9px';
-    row.innerHTML=`<div><label>Language name</label><input required name="languages[${languageIndex}][name]" placeholder="e.g. Georgian"></div><div><label>Language catalog URL</label><input required type="url" name="languages[${languageIndex}][url]" placeholder="https://store.example/?lang=ka"></div><button type="button" class="btn ghost remove-language" aria-label="Remove language">×</button>`;
-    row.querySelector('.remove-language').addEventListener('click',()=>row.remove());
+    row.className='structured-row';
+    if(language.id)row.dataset.sourceRow=language.id;
+    const savedActions=language.id?`<div class="source-controls"><span class="pill" data-source-status>${language.status||'ready'}</span>${language.refreshable?`<button type="submit" class="btn ghost" form="sync-source-${language.id}">↻ Sync</button>`:''}<button type="submit" class="btn ghost remove-source" form="remove-source-${language.id}">Remove</button></div>`:`<button type="button" class="btn ghost remove-language" aria-label="Remove language">×</button>`;
+    row.innerHTML=`<div class="structured-row__fields"><div><label>Language name</label><input required name="languages[${languageIndex}][name]" placeholder="e.g. Georgian"></div><div><label>Language catalog URL</label><input required type="url" name="languages[${languageIndex}][url]" placeholder="https://store.example/?lang=ka"></div></div><div class="structured-row__footer">${savedActions}</div>`;
+    row.querySelector('.remove-language')?.addEventListener('click',()=>row.remove());
     row.querySelector('input[name$="[name]"]').value=language.name||'';
     row.querySelector('input[name$="[url]"]').value=language.url||'';
     languageFields.appendChild(row);
@@ -172,7 +115,7 @@ structureForm.addEventListener('submit',async event=>{
 });
 document.querySelectorAll('.async-source-action').forEach(form=>form.addEventListener('submit',async event=>{
     event.preventDefault();
-    const button=form.querySelector('button'),row=form.closest('[data-source-row]'),action=form.dataset.action;
+    const button=document.querySelector(`[form="${form.id}"]`),row=document.querySelector(`[data-source-row="${form.dataset.sourceId}"]`),action=form.dataset.action;
     button.disabled=true;
     const original=button.textContent;
     button.textContent=action==='remove'?'Removing…':'Queued…';
@@ -219,16 +162,5 @@ async function refreshKnowledgeStatus(){
     }catch(error){structureStatus.textContent=error.message;scheduleKnowledgeStatus(10000);}finally{knowledgeStatusBusy=false;}
 }
 if(document.querySelector('[data-source-status]'))scheduleKnowledgeStatus(1000);
-const radios=document.querySelectorAll('input[name=type]'),file=document.querySelector('#file-field'),upload=file.querySelector('input[type=file]'),uploadLabel=file.querySelector('label');
-radios.forEach(r=>r.addEventListener('change',()=>{
-    if(!r.checked)return;
-    if(r.value==='pdf'){
-        upload.accept='.pdf';
-        uploadLabel.textContent='Choose PDF · max 10 MB';
-    }else if(r.value==='csv'){
-        upload.accept='.csv,.txt';
-        uploadLabel.textContent='Choose CSV or TXT · max 10 MB';
-    }
-}));
 </script>
 @endsection

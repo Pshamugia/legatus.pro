@@ -134,7 +134,7 @@ class OnboardingGoldenPathTest extends TestCase
 
         $this->actingAs($user)->get(route('knowledge.index'))
             ->assertOk()
-            ->assertSee('Connected knowledge')
+            ->assertSee('Knowledge sources')
             ->assertSee('failed');
     }
 
@@ -163,7 +163,7 @@ class OnboardingGoldenPathTest extends TestCase
 
         $this->actingAs($user)->get(route('knowledge.index'))
             ->assertOk()
-            ->assertSee('Legacy complete list');
+            ->assertDontSee('Connected knowledge');
 
         foreach (['ftp://example.com/catalog', 'https://user:secret@example.com/catalog'] as $unsafeUrl) {
             $this->actingAs($user)->post('/onboarding', [
