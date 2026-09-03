@@ -145,7 +145,7 @@
                 <fieldset class="copy-mode-fieldset"><legend>Post writing</legend><p class="field-help">Keep the current catalog text, or let Luna write a channel-specific caption from the verified product title, description and image.</p>
                     <div class="timing-mode-grid">
                         <label class="timing-mode"><input type="radio" name="copy_mode" value="original" data-copy-mode @checked(old('copy_mode', 'original') === 'original') @disabled(!$canManage)><span><strong>Original content</strong><small>Uses your saved Facebook and Instagram templates exactly as it does today.</small></span></label>
-                        <label class="timing-mode"><input type="radio" name="copy_mode" value="ai" data-copy-mode @checked(old('copy_mode') === 'ai') @disabled(!$canManage)><span><strong>AI Copywriter</strong><small>Luna writes up to 7 channel-ready posts per business each day. Extra posts automatically use Original content.</small></span></label>
+                        <label class="timing-mode"><input type="radio" name="copy_mode" value="ai" data-copy-mode @checked(old('copy_mode') === 'ai') @disabled(!$canManage)><span><strong>AI Copywriter</strong><small>Luna writes up to 7 product posts per business each day for every selected channel. Extra products automatically use Original content.</small></span></label>
                     </div>
                     <div class="ai-tone-picker" data-ai-tones @if(old('copy_mode', 'original') !== 'ai') hidden @endif>
                         <strong>Writing style</strong>

@@ -70,7 +70,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('AI Copywriter')
             ->assertSee('Original content')
             ->assertSee('Informative')
-            ->assertSee('Luna writes up to 7 channel-ready posts per business each day.')
+            ->assertSee('Luna writes up to 7 product posts per business each day')
             ->assertSee('Catalog design')
             ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
@@ -486,7 +486,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertDatabaseCount('social_media_schedules', 0);
     }
 
-    public function test_ai_copywriter_uses_original_content_after_seven_channel_posts_per_business_day(): void
+    public function test_ai_copywriter_uses_original_content_after_seven_product_slots_per_business_day(): void
     {
         [$user, $agent] = $this->tenant('ai-daily-limit');
         $this->connections($agent);
@@ -517,23 +517,26 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('original', $agent->socialMediaPosts()->latest('id')->firstOrFail()->copy_mode);
     }
 
-    public function test_ai_copywriter_keeps_an_oversized_schedule_and_marks_only_seven_posts_for_ai(): void
+    public function test_ai_copywriter_keeps_an_oversized_schedule_and_keeps_both_channels_in_the_same_mode(): void
     {
         [$user, $agent] = $this->tenant('ai-request-limit');
         $this->connections($agent);
-        foreach (range(1, 4) as $number) {
+        foreach (range(1, 8) as $number) {
             $agent->products()->create($this->product("AI Product {$number}", 'General', 5));
         }
 
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
             'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
-            'posts_per_day' => 4, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
+            'posts_per_day' => 8, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
             'copy_mode' => 'ai', 'ai_tone' => 'academic',
         ])->assertRedirect(route('social-media.index'))->assertSessionHasNoErrors();
 
         $this->assertDatabaseCount('social_media_schedules', 1);
-        $this->assertSame(7, $agent->socialMediaPosts()->where('copy_mode', 'ai')->count());
-        $this->assertSame(1, $agent->socialMediaPosts()->where('copy_mode', 'original')->count());
+        $this->assertSame(14, $agent->socialMediaPosts()->where('copy_mode', 'ai')->count());
+        $this->assertSame(2, $agent->socialMediaPosts()->where('copy_mode', 'original')->count());
+        $this->assertTrue($agent->socialMediaPosts()->get()->groupBy('scheduled_for')->every(
+            fn ($slotPosts): bool => $slotPosts->pluck('copy_mode')->unique()->count() === 1,
+        ));
     }
 
     public function test_luna_generates_a_verified_image_aware_caption_once_before_meta_publish(): void

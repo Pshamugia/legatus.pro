@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class SocialMediaScheduler
 {
-    private const AI_DAILY_LIMIT = 7;
+    private const AI_DAILY_PRODUCT_LIMIT = 7;
 
     public function __construct(
         private readonly SocialMediaTemplateService $templates,
@@ -71,8 +71,8 @@ class SocialMediaScheduler
 
             $productIndex = 0;
             for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
-                $remainingAiPosts = ($data['copy_mode'] ?? 'original') === 'ai'
-                    ? max(0, self::AI_DAILY_LIMIT - $this->scheduledAiPostsForDay($agent, $day))
+                $remainingAiProducts = ($data['copy_mode'] ?? 'original') === 'ai'
+                    ? max(0, self::AI_DAILY_PRODUCT_LIMIT - $this->scheduledAiProductSlotsForDay($agent, $day))
                     : 0;
                 $slots = isset($data['posting_times'])
                     ? $this->customDailyTimes($day, $data['posting_times'])
@@ -80,11 +80,11 @@ class SocialMediaScheduler
                 foreach ($slots as $slot) {
                     $variant = $products[$productIndex % $products->count()];
                     $productIndex++;
+                    $postCopyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
+                    if ($postCopyMode === 'ai') {
+                        $remainingAiProducts--;
+                    }
                     foreach ($data['providers'] as $provider) {
-                        $postCopyMode = $remainingAiPosts > 0 ? 'ai' : 'original';
-                        if ($postCopyMode === 'ai') {
-                            $remainingAiPosts--;
-                        }
                         $schedule->posts()->create($this->postAttributes(
                             $agent,
                             $variant['product'],
@@ -182,7 +182,7 @@ class SocialMediaScheduler
         })->all();
     }
 
-    private function scheduledAiPostsForDay(Agent $agent, CarbonImmutable $day): int
+    private function scheduledAiProductSlotsForDay(Agent $agent, CarbonImmutable $day): int
     {
         return $agent->socialMediaPosts()
             ->where('scheduled_for', '>=', $day->utc())
@@ -195,6 +195,8 @@ class SocialMediaScheduler
                             ->whereHas('schedule', fn ($schedule) => $schedule->where('copy_mode', 'ai'));
                     });
             })
+            ->get(['product_id', 'scheduled_for'])
+            ->unique(fn ($post): string => (string) $post->product_id.'|'.$post->getRawOriginal('scheduled_for'))
             ->count();
     }
 
