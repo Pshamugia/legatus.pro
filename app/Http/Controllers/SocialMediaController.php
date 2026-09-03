@@ -78,7 +78,7 @@ class SocialMediaController extends Controller
         $previewSource = $previewProduct['image'];
         $previewProduct['style_images'] = collect(SocialMediaTemplateService::IMAGE_STYLES)
             ->mapWithKeys(fn (string $style): array => [
-                $style => $style === 'original' && $primaryImage
+                $style => $style === 'storefront'
                     ? $primaryImage
                     : ($previewSource ? $imageDesigner->render(
                         $style === 'raw' ? ($previewProduct['raw_image'] ?: $previewSource) : $previewSource,

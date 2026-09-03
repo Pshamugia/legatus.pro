@@ -76,7 +76,8 @@
                                 <legend>Product image design</legend>
                                 <p class="field-help">Choose how product photos will be prepared for new {{ $platform['label'] }} schedules.</p>
                                 <div class="image-style-grid">
-                                    @foreach(['original' => 'Catalog design', 'raw' => 'Plain photo', 'framed' => 'Classic frame', 'editorial' => 'Editorial', 'dark' => 'Dark', 'brand' => 'Legatus green'] as $style => $label)
+                                    @foreach(['original' => 'Catalog design', 'storefront' => 'Storefront image', 'raw' => 'Plain photo', 'framed' => 'Classic frame', 'editorial' => 'Editorial', 'dark' => 'Dark', 'brand' => 'Legatus green'] as $style => $label)
+                                        @continue($style === 'storefront' && empty($previewProduct['style_images']['storefront']))
                                         <label class="image-style-option">
                                             <input type="radio" name="templates[{{ $provider }}][image_style]" value="{{ $style }}" data-image-style="{{ $provider }}" @checked(old("templates.{$provider}.image_style", $configuration['image_style']) === $style) @disabled(!$canManage)>
                                             <span class="style-swatch {{ $style }}">

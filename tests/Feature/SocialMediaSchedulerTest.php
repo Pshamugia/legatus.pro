@@ -74,10 +74,29 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Catalog design')
             ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
+            ->assertDontSee('Storefront image')
             ->assertSee('https://shop.example/images/product.jpg')
             ->assertSee('https://shop.example/images/catalog-design.jpg')
             ->assertSee('.template-workspace[hidden]{display:none!important}', false)
             ->assertSee('Open public product');
+    }
+
+    public function test_storefront_image_choice_is_visible_only_when_the_primary_image_contract_is_available(): void
+    {
+        [$user, $agent] = $this->tenant('storefront-image-choice');
+        $product = $agent->products()->create($this->product('Storefront Product', 'General', 2));
+        $this->mock(ProductPagePrimaryImageResolver::class)
+            ->shouldReceive('resolve')
+            ->once()
+            ->withArgs(fn ($resolvedProduct): bool => $resolvedProduct->is($product))
+            ->andReturn('https://shop.example/storage/books/exact-thumb-image.jpg');
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('Catalog design')
+            ->assertSee('Storefront image')
+            ->assertSee('https://shop.example/storage/books/exact-thumb-image.jpg');
     }
 
     public function test_selected_image_design_is_rendered_as_a_public_cached_jpeg(): void
@@ -121,7 +140,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('https://shop.example/prepared.png', $url);
     }
 
-    public function test_catalog_design_uses_the_exact_storefront_primary_image_when_the_product_page_exposes_it(): void
+    public function test_storefront_image_style_uses_the_exact_primary_image_when_the_product_page_exposes_it(): void
     {
         [$user, $agent] = $this->tenant('storefront-primary-image');
         $this->connections($agent);
@@ -135,6 +154,21 @@ class SocialMediaSchedulerTest extends TestCase
             ->withArgs(fn ($resolvedProduct, $language): bool => $resolvedProduct->is($product) && $language === null)
             ->andReturn('https://shop.example/storage/books/exact-thumb-image.jpg');
         Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $this->actingAs($user)->put(route('social-media.templates.update'), [
+            'templates' => [
+                'facebook' => [
+                    'body_template' => '{product_title} {product_url}',
+                    'delivery_enabled' => false,
+                    'image_style' => 'storefront',
+                ],
+                'instagram' => [
+                    'body_template' => '{product_title} {product_url}',
+                    'delivery_enabled' => false,
+                    'image_style' => 'original',
+                ],
+            ],
+        ])->assertRedirect(route('social-media.index'));
 
         $this->actingAs($user)->post(route('social-media.store'), [
             'starts_on' => now()->addDay()->toDateString(),
@@ -157,10 +191,7 @@ class SocialMediaSchedulerTest extends TestCase
         $metadata['image'] = 'https://shop.example/images/generated-catalog-design.jpg';
         $product->update(['metadata' => $metadata]);
         $this->mock(ProductPagePrimaryImageResolver::class)
-            ->shouldReceive('resolve')
-            ->once()
-            ->withArgs(fn ($resolvedProduct, $language): bool => $resolvedProduct->is($product) && $language === null)
-            ->andReturn('https://shop.example/storage/books/exact-thumb-image.jpg');
+            ->shouldNotReceive('resolve');
         Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
 
         $this->actingAs($user)->put(route('social-media.templates.update'), [
