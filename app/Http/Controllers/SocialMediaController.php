@@ -9,6 +9,7 @@ use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateService;
 use App\Services\TenantContext;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -166,7 +167,13 @@ class SocialMediaController extends Controller
     {
         $tenant->authorize(['owner', 'admin']);
         abort_unless($schedule->agent_id === $tenant->agent()->id, 404);
-        $schedule->delete();
+        DB::transaction(function () use ($schedule): void {
+            // Delete explicitly as well as relying on the foreign-key cascade.
+            // Some shared-hosting databases may have legacy tables whose
+            // constraint was not created with cascading enabled.
+            $schedule->posts()->delete();
+            $schedule->delete();
+        });
 
         return back()->with('social_success', 'Schedule and its post history were removed.');
     }

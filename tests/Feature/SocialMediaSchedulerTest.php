@@ -698,6 +698,36 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertDatabaseHas('social_media_schedules', ['id' => $schedule->id, 'agent_id' => $firstAgent->id]);
     }
 
+    public function test_deleting_a_schedule_removes_its_posts_and_releases_ai_capacity(): void
+    {
+        [$user, $agent] = $this->tenant('delete-ai-schedule');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Replaceable AI Product', 'General', 10));
+        $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
+        $payload = [
+            'starts_on' => $date,
+            'ends_on' => $date,
+            'posts_per_day' => 7,
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+            'copy_mode' => 'ai',
+            'ai_tone' => 'simple',
+        ];
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $deletedSchedule = $agent->socialMediaSchedules()->firstOrFail();
+        $deletedPostIds = $deletedSchedule->posts()->pluck('id');
+
+        $this->actingAs($user)->delete(route('social-media.destroy', $deletedSchedule))->assertSessionHasNoErrors();
+
+        $this->assertDatabaseMissing('social_media_schedules', ['id' => $deletedSchedule->id]);
+        $this->assertSame(0, SocialMediaPost::query()->whereIn('id', $deletedPostIds)->count());
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $this->assertSame(7, $agent->socialMediaPosts()->where('copy_mode', 'ai')->count());
+        $this->assertSame(0, $agent->socialMediaPosts()->where('copy_mode', 'original')->count());
+    }
+
     public function test_queued_post_is_skipped_when_its_product_is_no_longer_available(): void
     {
         [, $agent] = $this->tenant('stale-product');

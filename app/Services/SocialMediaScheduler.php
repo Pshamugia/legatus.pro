@@ -180,6 +180,7 @@ class SocialMediaScheduler
         return $agent->socialMediaPosts()
             ->where('scheduled_for', '>=', $day->utc())
             ->where('scheduled_for', '<', $day->addDay()->utc())
+            ->whereHas('schedule', fn ($schedule) => $schedule->where('status', 'active'))
             ->where(function ($query): void {
                 $query->where('copy_mode', 'ai')
                     ->orWhere(function ($legacy): void {
