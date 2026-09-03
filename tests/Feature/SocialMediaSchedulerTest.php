@@ -43,8 +43,8 @@ class SocialMediaSchedulerTest extends TestCase
         Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
         $this->actingAs($user)->post(route('social-media.store'), [
             'starts_on' => now()->toDateString(),
-            'ends_on' => now()->addDay()->toDateString(),
-            'posts_per_day' => 3,
+            'ends_on' => now()->toDateString(),
+            'posts_per_day' => 1,
             'categories' => ['Novel'],
             'providers' => ['facebook', 'instagram'],
             'timezone' => 'Asia/Tbilisi',
@@ -52,13 +52,13 @@ class SocialMediaSchedulerTest extends TestCase
 
         $schedule = $agent->socialMediaSchedules()->firstOrFail();
         $this->assertSame(['Novel'], $schedule->categories);
-        $this->assertCount(12, $schedule->posts);
+        $this->assertCount(2, $schedule->posts);
         $this->assertSame([$selected->id], $schedule->posts->pluck('product_id')->unique()->values()->all());
         $this->assertTrue($schedule->posts->every(fn ($post) => str_contains($post->caption, 'https://shop.example/products/public-novel')));
         $this->assertTrue($schedule->posts->every(fn ($post) => $post->description === 'Verified public description.'));
         $this->assertTrue($schedule->posts->every(fn ($post) => str_contains($post->caption, 'Verified public description.')));
-        $this->assertSame(6, $schedule->posts->where('provider', 'facebook')->count());
-        $this->assertSame(6, $schedule->posts->where('provider', 'instagram')->count());
+        $this->assertSame(1, $schedule->posts->where('provider', 'facebook')->count());
+        $this->assertSame(1, $schedule->posts->where('provider', 'instagram')->count());
 
         $this->actingAs($user)->get(route('social-media.index'))
             ->assertOk()
@@ -79,6 +79,60 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('https://shop.example/images/catalog-design.jpg')
             ->assertSee('.template-workspace[hidden]{display:none!important}', false)
             ->assertSee('Open public product');
+    }
+
+    public function test_multi_channel_schedule_does_not_repeat_products_while_unused_products_remain(): void
+    {
+        [$user, $agent] = $this->tenant('cross-channel-product-rotation');
+        $this->connections($agent);
+        foreach (range(1, 4) as $number) {
+            $agent->products()->create($this->product("Rotation Product {$number}", 'General', 2));
+        }
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 2,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+            'copy_mode' => 'ai',
+            'ai_tone' => 'simple',
+        ])->assertSessionHasNoErrors();
+
+        $posts = $agent->socialMediaPosts()->orderBy('scheduled_for')->orderBy('provider')->get();
+        $this->assertCount(4, $posts);
+        $this->assertCount(2, $posts->pluck('product_id')->unique());
+        $this->assertTrue($posts->groupBy('scheduled_for')->every(
+            fn ($slotPosts): bool => $slotPosts->pluck('product_id')->unique()->count() === 1
+                && $slotPosts->pluck('provider')->sort()->values()->all() === ['facebook', 'instagram'],
+        ));
+    }
+
+    public function test_new_schedules_prefer_unposted_products_then_restart_after_catalog_exhaustion(): void
+    {
+        [$user, $agent] = $this->tenant('cross-schedule-product-rotation');
+        $this->connections($agent);
+        foreach (range(1, 3) as $number) {
+            $agent->products()->create($this->product("History Product {$number}", 'General', 2));
+        }
+        $payload = [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ];
+
+        $chosenProducts = collect();
+        foreach (range(1, 4) as $iteration) {
+            $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+            $schedule = $agent->socialMediaSchedules()->latest('id')->firstOrFail();
+            $this->assertSame(1, $schedule->posts()->pluck('product_id')->unique()->count());
+            $chosenProducts->push((int) $schedule->posts()->value('product_id'));
+        }
+
+        $this->assertCount(3, $chosenProducts->take(3)->unique());
+        $this->assertContains($chosenProducts->last(), $chosenProducts->take(3));
     }
 
     public function test_storefront_image_choice_is_visible_only_when_the_primary_image_contract_is_available(): void
@@ -355,7 +409,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertDatabaseCount('social_media_schedules', 0);
     }
 
-    public function test_each_provider_uses_its_own_product_eligibility_rules(): void
+    public function test_multi_channel_schedule_uses_only_products_eligible_for_every_selected_provider(): void
     {
         [$user, $agent] = $this->tenant('provider-eligibility');
         $this->connections($agent);
@@ -366,17 +420,14 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->actingAs($user)->post(route('social-media.store'), [
             'starts_on' => now()->toDateString(), 'ends_on' => now()->toDateString(),
-            'posts_per_day' => 2, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
+            'posts_per_day' => 1, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
         ])->assertRedirect(route('social-media.index'));
 
         $schedule = $agent->socialMediaSchedules()->firstOrFail();
-        $this->assertEqualsCanonicalizing(
-            [$facebookOnlyProduct->id, $sharedProduct->id],
-            $schedule->posts()->where('provider', 'facebook')->pluck('product_id')->unique()->all(),
-        );
+        $this->assertNotContains($facebookOnlyProduct->id, $schedule->posts()->pluck('product_id'));
         $this->assertSame(
             [$sharedProduct->id],
-            $schedule->posts()->where('provider', 'instagram')->pluck('product_id')->unique()->values()->all(),
+            $schedule->posts()->pluck('product_id')->unique()->values()->all(),
         );
     }
 
@@ -384,7 +435,8 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [$user, $agent] = $this->tenant('custom-posting-times');
         $this->connections($agent);
-        $agent->products()->create($this->product('Timed Product', 'General', 3));
+        $agent->products()->create($this->product('Timed Product One', 'General', 3));
+        $agent->products()->create($this->product('Timed Product Two', 'General', 3));
         $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
 
         $this->actingAs($user)->post(route('social-media.store'), [
@@ -438,7 +490,9 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [$user, $agent] = $this->tenant('ai-daily-limit');
         $this->connections($agent);
-        $agent->products()->create($this->product('AI Product', 'General', 5));
+        foreach (range(1, 7) as $number) {
+            $agent->products()->create($this->product("AI Product {$number}", 'General', 5));
+        }
         $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
 
         $this->actingAs($user)->post(route('social-media.store'), [
@@ -467,7 +521,9 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [$user, $agent] = $this->tenant('ai-request-limit');
         $this->connections($agent);
-        $agent->products()->create($this->product('AI Product', 'General', 5));
+        foreach (range(1, 4) as $number) {
+            $agent->products()->create($this->product("AI Product {$number}", 'General', 5));
+        }
 
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
             'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
@@ -702,7 +758,9 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [$user, $agent] = $this->tenant('delete-ai-schedule');
         $this->connections($agent);
-        $agent->products()->create($this->product('Replaceable AI Product', 'General', 10));
+        foreach (range(1, 7) as $number) {
+            $agent->products()->create($this->product("Replaceable AI Product {$number}", 'General', 10));
+        }
         $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
         $payload = [
             'starts_on' => $date,

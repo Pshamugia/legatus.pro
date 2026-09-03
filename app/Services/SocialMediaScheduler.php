@@ -23,21 +23,33 @@ class SocialMediaScheduler
 
     public function create(Agent $agent, array $data): SocialMediaSchedule
     {
-        $productsByProvider = collect($data['providers'])->mapWithKeys(fn (string $provider): array => [
-            $provider => $this->eligibleProductVariants($agent, $data['categories'] ?? [], $data['languages'] ?? [], [$provider]),
-        ]);
-        foreach ($productsByProvider as $provider => $products) {
-            if ($products->isEmpty()) {
-                $requirement = $provider === 'instagram' ? 'descriptions, public links and images' : 'descriptions and public links';
-                throw ValidationException::withMessages([
-                    'categories' => 'No products with usable '.$requirement.' were found for '.ucfirst($provider).' in this selection.',
-                ]);
-            }
+        $products = $this->eligibleProductVariants(
+            $agent,
+            $data['categories'] ?? [],
+            $data['languages'] ?? [],
+            $data['providers'],
+        )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
+        $previouslyPosted = $agent->socialMediaPosts()
+            ->whereIn('provider', $data['providers'])
+            ->whereIn('status', ['scheduled', 'queued', 'published'])
+            ->whereNotNull('product_id')
+            ->pluck('product_id')
+            ->mapWithKeys(fn ($id): array => [(int) $id => true]);
+        $products = $products
+            ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
+            ->concat($products->filter(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id])))
+            ->values();
+        $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
+        $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
+        if ($products->isEmpty()) {
+            throw ValidationException::withMessages([
+                'categories' => 'No publishable products are available for every selected channel in this selection.',
+            ]);
         }
 
         $templateSnapshots = $this->templates->snapshots($agent, $data['providers']);
 
-        return DB::transaction(function () use ($agent, $data, $productsByProvider, $templateSnapshots): SocialMediaSchedule {
+        return DB::transaction(function () use ($agent, $data, $products, $templateSnapshots, $starts, $ends): SocialMediaSchedule {
             if (($data['copy_mode'] ?? 'original') === 'ai') {
                 Agent::query()->whereKey($agent->id)->lockForUpdate()->firstOrFail();
             }
@@ -57,11 +69,7 @@ class SocialMediaScheduler
                 'status' => 'active',
             ]);
 
-            $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
-            $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
-            $productIndexes = collect($data['providers'])
-                ->mapWithKeys(fn (string $provider): array => [$provider => 0])
-                ->all();
+            $productIndex = 0;
             for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
                 $remainingAiPosts = ($data['copy_mode'] ?? 'original') === 'ai'
                     ? max(0, self::AI_DAILY_LIMIT - $this->scheduledAiPostsForDay($agent, $day))
@@ -70,10 +78,9 @@ class SocialMediaScheduler
                     ? $this->customDailyTimes($day, $data['posting_times'])
                     : $this->dailyTimes($day, (int) $data['posts_per_day']);
                 foreach ($slots as $slot) {
+                    $variant = $products[$productIndex % $products->count()];
+                    $productIndex++;
                     foreach ($data['providers'] as $provider) {
-                        $products = $productsByProvider[$provider];
-                        $variant = $products[$productIndexes[$provider] % $products->count()];
-                        $productIndexes[$provider]++;
                         $postCopyMode = $remainingAiPosts > 0 ? 'ai' : 'original';
                         if ($postCopyMode === 'ai') {
                             $remainingAiPosts--;
