@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\SocialMediaSchedule;
+use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateService;
@@ -14,7 +15,7 @@ use Illuminate\Validation\ValidationException;
 
 class SocialMediaController extends Controller
 {
-    public function index(TenantContext $tenant, SocialMediaTemplateService $templateService, SocialMediaImageDesigner $imageDesigner)
+    public function index(TenantContext $tenant, SocialMediaTemplateService $templateService, SocialMediaImageDesigner $imageDesigner, ProductPagePrimaryImageResolver $primaryImages)
     {
         $agent = $tenant->agent();
         $connections = $agent->channelConnections()
@@ -50,6 +51,8 @@ class SocialMediaController extends Controller
         $localizedPreview = $sample ? collect((array) data_get($sample->metadata, 'localized', []))
             ->first(fn ($variant): bool => filled(trim((string) data_get($variant, 'description')))
                 && $this->publicHttpUrl(data_get($variant, 'product_url'))) : null;
+        $primaryImage = $sample ? $primaryImages->resolve($sample) : null;
+        $catalogImage = $sample ? ($sample->catalogDesignImageUrl() ?: $sample->publicImageUrl() ?: data_get($localizedPreview, 'image')) : null;
         $previewProduct = $sample ? [
             'title' => (string) data_get($localizedPreview, 'name', $sample->name),
             'description' => Str::limit(trim(preg_replace('/\s+/u', ' ', strip_tags((string) $sample->socialDescription())) ?? ''), 400, '…'),
@@ -58,7 +61,7 @@ class SocialMediaController extends Controller
             'url' => (string) data_get($localizedPreview, 'product_url', data_get($sample->metadata, 'product_url')),
             // Preserve the catalog's curated/branded image. The localized
             // crawl image is only a fallback when the catalog has none.
-            'image' => $sample->catalogDesignImageUrl() ?: $sample->publicImageUrl() ?: data_get($localizedPreview, 'image'),
+            'image' => $catalogImage,
             'raw_image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
@@ -75,10 +78,12 @@ class SocialMediaController extends Controller
         $previewSource = $previewProduct['image'];
         $previewProduct['style_images'] = collect(SocialMediaTemplateService::IMAGE_STYLES)
             ->mapWithKeys(fn (string $style): array => [
-                $style => $previewSource ? $imageDesigner->render(
-                    $style === 'raw' ? ($previewProduct['raw_image'] ?: $previewSource) : $previewSource,
-                    $style,
-                ) : null,
+                $style => $style === 'original' && $primaryImage
+                    ? $primaryImage
+                    : ($previewSource ? $imageDesigner->render(
+                        $style === 'raw' ? ($previewProduct['raw_image'] ?: $previewSource) : $previewSource,
+                        $style,
+                    ) : null),
             ])->all();
 
         return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'canManage', 'templates', 'previewProduct'));

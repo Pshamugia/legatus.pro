@@ -16,6 +16,7 @@ class SocialMediaScheduler
         private readonly SocialMediaTemplateService $templates,
         private readonly SocialMediaTemplateRenderer $renderer,
         private readonly SocialMediaImageDesigner $images,
+        private readonly ProductPagePrimaryImageResolver $primaryImages,
     ) {}
 
     public function create(Agent $agent, array $data): SocialMediaSchedule
@@ -201,11 +202,16 @@ class SocialMediaScheduler
         $localized = $language ? (array) ($localizedMap[$language] ?? []) : [];
         $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
         $style = (string) ($template['image_style'] ?? 'original');
+        $primaryImage = $this->primaryImages->resolve($product, $language);
         $catalogImage = $product->catalogDesignImageUrl() ?: $product->publicImageUrl();
         $sourceImage = $style === 'raw'
             ? ($localized['image'] ?? $catalogImage)
-            : ($catalogImage ?: ($localized['image'] ?? null));
-        $image = $sourceImage ? $this->images->render($sourceImage, $style) : null;
+            : ($style === 'original' && $primaryImage
+                ? $primaryImage
+                : ($catalogImage ?: ($localized['image'] ?? null)));
+        $image = $sourceImage
+            ? ($style === 'original' && $primaryImage ? $primaryImage : $this->images->render($sourceImage, $style))
+            : null;
         $title = (string) ($localized['name'] ?? $product->name);
         $descriptionValue = $product->socialDescription($language);
         $description = trim(strip_tags((string) $descriptionValue));

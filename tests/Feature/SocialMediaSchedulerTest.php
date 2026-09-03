@@ -7,6 +7,7 @@ use App\Models\Organization;
 use App\Models\SocialMediaPost;
 use App\Models\User;
 use App\Services\MetaGraphClient;
+use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaTemplateRenderer;
 use Carbon\CarbonImmutable;
@@ -118,6 +119,77 @@ class SocialMediaSchedulerTest extends TestCase
         $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/prepared.png', 'original');
 
         $this->assertSame('https://shop.example/prepared.png', $url);
+    }
+
+    public function test_catalog_design_uses_the_exact_storefront_primary_image_when_the_product_page_exposes_it(): void
+    {
+        [$user, $agent] = $this->tenant('storefront-primary-image');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Primary Gallery Product', 'General', 2));
+        $metadata = $product->metadata;
+        $metadata['image'] = 'https://shop.example/images/generated-catalog-design.jpg';
+        $product->update(['metadata' => $metadata]);
+        $this->mock(ProductPagePrimaryImageResolver::class)
+            ->shouldReceive('resolve')
+            ->once()
+            ->withArgs(fn ($resolvedProduct, $language): bool => $resolvedProduct->is($product) && $language === null)
+            ->andReturn('https://shop.example/storage/books/exact-thumb-image.jpg');
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertRedirect(route('social-media.index'));
+
+        $post = $agent->socialMediaPosts()->sole();
+        $this->assertSame('https://shop.example/storage/books/exact-thumb-image.jpg', $post->image_url);
+    }
+
+    public function test_storefront_primary_image_contract_does_not_change_the_other_image_styles(): void
+    {
+        [$user, $agent] = $this->tenant('storefront-primary-image-framed');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Framed Gallery Product', 'General', 2));
+        $metadata = $product->metadata;
+        $metadata['image'] = 'https://shop.example/images/generated-catalog-design.jpg';
+        $product->update(['metadata' => $metadata]);
+        $this->mock(ProductPagePrimaryImageResolver::class)
+            ->shouldReceive('resolve')
+            ->once()
+            ->withArgs(fn ($resolvedProduct, $language): bool => $resolvedProduct->is($product) && $language === null)
+            ->andReturn('https://shop.example/storage/books/exact-thumb-image.jpg');
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $this->actingAs($user)->put(route('social-media.templates.update'), [
+            'templates' => [
+                'facebook' => [
+                    'body_template' => '{product_title} {product_url}',
+                    'delivery_enabled' => false,
+                    'image_style' => 'framed',
+                ],
+                'instagram' => [
+                    'body_template' => '{product_title} {product_url}',
+                    'delivery_enabled' => false,
+                    'image_style' => 'original',
+                ],
+            ],
+        ])->assertRedirect(route('social-media.index'));
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertRedirect(route('social-media.index'));
+
+        $this->assertSame(
+            'https://shop.example/images/generated-catalog-design.jpg',
+            $agent->socialMediaPosts()->sole()->image_url,
+        );
     }
 
     public function test_business_saves_and_snapshots_distinct_facebook_and_instagram_templates(): void
