@@ -12,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class SocialMediaScheduler
 {
+    private const AI_DAILY_LIMIT = 7;
+
     public function __construct(
         private readonly SocialMediaTemplateService $templates,
         private readonly SocialMediaTemplateRenderer $renderer,
@@ -38,7 +40,6 @@ class SocialMediaScheduler
         return DB::transaction(function () use ($agent, $data, $productsByProvider, $templateSnapshots): SocialMediaSchedule {
             if (($data['copy_mode'] ?? 'original') === 'ai') {
                 Agent::query()->whereKey($agent->id)->lockForUpdate()->firstOrFail();
-                $this->assertAiDailyCapacity($agent, $data);
             }
 
             $schedule = $agent->socialMediaSchedules()->create([
@@ -62,6 +63,9 @@ class SocialMediaScheduler
                 ->mapWithKeys(fn (string $provider): array => [$provider => 0])
                 ->all();
             for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
+                $remainingAiPosts = ($data['copy_mode'] ?? 'original') === 'ai'
+                    ? max(0, self::AI_DAILY_LIMIT - $this->scheduledAiPostsForDay($agent, $day))
+                    : 0;
                 $slots = isset($data['posting_times'])
                     ? $this->customDailyTimes($day, $data['posting_times'])
                     : $this->dailyTimes($day, (int) $data['posts_per_day']);
@@ -70,6 +74,10 @@ class SocialMediaScheduler
                         $products = $productsByProvider[$provider];
                         $variant = $products[$productIndexes[$provider] % $products->count()];
                         $productIndexes[$provider]++;
+                        $postCopyMode = $remainingAiPosts > 0 ? 'ai' : 'original';
+                        if ($postCopyMode === 'ai') {
+                            $remainingAiPosts--;
+                        }
                         $schedule->posts()->create($this->postAttributes(
                             $agent,
                             $variant['product'],
@@ -77,6 +85,7 @@ class SocialMediaScheduler
                             $slot,
                             $templateSnapshots[$provider],
                             $variant['language'],
+                            $postCopyMode,
                         ));
                     }
                 }
@@ -166,24 +175,19 @@ class SocialMediaScheduler
         })->all();
     }
 
-    private function assertAiDailyCapacity(Agent $agent, array $data): void
+    private function scheduledAiPostsForDay(Agent $agent, CarbonImmutable $day): int
     {
-        $newPostsPerDay = (int) $data['posts_per_day'] * count($data['providers']);
-        $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
-        $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
-
-        for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
-            $existing = $agent->socialMediaPosts()
-                ->where('scheduled_for', '>=', $day->utc())
-                ->where('scheduled_for', '<', $day->addDay()->utc())
-                ->whereHas('schedule', fn ($query) => $query->where('copy_mode', 'ai'))
-                ->count();
-            if (($existing + $newPostsPerDay) > 3) {
-                throw ValidationException::withMessages([
-                    'posts_per_day' => 'This business already has AI-generated posts scheduled for '.$day->toDateString().'. The daily maximum is 3 across Facebook and Instagram.',
-                ]);
-            }
-        }
+        return $agent->socialMediaPosts()
+            ->where('scheduled_for', '>=', $day->utc())
+            ->where('scheduled_for', '<', $day->addDay()->utc())
+            ->where(function ($query): void {
+                $query->where('copy_mode', 'ai')
+                    ->orWhere(function ($legacy): void {
+                        $legacy->whereNull('copy_mode')
+                            ->whereHas('schedule', fn ($schedule) => $schedule->where('copy_mode', 'ai'));
+                    });
+            })
+            ->count();
     }
 
     /** @param list<string> $times */
@@ -196,7 +200,7 @@ class SocialMediaScheduler
         })->all();
     }
 
-    private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot, array $template, ?string $language = null): array
+    private function postAttributes(Agent $agent, $product, string $provider, CarbonImmutable $slot, array $template, ?string $language = null, string $copyMode = 'original'): array
     {
         $localizedMap = (array) data_get($product->metadata, 'localized', []);
         $localized = $language ? (array) ($localizedMap[$language] ?? []) : [];
@@ -238,6 +242,7 @@ class SocialMediaScheduler
             'product_url' => $url,
             'image_url' => $this->publicHttpUrl($image) ? $image : null,
             'caption' => $this->renderer->render($provider, $template, $agent, $renderProduct),
+            'copy_mode' => $copyMode,
         ];
     }
 

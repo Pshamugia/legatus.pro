@@ -144,12 +144,6 @@ class SocialMediaController extends Controller
             throw ValidationException::withMessages(['providers' => 'Connect the selected Facebook/Instagram accounts before creating a schedule.']);
         }
 
-        if ($data['copy_mode'] === 'ai' && ((int) $data['posts_per_day'] * count($data['providers'])) > 3) {
-            throw ValidationException::withMessages([
-                'posts_per_day' => 'AI Copywriter is limited to 3 generated posts per business per day across all selected channels.',
-            ]);
-        }
-
         $scheduler->create($agent, $data);
 
         return redirect()->route('social-media.index')->with('social_success', 'Social media schedule created. Posts are ready in the publishing queue.');

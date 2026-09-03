@@ -70,7 +70,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('AI Copywriter')
             ->assertSee('Original content')
             ->assertSee('Informative')
-            ->assertSee('Maximum 3 generated posts per business each day.')
+            ->assertSee('Luna writes up to 7 channel-ready posts per business each day.')
             ->assertSee('Catalog design')
             ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
@@ -434,7 +434,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertDatabaseCount('social_media_schedules', 0);
     }
 
-    public function test_ai_copywriter_schedule_is_limited_to_three_channel_posts_per_business_day(): void
+    public function test_ai_copywriter_uses_original_content_after_seven_channel_posts_per_business_day(): void
     {
         [$user, $agent] = $this->tenant('ai-daily-limit');
         $this->connections($agent);
@@ -442,7 +442,7 @@ class SocialMediaSchedulerTest extends TestCase
         $date = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
 
         $this->actingAs($user)->post(route('social-media.store'), [
-            'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 3,
+            'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 7,
             'providers' => ['facebook'], 'timezone' => 'Asia/Tbilisi',
             'copy_mode' => 'ai', 'ai_tone' => 'creative',
         ])->assertRedirect(route('social-media.index'));
@@ -450,18 +450,20 @@ class SocialMediaSchedulerTest extends TestCase
         $schedule = $agent->socialMediaSchedules()->firstOrFail();
         $this->assertSame('ai', $schedule->copy_mode);
         $this->assertSame('creative', $schedule->ai_tone);
-        $this->assertCount(3, $schedule->posts);
+        $this->assertCount(7, $schedule->posts);
+        $this->assertSame(7, $schedule->posts->where('copy_mode', 'ai')->count());
 
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
             'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 1,
             'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
             'copy_mode' => 'ai', 'ai_tone' => 'simple',
-        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posts_per_day');
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasNoErrors();
 
-        $this->assertSame(1, $agent->socialMediaSchedules()->count());
+        $this->assertSame(2, $agent->socialMediaSchedules()->count());
+        $this->assertSame('original', $agent->socialMediaPosts()->latest('id')->firstOrFail()->copy_mode);
     }
 
-    public function test_ai_copywriter_rejects_more_than_three_generated_channel_posts_in_one_schedule(): void
+    public function test_ai_copywriter_keeps_an_oversized_schedule_and_marks_only_seven_posts_for_ai(): void
     {
         [$user, $agent] = $this->tenant('ai-request-limit');
         $this->connections($agent);
@@ -469,11 +471,13 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
             'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
-            'posts_per_day' => 2, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
+            'posts_per_day' => 4, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
             'copy_mode' => 'ai', 'ai_tone' => 'academic',
-        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('posts_per_day');
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasNoErrors();
 
-        $this->assertDatabaseCount('social_media_schedules', 0);
+        $this->assertDatabaseCount('social_media_schedules', 1);
+        $this->assertSame(7, $agent->socialMediaPosts()->where('copy_mode', 'ai')->count());
+        $this->assertSame(1, $agent->socialMediaPosts()->where('copy_mode', 'original')->count());
     }
 
     public function test_luna_generates_a_verified_image_aware_caption_once_before_meta_publish(): void
@@ -519,7 +523,7 @@ class SocialMediaSchedulerTest extends TestCase
             && str_contains((string) $request['caption'], $generated));
     }
 
-    public function test_failed_ai_generation_is_not_repeated_or_sent_to_meta(): void
+    public function test_failed_ai_generation_falls_back_to_original_content_without_repeating_ai(): void
     {
         [, $agent] = $this->tenant('ai-generation-failure');
         $this->connections($agent);
@@ -536,16 +540,20 @@ class SocialMediaSchedulerTest extends TestCase
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'caption' => 'Prepared fallback caption',
         ]);
-        Http::fake(['https://api.openai.com/v1/responses' => Http::response(['error' => ['message' => 'Unavailable']], 503)]);
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response(['error' => ['message' => 'Unavailable']], 503),
+            'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'fallback-facebook-post']),
+        ]);
 
         $job = new PublishSocialMediaPost($post->id);
         $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
         $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
 
-        $this->assertSame('failed', $post->fresh()->status);
+        $this->assertSame('published', $post->fresh()->status);
+        $this->assertSame('Prepared fallback caption', $post->fresh()->caption);
         $this->assertNotNull($post->fresh()->ai_generation_attempted_at);
         $this->assertNull($post->fresh()->ai_generated_at);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_social_schedule_filters_and_snapshots_the_selected_website_language(): void

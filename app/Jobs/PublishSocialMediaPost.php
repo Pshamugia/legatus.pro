@@ -48,13 +48,9 @@ class PublishSocialMediaPost implements ShouldQueue
         }
 
         $template = data_get($post->schedule->template_snapshots, $post->provider);
-        if ($post->schedule->copy_mode === 'ai') {
-            if ($post->ai_generated_at === null) {
-                if ($post->ai_generation_attempted_at !== null) {
-                    $post->update(['status' => 'failed', 'failure_reason' => 'AI Copywriter did not complete its first generation attempt.']);
-
-                    return;
-                }
+        $copyMode = $post->copy_mode ?: $post->schedule->copy_mode;
+        if ($copyMode === 'ai') {
+            if ($post->ai_generated_at === null && $post->ai_generation_attempted_at === null) {
                 $title = (string) ($localized['name'] ?? $product->name);
                 $descriptionValue = $product->socialDescription($post->language, $post->description);
                 $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 700, '…');
@@ -76,14 +72,12 @@ class PublishSocialMediaPost implements ShouldQueue
                     $post->refresh();
                 } catch (\Throwable $exception) {
                     $post->update([
-                        'status' => 'failed',
-                        'failure_reason' => Str::limit('AI Copywriter: '.$exception->getMessage(), 2000, ''),
+                        'failure_reason' => Str::limit('AI Copywriter unavailable; Original content used. '.$exception->getMessage(), 2000, ''),
                     ]);
-
-                    return;
                 }
             }
-        } elseif (is_array($template)) {
+        }
+        if ($post->ai_generated_at === null && is_array($template)) {
             try {
                 $title = (string) ($localized['name'] ?? $product->name);
                 // Never erase the immutable description prepared for this post
