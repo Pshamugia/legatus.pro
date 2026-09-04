@@ -609,6 +609,8 @@ HTML;
             ->assertOk()
             ->assertSee('sync-source-'.$source->id, false)
             ->assertSee('remove-source-'.$source->id, false)
+            ->assertSee("structured-field-with-controls \${category.id?'has-source-controls':'has-remove-control'}", false)
+            ->assertDontSee('structured-row__footer', false)
             ->assertDontSee('Connected knowledge');
     }
 
