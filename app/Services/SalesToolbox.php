@@ -411,7 +411,7 @@ class SalesToolbox
             ? 'delivery'
             : (preg_match('/(?:წეს|პირობ|დაბრუნ|refund|return|გადახდ|payment|privacy|კონფიდენციალ|terms|warranty|გარანტ)/iu', $queryText) === 1 ? 'terms' : null);
         $targetSourceIds = $targetScope
-            ? $agent->knowledgeSources()->where('source_scope', $targetScope)->pluck('id')
+            ? $agent->knowledgeSources()->whereIn('source_scope', [$targetScope, 'business'])->pluck('id')
             : collect();
 
         try {
@@ -939,8 +939,24 @@ class SalesToolbox
     private function publishedDeliveryPolicy(Agent $agent, string $city, string $language): ?array
     {
         $manualDeliverySourceIds = $agent->knowledgeSources()
-            ->where('source_scope', 'delivery')
             ->where('status', 'ready')
+            ->where(function ($sources): void {
+                $sources->where('source_scope', 'delivery')
+                    ->orWhere(function ($business): void {
+                        $business->where('source_scope', 'business')
+                            ->whereHas('chunks', function ($query): void {
+                                $query->where('kind', 'policy')->where(function ($delivery): void {
+                                    $delivery->where('content', 'like', '%მიწოდ%')
+                                        ->orWhere('content', 'like', '%კურიერ%')
+                                        ->orWhere('content', 'like', '%ტრანსპორტ%')
+                                        ->orWhereRaw('LOWER(content) LIKE ?', ['%delivery%'])
+                                        ->orWhereRaw('LOWER(content) LIKE ?', ['%shipping%'])
+                                        ->orWhereRaw('LOWER(title) LIKE ?', ['%delivery%'])
+                                        ->orWhereRaw('LOWER(title) LIKE ?', ['%shipping%']);
+                                });
+                            });
+                    });
+            })
             ->pluck('id');
         $websiteSourceIds = $agent->knowledgeSources()
             ->where('type', 'url')

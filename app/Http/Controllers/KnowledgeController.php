@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\CrawlPublicWebsite;
+use App\Jobs\EmbedKnowledgeSource;
 use App\Models\KnowledgeSource;
 use App\Services\KnowledgeIngestionService;
 use App\Services\TenantContext;
@@ -22,8 +23,22 @@ class KnowledgeController extends Controller
             ->get();
         $catalogSource = $sources->firstWhere('source_scope', 'catalog');
         $sitemapSource = $sources->firstWhere('source_scope', 'sitemap');
-        $deliverySource = $sources->firstWhere('source_scope', 'delivery');
-        $termsSource = $sources->firstWhere('source_scope', 'terms');
+        $businessSources = $sources
+            ->whereIn('source_scope', ['business', 'delivery', 'terms'])
+            ->map(function (KnowledgeSource $source): array {
+                return [
+                    'id' => $source->id,
+                    'name' => $source->name,
+                    'type' => $source->type,
+                    'url' => $source->url,
+                    'text' => $source->type === 'text'
+                        ? $source->chunks()->where('kind', 'policy')->value('content')
+                        : null,
+                    'status' => $source->status,
+                    'refreshable' => $source->isRefreshable(),
+                ];
+            })
+            ->values();
         $categorySources = $sources
             ->map(function (KnowledgeSource $source) use ($ingestion): ?array {
                 $taxonomy = $ingestion->taxonomyForSource($source);
@@ -49,9 +64,7 @@ class KnowledgeController extends Controller
             'refreshable' => $source->isRefreshable(),
         ])->values();
 
-        $deliveryText = $deliverySource?->chunks()->where('kind', 'policy')->value('content');
-
-        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources', 'languageSources', 'deliverySource', 'deliveryText', 'termsSource'));
+        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources', 'languageSources', 'businessSources'));
     }
 
     public function status(TenantContext $tenant)
@@ -86,6 +99,9 @@ class KnowledgeController extends Controller
         if ($r->input('mode') === 'business_policies') {
             return $this->storeBusinessPolicies($r, $tenant);
         }
+        if ($r->input('mode') === 'business_knowledge') {
+            return $this->storeBusinessKnowledge($r, $tenant);
+        }
 
         $data = $r->validate([
             'type' => 'required|in:url,csv,pdf',
@@ -117,6 +133,76 @@ class KnowledgeController extends Controller
         } catch (\Throwable) {
             return back()->with('error', $source->fresh()->error);
         }
+    }
+
+    private function storeBusinessKnowledge(Request $request, TenantContext $tenant)
+    {
+        $data = $request->validate([
+            'business_knowledge' => 'required|array|min:1|max:50',
+            'business_knowledge.*.id' => 'nullable|integer',
+            'business_knowledge.*.title' => 'required|string|max:150',
+            'business_knowledge.*.type' => 'required|in:text,url',
+            'business_knowledge.*.text' => 'nullable|required_if:business_knowledge.*.type,text|string|max:20000',
+            'business_knowledge.*.url' => 'nullable|required_if:business_knowledge.*.type,url|url|max:2000',
+        ]);
+        $agent = $tenant->agent();
+        $crawlIds = [];
+        $embedIds = [];
+
+        DB::transaction(function () use ($agent, $data, &$crawlIds, &$embedIds): void {
+            foreach ($data['business_knowledge'] as $item) {
+                $source = filled($item['id'] ?? null)
+                    ? $agent->knowledgeSources()
+                        ->whereIn('source_scope', ['business', 'delivery', 'terms'])
+                        ->findOrFail((int) $item['id'])
+                    : new KnowledgeSource(['agent_id' => $agent->id, 'source_scope' => 'business']);
+                $type = $item['type'];
+                $title = trim($item['title']);
+
+                if ($type === 'text') {
+                    $text = trim((string) $item['text']);
+                    $source->fill([
+                        'type' => 'text', 'name' => $title, 'url' => null, 'file_path' => null,
+                        'status' => 'ready', 'progress' => 100,
+                        'items_found' => 1, 'items_created' => $source->exists ? 0 : 1,
+                        'items_updated' => $source->exists ? 1 : 0, 'error' => null,
+                        'last_synced_at' => now(),
+                    ]);
+                    $source->save();
+                    $source->chunks()->delete();
+                    $source->chunks()->create([
+                        'agent_id' => $agent->id, 'kind' => 'policy', 'title' => $title,
+                        'content' => $text, 'content_hash' => hash('sha256', $text),
+                        'metadata' => ['source_scope' => $source->source_scope, 'manual' => true],
+                    ]);
+                    if (config('services.openai.key')) {
+                        $embedIds[] = $source->id;
+                    }
+                    continue;
+                }
+
+                $url = trim((string) $item['url']);
+                $changed = ! $source->exists || $source->type !== 'url' || $source->url !== $url || $source->name !== $title;
+                $source->fill([
+                    'type' => 'url', 'name' => $title, 'url' => $url, 'file_path' => null,
+                    'status' => $changed ? 'processing' : $source->status,
+                    'progress' => $changed ? 1 : $source->progress, 'error' => null,
+                ]);
+                $source->save();
+                if ($changed) {
+                    $crawlIds[] = $source->id;
+                }
+            }
+        });
+
+        foreach ($crawlIds as $sourceId) {
+            CrawlPublicWebsite::dispatch($sourceId);
+        }
+        foreach ($embedIds as $sourceId) {
+            EmbedKnowledgeSource::dispatch($sourceId);
+        }
+
+        return back()->with('success', 'Business knowledge was saved. URL sources and semantic indexes are updating in the background.');
     }
 
     private function storeBusinessPolicies(Request $request, TenantContext $tenant)

@@ -31,33 +31,18 @@
     </div>
 </section>
 <section class="panel knowledge-section">
-    <div class="knowledge-section__head"><span class="eyebrow">Business rules</span><h3>Delivery and business policies</h3><p>Give the assistant one authoritative delivery text and one public page for your terms, returns, payments, and other business rules.</p></div>
+    <div class="knowledge-section__head"><span class="eyebrow">Business knowledge</span><h3>Custom business information</h3><p>Add any facts Legatus should use in answers, such as delivery rules, working hours, addresses, returns, payments, or services.</p></div>
     <div class="knowledge-section__body">
     <form method="post" action="{{ route('knowledge.store') }}">
         @csrf
-        <input type="hidden" name="mode" value="business_policies">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px" class="policy-grid">
-            <div @if($deliverySource) data-source-row="{{ $deliverySource->id }}" @endif>
-                <div class="knowledge-group__title"><span class="eyebrow">Delivery</span>@include('partials.knowledge-source-controls', ['source' => $deliverySource])</div>
-                <label>Title</label>
-                <input name="delivery_title" required maxlength="150" value="{{ old('delivery_title', $deliverySource?->name ?? 'Delivery policy') }}" placeholder="Delivery policy">
-                <label>Delivery information</label>
-                <textarea name="delivery_text" required maxlength="10000" rows="8" placeholder="Write delivery areas, price, timing, working days, and exceptions.">{{ old('delivery_text', $deliveryText) }}</textarea>
-            </div>
-            <div @if($termsSource) data-source-row="{{ $termsSource->id }}" @endif>
-                <div class="knowledge-group__title"><span class="eyebrow">Terms &amp; Policies</span>@include('partials.knowledge-source-controls', ['source' => $termsSource])</div>
-                <label>Title</label>
-                <input name="terms_title" required maxlength="150" value="{{ old('terms_title', $termsSource?->name ?? 'Terms and policies') }}" placeholder="Terms and policies">
-                <label>Public URL</label>
-                <input type="url" name="terms_url" required maxlength="2000" value="{{ old('terms_url', $termsSource?->url) }}" placeholder="https://store.example/terms">
-                <p class="channel">Used for terms, returns, refunds, payments, and related policy questions.</p>
-            </div>
-        </div>
-        <button class="btn lime" style="margin-top:22px">Save policies →</button>
+        <input type="hidden" name="mode" value="business_knowledge">
+        <div class="knowledge-group__title"><div><label>Knowledge items</label><p>Use direct text or connect a public page.</p></div><button type="button" class="btn ghost" id="add-business-knowledge">＋ Add information</button></div>
+        <div id="business-knowledge-fields"></div>
+        <button class="btn lime" style="margin-top:22px">Save knowledge →</button>
     </form>
     </div>
 </section>
-<style>.policy-grid textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:12px;padding:12px;font:inherit;resize:vertical}@media(max-width:800px){.policy-grid{grid-template-columns:1fr!important}}</style>
+<style>.business-knowledge-row{padding:18px;border:1px solid var(--line);border-radius:15px;background:#f8faf7}.business-knowledge-row+.business-knowledge-row{margin-top:12px}.business-knowledge-fields{display:grid;grid-template-columns:minmax(0,1fr) 180px;gap:12px}.business-knowledge-row textarea,.business-knowledge-row select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;font:inherit}.business-knowledge-row textarea{resize:vertical}@media(max-width:700px){.business-knowledge-fields{grid-template-columns:1fr}}</style>
 <div class="knowledge-action-forms" aria-hidden="true">
     @foreach($sources as $source)
         @if($source->isRefreshable())<form id="sync-source-{{ $source->id }}" class="async-source-action" data-source-id="{{ $source->id }}" data-action="sync" method="post" action="{{ route('knowledge.sync',$source) }}">@csrf</form>@endif
@@ -69,9 +54,11 @@ const categoryFields=document.querySelector('#category-fields'),addCategory=docu
 const knowledgeStatusUrl=@json(route('knowledge.status'));
 const existingCategories=@json($categorySources);
 const existingLanguages=@json($languageSources);
+const existingBusinessKnowledge=@json($businessSources);
 let trackedSourceIds=[];
 let categoryIndex=0;
 let languageIndex=0;
+let businessKnowledgeIndex=0;
 function appendCategory(category={}){
     const row=document.createElement('div');
     row.className='structured-row';
@@ -100,6 +87,23 @@ function appendLanguage(language={}){
 }
 addLanguage.addEventListener('click',()=>appendLanguage());
 if(existingLanguages.length)existingLanguages.forEach(appendLanguage);else appendLanguage();
+const businessKnowledgeFields=document.querySelector('#business-knowledge-fields'),addBusinessKnowledge=document.querySelector('#add-business-knowledge');
+function appendBusinessKnowledge(item={}){
+    const row=document.createElement('div');
+    row.className='business-knowledge-row';
+    if(item.id)row.dataset.sourceRow=item.id;
+    const index=businessKnowledgeIndex++;
+    const controls=item.id?`<div class="source-controls"><span class="pill" data-source-status>${item.status||'ready'}</span>${item.refreshable?`<button type="submit" class="btn ghost" form="sync-source-${item.id}">↻ Sync</button>`:''}<button type="submit" class="btn ghost remove-source" form="remove-source-${item.id}">Remove</button></div>`:`<button type="button" class="btn ghost remove-business-knowledge">Remove</button>`;
+    row.innerHTML=`<div class="knowledge-group__title"><span class="eyebrow">Business information</span>${controls}</div><input type="hidden" name="business_knowledge[${index}][id]" value="${item.id||''}"><div class="business-knowledge-fields"><div><label>Title</label><input required maxlength="150" name="business_knowledge[${index}][title]" placeholder="e.g. Working hours"></div><div><label>Source type</label><select name="business_knowledge[${index}][type]"><option value="text">Text</option><option value="url">Public URL</option></select></div></div><div data-business-text><label>Information</label><textarea rows="6" maxlength="20000" name="business_knowledge[${index}][text]" placeholder="Write the authoritative information Legatus should use."></textarea></div><div data-business-url hidden><label>Public URL</label><input type="url" maxlength="2000" name="business_knowledge[${index}][url]" placeholder="https://store.example/information"></div>`;
+    const title=row.querySelector('[name$="[title]"]'),type=row.querySelector('[name$="[type]"]'),textInput=row.querySelector('textarea'),urlInput=row.querySelector('[name$="[url]"]');
+    title.value=item.name||'';type.value=item.type||'text';textInput.value=item.text||'';urlInput.value=item.url||'';
+    const toggle=()=>{const isText=type.value==='text';row.querySelector('[data-business-text]').hidden=!isText;row.querySelector('[data-business-url]').hidden=isText;textInput.required=isText;urlInput.required=!isText;};
+    type.addEventListener('change',toggle);toggle();
+    row.querySelector('.remove-business-knowledge')?.addEventListener('click',()=>row.remove());
+    businessKnowledgeFields.appendChild(row);
+}
+addBusinessKnowledge.addEventListener('click',()=>appendBusinessKnowledge());
+if(existingBusinessKnowledge.length)existingBusinessKnowledge.forEach(appendBusinessKnowledge);else appendBusinessKnowledge();
 structureForm.addEventListener('submit',async event=>{
     event.preventDefault();
     const button=structureForm.querySelector('button[type=submit],button:not([type])');

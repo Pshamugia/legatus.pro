@@ -711,9 +711,58 @@ HTML;
         $this->actingAs($user)->get(route('knowledge.index'))
             ->assertOk()
             ->assertSee('Delivery information')
-            ->assertSee('თბილისში მიწოდება უფასოა')
-            ->assertSee('https://shop.example/terms')
-            ->assertSee('form="remove-source-'.$delivery->id.'"', false);
+            ->assertSee('Custom business information')
+            ->assertSee('https:\/\/shop.example\/terms', false);
+    }
+
+    public function test_business_can_manage_arbitrary_text_and_url_knowledge_without_losing_legacy_policies(): void
+    {
+        Queue::fake();
+        config(['services.openai.key' => null]);
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+        $delivery = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery policy',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $delivery->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery policy',
+            'content' => 'Delivery takes two business days.', 'content_hash' => hash('sha256', 'Delivery takes two business days.'),
+        ]);
+
+        $this->actingAs($user)->post(route('knowledge.store'), [
+            'mode' => 'business_knowledge',
+            'business_knowledge' => [
+                [
+                    'id' => $delivery->id, 'title' => 'Delivery details', 'type' => 'text',
+                    'text' => 'Delivery takes one business day.',
+                ],
+                [
+                    'title' => 'Working hours', 'type' => 'text',
+                    'text' => 'The office is open Monday through Friday from 09:00 to 18:00.',
+                ],
+                [
+                    'title' => 'Office address', 'type' => 'url',
+                    'url' => 'https://shop.example/contact',
+                ],
+            ],
+        ])->assertRedirect()->assertSessionHas('success');
+
+        $this->assertSame('delivery', $delivery->fresh()->source_scope);
+        $this->assertSame('Delivery takes one business day.', $delivery->chunks()->sole()->content);
+        $hours = $agent->knowledgeSources()->where('source_scope', 'business')->where('name', 'Working hours')->sole();
+        $address = $agent->knowledgeSources()->where('source_scope', 'business')->where('name', 'Office address')->sole();
+        $this->assertSame('ready', $hours->status);
+        $this->assertSame('The office is open Monday through Friday from 09:00 to 18:00.', $hours->chunks()->sole()->content);
+        $this->assertSame('processing', $address->status);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $address->id);
+
+        $this->actingAs($user)->get(route('knowledge.index'))->assertOk()
+            ->assertSee('Custom business information')
+            ->assertSee('Delivery details')
+            ->assertSee('Working hours')
+            ->assertSee('https:\/\/shop.example\/contact', false);
     }
 
     public function test_saving_website_structure_updates_single_catalog_and_existing_category(): void

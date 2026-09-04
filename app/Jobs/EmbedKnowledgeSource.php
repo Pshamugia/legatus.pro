@@ -24,7 +24,7 @@ class EmbedKnowledgeSource implements ShouldQueue
     public function handle(EmbeddingService $embeddings): void
     {
         $source = KnowledgeSource::find($this->sourceId);
-        if (! $source || $source->status !== 'processing') {
+        if (! $source || ! in_array($source->status, ['processing', 'ready'], true)) {
             return;
         }
 

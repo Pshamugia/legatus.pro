@@ -1337,7 +1337,7 @@ class OpenAiSalesOrchestrator
         $hasBudgetRecommendationContext = $this->explicitBudgetConstraint($message) !== null
             || is_array(data_get($conversation->context, 'pending_budget_request'));
         $hasDeliveryKnowledge = $agent->knowledgeSources()
-            ->where('source_scope', 'delivery')
+            ->whereIn('source_scope', ['delivery', 'business'])
             ->where('status', 'ready')
             ->exists();
         if ($recentIds->isEmpty()

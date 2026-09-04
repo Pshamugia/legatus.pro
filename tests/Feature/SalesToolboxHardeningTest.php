@@ -105,6 +105,63 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertArrayNotHasKey('earliest', $result);
     }
 
+    public function test_custom_business_delivery_knowledge_is_authoritative_for_delivery_tool(): void
+    {
+        [$agent, , $conversation] = $this->context();
+        $agent->update(['settings' => ['handoff_threshold' => .72, 'discount_limit' => 10]]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'business', 'name' => 'Delivery details',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery details',
+            'content' => 'Delivery to Batumi costs 8 GEL and takes 2 business days.',
+            'content_hash' => hash('sha256', 'custom-delivery'),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'Batumi', 'language' => 'en',
+        ], $agent->fresh(), $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('manual_policy', $result['source']['type']);
+        $this->assertStringContainsString('8 GEL', $result['customer_message']);
+    }
+
+    public function test_arbitrary_business_knowledge_is_searchable_and_tenant_scoped(): void
+    {
+        config(['services.openai.key' => null]);
+        [$agent, , $conversation] = $this->context();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'business', 'name' => 'Working hours',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Working hours',
+            'content' => 'The showroom is open Monday through Friday from 09:00 to 18:00.',
+            'content_hash' => hash('sha256', 'working-hours'),
+        ]);
+        $otherAgent = Agent::create([
+            'name' => 'Other assistant', 'slug' => 'other-business-knowledge',
+            'business_name' => 'Other Store', 'settings' => [],
+        ]);
+        $otherAgent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'business', 'name' => 'Secret office',
+            'status' => 'ready', 'progress' => 100,
+        ])->chunks()->create([
+            'agent_id' => $otherAgent->id, 'kind' => 'policy', 'title' => 'Secret office',
+            'content' => 'Saturday access code is 9999.', 'content_hash' => hash('sha256', 'other-tenant'),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_knowledge', [
+            'query' => 'What are the showroom working hours?',
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertStringContainsString('09:00', $result['results'][0]['excerpt']);
+        $this->assertStringNotContainsString('9999', json_encode($result));
+    }
+
     public function test_lead_requires_and_records_server_verified_consent_message(): void
     {
         [$agent, , $conversation] = $this->context();
