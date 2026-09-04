@@ -20,7 +20,7 @@ class SocialMediaController extends Controller
     {
         $agent = $tenant->agent();
         $connections = $agent->channelConnections()
-            ->whereIn('provider', ['facebook', 'instagram'])
+            ->whereIn('provider', SocialMediaTemplateService::PROVIDERS)
             ->get()
             ->keyBy('provider');
         $products = $agent->customerProducts()->where('is_active', true)->get();
@@ -104,7 +104,7 @@ class SocialMediaController extends Controller
             'languages' => ['nullable', 'array'],
             'languages.*' => ['string', 'max:150'],
             'providers' => ['required', 'array', 'min:1'],
-            'providers.*' => [Rule::in(['facebook', 'instagram'])],
+            'providers.*' => [Rule::in(SocialMediaTemplateService::PROVIDERS)],
             'timezone' => ['required', 'timezone'],
             'timing_mode' => ['required', Rule::in(['auto', 'custom'])],
             'posting_times' => ['nullable', 'array'],
@@ -142,7 +142,7 @@ class SocialMediaController extends Controller
         $active = $agent->channelConnections()->whereIn('provider', $data['providers'])->where('status', 'active')->pluck('provider');
         $missing = collect($data['providers'])->diff($active);
         if ($missing->isNotEmpty()) {
-            throw ValidationException::withMessages(['providers' => 'Connect the selected Facebook/Instagram accounts before creating a schedule.']);
+            throw ValidationException::withMessages(['providers' => 'Connect every selected social account before creating a schedule.']);
         }
 
         $scheduler->create($agent, $data);

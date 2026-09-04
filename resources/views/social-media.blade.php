@@ -5,6 +5,7 @@
     $platforms = [
         'facebook' => ['label' => 'Facebook', 'account' => $connections->get('facebook')?->external_account_name ?: $agent->business_name, 'limit' => 6000],
         'instagram' => ['label' => 'Instagram', 'account' => $connections->get('instagram')?->external_account_name ?: $agent->business_name, 'limit' => 2200],
+        'linkedin' => ['label' => 'LinkedIn', 'account' => $connections->get('linkedin')?->external_account_name ?: $agent->business_name, 'limit' => 3000],
     ];
     $tokens = [
         '{product_title}' => 'Product title',
@@ -40,7 +41,7 @@
 
         <section class="panel template-panel" aria-labelledby="template-heading">
             <div class="section-heading">
-                <div><span class="step">01</span><div><h2 id="template-heading">Design post templates</h2><p>Facebook and Instagram keep independent text, emojis and delivery details.</p></div></div>
+                <div><span class="step">01</span><div><h2 id="template-heading">Design post templates</h2><p>Facebook, Instagram and LinkedIn keep independent text, emojis and delivery details.</p></div></div>
                 <span class="status-pill">Saved per business</span>
             </div>
 
@@ -51,7 +52,7 @@
                     <div class="platform-tabs" role="tablist" aria-label="Post template channel">
                         @foreach($platforms as $provider => $platform)
                             <button class="platform-tab {{ $loop->first ? 'active' : '' }}" type="button" role="tab" id="{{ $provider }}-tab" aria-controls="{{ $provider }}-panel" aria-selected="{{ $loop->first ? 'true' : 'false' }}" tabindex="{{ $loop->first ? '0' : '-1' }}" data-platform-tab="{{ $provider }}">
-                                <span class="platform-mark {{ $provider }}">{{ $provider === 'facebook' ? 'f' : '◎' }}</span>
+                                <span class="platform-mark {{ $provider }}">{{ ['facebook' => 'f', 'instagram' => '◎', 'linkedin' => 'in'][$provider] }}</span>
                                 {{ $platform['label'] }}
                             </button>
                         @endforeach
@@ -64,7 +65,7 @@
                     <div class="template-workspace" id="{{ $provider }}-panel" role="tabpanel" aria-labelledby="{{ $provider }}-tab" data-platform-panel="{{ $provider }}" @if(!$loop->first) hidden @endif>
                         <div class="template-editor">
                             <label for="{{ $provider }}-body"><strong>{{ $platform['label'] }} post text</strong><small>Edit every word and emoji. Product facts are inserted from the verified public catalog.</small></label>
-                            <textarea id="{{ $provider }}-body" name="templates[{{ $provider }}][body_template]" rows="12" maxlength="{{ $provider === 'instagram' ? 1800 : 5000 }}" data-template-body="{{ $provider }}" @disabled(!$canManage)>{{ old("templates.{$provider}.body_template", $configuration['body_template']) }}</textarea>
+                            <textarea id="{{ $provider }}-body" name="templates[{{ $provider }}][body_template]" rows="12" maxlength="{{ $provider === 'instagram' ? 1800 : ($provider === 'linkedin' ? 2800 : 5000) }}" data-template-body="{{ $provider }}" @disabled(!$canManage)>{{ old("templates.{$provider}.body_template", $configuration['body_template']) }}</textarea>
                             <div class="token-tools" aria-label="Insert verified product field">
                                 <span>Insert field:</span>
                                 @foreach($tokens as $token => $label)
@@ -132,7 +133,7 @@
 
                 <div class="template-save-row">
                     <p>Saving affects new schedules only. Already prepared posts keep their original template snapshot.</p>
-                    <button class="btn lime" type="submit" @disabled(!$canManage)>Save both templates →</button>
+                    <button class="btn lime" type="submit" @disabled(!$canManage)>Save templates →</button>
                 </div>
             </form>
         </section>
@@ -144,7 +145,7 @@
 
                 <fieldset class="copy-mode-fieldset"><legend>Post writing</legend><p class="field-help">Keep the current catalog text, or let Luna write a channel-specific caption from the verified product title, description and image.</p>
                     <div class="timing-mode-grid">
-                        <label class="timing-mode"><input type="radio" name="copy_mode" value="original" data-copy-mode @checked(old('copy_mode', 'original') === 'original') @disabled(!$canManage)><span><strong>Original content</strong><small>Uses your saved Facebook and Instagram templates exactly as it does today.</small></span></label>
+                        <label class="timing-mode"><input type="radio" name="copy_mode" value="original" data-copy-mode @checked(old('copy_mode', 'original') === 'original') @disabled(!$canManage)><span><strong>Original content</strong><small>Uses the saved template for each selected social channel.</small></span></label>
                         <label class="timing-mode"><input type="radio" name="copy_mode" value="ai" data-copy-mode @checked(old('copy_mode') === 'ai') @disabled(!$canManage)><span><strong>AI Copywriter</strong><small>Luna writes up to 7 product posts per business each day for every selected channel. Extra products automatically use Original content.</small></span></label>
                     </div>
                     <div class="ai-tone-picker" data-ai-tones @if(old('copy_mode', 'original') !== 'ai') hidden @endif>
@@ -174,12 +175,12 @@
                     <div class="posting-times" data-posting-times @if(old('timing_mode', 'auto') !== 'custom') hidden @endif></div>
                 </fieldset>
 
-                <fieldset><legend>Publish to</legend><p class="field-help">Choose Facebook, Instagram, or both connected channels.</p><div class="choice-grid">
-                    @foreach(['facebook' => 'Facebook Page', 'instagram' => 'Instagram'] as $provider => $label)
+                <fieldset><legend>Publish to</legend><p class="field-help">Choose Facebook, Instagram, or both connected channels. LinkedIn can be selected independently or together with them.</p><div class="choice-grid">
+                    @foreach(['facebook' => 'Facebook Page', 'instagram' => 'Instagram', 'linkedin' => 'LinkedIn Page'] as $provider => $label)
                         @php($connection = $connections->get($provider))
                         <label class="choice-card @if(!$connection?->isActive()) disabled @endif">
                             <input type="checkbox" name="providers[]" value="{{ $provider }}" @checked(in_array($provider, old('providers', []), true)) @disabled(!$canManage || !$connection?->isActive())>
-                            <span class="platform-mark {{ $provider }}">{{ $provider === 'facebook' ? 'f' : '◎' }}</span>
+                            <span class="platform-mark {{ $provider }}">{{ ['facebook' => 'f', 'instagram' => '◎', 'linkedin' => 'in'][$provider] }}</span>
                             <span><strong>{{ $label }}</strong><small>{{ $connection?->isActive() ? ($connection->external_account_name ?: 'Connected') : 'Connect this channel first' }}</small></span>
                         </label>
                     @endforeach
@@ -198,7 +199,7 @@
 
             <aside class="panel connection-panel">
                 <h3>Publishing readiness</h3>
-                @foreach(['facebook' => 'Facebook', 'instagram' => 'Instagram'] as $provider => $label)
+                @foreach(['facebook' => 'Facebook', 'instagram' => 'Instagram', 'linkedin' => 'LinkedIn'] as $provider => $label)
                     @php($connection = $connections->get($provider))
                     <div class="readiness"><span class="readiness-dot {{ $connection?->isActive() ? 'ready' : '' }}"></span><div><strong>{{ $label }}</strong><small>{{ $connection?->isActive() ? 'Connected · publishing access requested' : 'Not connected' }}</small></div></div>
                 @endforeach
@@ -243,7 +244,7 @@
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 (() => {
     const product = {{ \Illuminate\Support\Js::from($previewProduct) }};
-    const limits = {facebook: 6000, instagram: 2200};
+    const limits = {facebook: 6000, instagram: 2200, linkedin: 3000};
     const tabs = [...document.querySelectorAll('[data-platform-tab]')];
     const panels = [...document.querySelectorAll('[data-platform-panel]')];
     const postsPerDay = document.querySelector('[name="posts_per_day"]');
@@ -394,6 +395,7 @@
     }
     render('facebook');
     render('instagram');
+    render('linkedin');
 })();
 </script>
 @endsection

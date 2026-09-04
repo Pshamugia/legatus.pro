@@ -105,15 +105,15 @@ class SocialMediaScheduler
     public function eligibleProducts(Agent $agent, array $categories = [], array $providers = []): Collection
     {
         $wanted = collect($categories)->map(fn ($value) => Str::lower(trim((string) $value)))->filter()->unique();
-        $instagram = in_array('instagram', $providers, true);
+        $imageRequired = collect($providers)->intersect(['instagram', 'linkedin'])->isNotEmpty();
 
         return $agent->customerProducts()
             ->where('is_active', true)
             ->where('stock', '>', 0)
             ->get()
-            ->filter(function ($product) use ($wanted, $instagram): bool {
+            ->filter(function ($product) use ($wanted, $imageRequired): bool {
                 $url = data_get($product->metadata, 'product_url');
-                if (! $this->publicHttpUrl($url) || ($instagram && $product->publicImageUrl() === null)) {
+                if (! $this->publicHttpUrl($url) || ($imageRequired && $product->publicImageUrl() === null)) {
                     return false;
                 }
                 if ($wanted->isEmpty()) {

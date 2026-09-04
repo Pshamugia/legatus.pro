@@ -108,6 +108,51 @@ class SocialMediaSchedulerTest extends TestCase
         ));
     }
 
+    public function test_linkedin_uses_the_same_product_slot_and_publishes_an_image_post(): void
+    {
+        [$user, $agent] = $this->tenant('linkedin-scheduler');
+        $this->connections($agent);
+        $agent->channelConnections()->create([
+            'provider' => 'linkedin', 'status' => 'active', 'external_account_id' => '778899',
+            'external_account_name' => 'Legatus Company', 'access_token' => 'linkedin-token', 'connected_at' => now(),
+        ]);
+        $product = $agent->products()->create($this->product('LinkedIn Product', 'General', 2));
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook', 'instagram', 'linkedin'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $posts = $agent->socialMediaPosts()->get();
+        $this->assertSame(['facebook', 'instagram', 'linkedin'], $posts->pluck('provider')->sort()->values()->all());
+        $this->assertSame([$product->id], $posts->pluck('product_id')->unique()->values()->all());
+
+        $linkedinPost = $posts->firstWhere('provider', 'linkedin');
+        $linkedinPost->update(['status' => 'queued']);
+        config(['linkedin.api_url' => 'https://api.linkedin.test', 'linkedin.version' => '202606']);
+        Http::fake([
+            'https://shop.example/images/product.jpg' => Http::response('jpeg-bytes', 200, ['Content-Type' => 'image/jpeg']),
+            'https://api.linkedin.test/rest/images*' => Http::response(['value' => [
+                'uploadUrl' => 'https://upload.linkedin.test/image-1',
+                'image' => 'urn:li:image:image-1',
+            ]]),
+            'https://upload.linkedin.test/image-1' => Http::response('', 201),
+            'https://api.linkedin.test/rest/posts' => Http::response([], 201, ['x-restli-id' => 'urn:li:share:123']),
+        ]);
+
+        (new PublishSocialMediaPost($linkedinPost->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+
+        $this->assertSame('published', $linkedinPost->fresh()->status);
+        $this->assertSame('urn:li:share:123', $linkedinPost->fresh()->provider_post_id);
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request->url() === 'https://api.linkedin.test/rest/posts'
+            && $request['author'] === 'urn:li:organization:778899'
+            && data_get($request->data(), 'content.media.id') === 'urn:li:image:image-1');
+    }
+
     public function test_new_schedules_prefer_unposted_products_then_restart_after_catalog_exhaustion(): void
     {
         [$user, $agent] = $this->tenant('cross-schedule-product-rotation');

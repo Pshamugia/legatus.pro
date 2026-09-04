@@ -97,6 +97,27 @@
         </div>
         <p class="meta-security">Authorization happens on Meta’s official page. Legatus never sees your Facebook or Instagram password.</p>
     </article>
+
+    <article class="channel-block" id="linkedin-channel">
+        <div class="channel-block__head">
+            <div><span class="channel-number">4</span><div><h3>LinkedIn company page</h3><p>Publish scheduled product posts to a LinkedIn Page managed by your business.</p></div></div>
+            <span @class(['channel-status', 'is-connected' => $linkedinChannel['connected']])>{{ $linkedinChannel['connected'] ? '✓ Connected' : 'Not connected' }}</span>
+        </div>
+        <div class="meta-channel-grid" style="grid-template-columns:1fr">
+            <div class="meta-channel-card" data-channel="linkedin" data-status="{{ $linkedinChannel['connected'] ? 'connected' : 'disconnected' }}">
+                <div class="meta-channel-card__title"><span style="background:#e8f2fb;color:#0a66c2">in</span><div><b>LinkedIn</b><small>{{ $linkedinChannel['connected'] ? 'Ready for scheduled publishing' : 'Company Page connection required' }}</small></div></div>
+                <p>Uses LinkedIn's official authorization and posts only to the Page you select.</p>
+                @if($linkedinChannel['connected'])
+                    <div class="connected-account"><small>Connected page</small><b>{{ $linkedinChannel['account_name'] }}</b></div>
+                    @if($canManageChannels && $linkedinChannel['disconnect_url'])<div class="channel-actions"><span></span><form action="{{ $linkedinChannel['disconnect_url'] }}" method="POST">@csrf @method('DELETE')<button class="link-button" type="submit">Disconnect</button></form></div>@endif
+                @else
+                    @if($linkedinChannel['error'])<p class="channel-error">{{ $linkedinChannel['error'] }}</p>@endif
+                    @if($canManageChannels && $linkedinChannel['connect_url'])<a class="btn" href="{{ $linkedinChannel['connect_url'] }}">Connect LinkedIn</a>@endif
+                @endif
+            </div>
+        </div>
+        <p class="meta-security">Authorization happens on LinkedIn's official page. Legatus never sees your LinkedIn password.</p>
+    </article>
 </section>
 
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">

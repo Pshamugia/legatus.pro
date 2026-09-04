@@ -67,9 +67,11 @@ class SocialMediaAiCopywriter
             'academic' => 'Informative: precise, composed, and educational without sounding dry.',
             default => 'Simple: clear, warm, concise, and easy to understand.',
         };
-        $platform = $post->provider === 'instagram'
-            ? 'Instagram caption with natural line breaks and 3-6 relevant hashtags.'
-            : 'Facebook post with a conversational opening and no hashtag stuffing.';
+        $platform = match ($post->provider) {
+            'instagram' => 'Instagram caption with natural line breaks and 3-6 relevant hashtags.',
+            'linkedin' => 'LinkedIn company Page post with a professional opening, readable short paragraphs, and 2-4 relevant hashtags.',
+            default => 'Facebook post with a conversational opening and no hashtag stuffing.',
+        };
         $language = $post->language ?: 'the same language used by the product title and description';
 
         return <<<PROMPT

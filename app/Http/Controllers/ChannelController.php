@@ -20,7 +20,7 @@ class ChannelController extends Controller
         $agent = $tenant->agent();
         $snippet = '<script src="'.route('widget.script', $agent).'" async></script>';
         $connections = method_exists($agent, 'channelConnections')
-            ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram'])->get()
+            ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram', 'linkedin'])->get()
             : collect();
 
         $metaChannels = collect([
@@ -47,6 +47,20 @@ class ChannelController extends Controller
         $metaConnectUrl = Route::has('channels.meta.connect')
             ? route('channels.meta.connect', ['provider' => 'meta'])
             : null;
+        $linkedinConnection = $connections->firstWhere('provider', 'linkedin');
+        $linkedinConnected = $linkedinConnection?->isActive() ?? false;
+        $linkedinChannel = [
+            'connection' => $linkedinConnection,
+            'connected' => $linkedinConnected,
+            'account_name' => $linkedinConnection?->external_account_name,
+            'connect_url' => Route::has('channels.linkedin.connect') ? route('channels.linkedin.connect') : null,
+            'disconnect_url' => $linkedinConnection && Route::has('channels.linkedin.disconnect')
+                ? route('channels.linkedin.disconnect', $linkedinConnection)
+                : null,
+            'error' => $linkedinConnection?->token_expires_at?->isPast()
+                ? 'LinkedIn authorization expired. Reconnect to resume publishing.'
+                : $linkedinConnection?->last_error,
+        ];
 
         // Match the exact tenant-scoped catalog that customer conversations can use.
         $productCount = $agent->customerProducts()->where('is_active', true)->count();
@@ -78,6 +92,7 @@ class ChannelController extends Controller
             'snippet',
             'metaChannels',
             'metaConnectUrl',
+            'linkedinChannel',
             'productCount',
             'knowledgeSourceCount',
             'failedKnowledgeSources',

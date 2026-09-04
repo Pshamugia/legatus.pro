@@ -22,6 +22,7 @@ class SocialMediaTemplateRenderer
     public const CHARACTER_LIMITS = [
         'facebook' => 6000,
         'instagram' => 2200,
+        'linkedin' => 3000,
     ];
 
     /** @param array{body_template?: mixed, delivery_enabled?: mixed, delivery_text?: mixed} $config */
@@ -29,7 +30,11 @@ class SocialMediaTemplateRenderer
     {
         $body = $this->cleanText((string) ($config['body_template'] ?? ''));
         $errors = [];
-        $rawLimit = $provider === 'instagram' ? 1800 : 5000;
+        $rawLimit = match ($provider) {
+            'instagram' => 1800,
+            'linkedin' => 2800,
+            default => 5000,
+        };
 
         if ($body === '') {
             $errors[$fieldPrefix.'.body_template'] = 'The post template cannot be empty.';

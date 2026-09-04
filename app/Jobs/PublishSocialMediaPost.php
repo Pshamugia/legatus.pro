@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\SocialMediaPost;
 use App\Services\MetaGraphClient;
+use App\Services\LinkedInClient;
 use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaTemplateRenderer;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,6 +21,7 @@ class PublishSocialMediaPost implements ShouldQueue
 
     public function handle(MetaGraphClient $meta, SocialMediaTemplateRenderer $renderer, ?SocialMediaAiCopywriter $copywriter = null): void
     {
+        $linkedin = app(LinkedInClient::class);
         $copywriter ??= app(SocialMediaAiCopywriter::class);
         $post = SocialMediaPost::query()->with(['schedule', 'agent.organization', 'product'])->find($this->postId);
         if (! $post || $post->status !== 'queued' || $post->schedule?->status !== 'active') {
@@ -37,7 +39,7 @@ class PublishSocialMediaPost implements ShouldQueue
             && $product->is_active
             && $product->stock > 0
             && $this->publicHttpUrl($currentUrl)
-            && ($post->provider !== 'instagram' || $this->publicHttpUrl($currentImage));
+            && (! in_array($post->provider, ['instagram', 'linkedin'], true) || $this->publicHttpUrl($currentImage));
         if (! $productIsPublishable) {
             $post->update([
                 'status' => 'skipped',
@@ -120,9 +122,11 @@ class PublishSocialMediaPost implements ShouldQueue
 
         $post->increment('attempts');
         try {
-            $result = $post->provider === 'instagram'
-                ? $meta->publishInstagramPost($connection, $post->caption, (string) $post->image_url)
-                : $meta->publishFacebookPost($connection, $post->caption, $post->product_url, (string) $post->image_url);
+            $result = match ($post->provider) {
+                'instagram' => $meta->publishInstagramPost($connection, $post->caption, (string) $post->image_url),
+                'linkedin' => $linkedin->publish($connection, $post->caption, (string) $post->image_url),
+                default => $meta->publishFacebookPost($connection, $post->caption, $post->product_url, (string) $post->image_url),
+            };
             $post->update([
                 'status' => 'published',
                 'provider_post_id' => (string) ($result['id'] ?? ''),

@@ -9,6 +9,7 @@ use App\Http\Controllers\ChatController;
 use App\Http\Controllers\CommerceConnectionController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\KnowledgeController;
+use App\Http\Controllers\LinkedInConnectionController;
 use App\Http\Controllers\MetaConnectionController;
 use App\Http\Controllers\MetaWebhookController;
 use App\Http\Controllers\PaddleWebhookController;
@@ -149,6 +150,11 @@ Route::middleware('auth')->group(function () {
             ->name('channels.meta.select');
         Route::delete('/app/channels/meta/{connection}', [MetaConnectionController::class, 'disconnect'])
             ->name('channels.meta.disconnect');
+        Route::get('/app/channels/linkedin/connect', [LinkedInConnectionController::class, 'connect'])->name('channels.linkedin.connect');
+        Route::get('/auth/linkedin/callback', [LinkedInConnectionController::class, 'callback'])->name('channels.linkedin.callback');
+        Route::get('/app/channels/linkedin/select/{selection}', [LinkedInConnectionController::class, 'selection'])->name('channels.linkedin.selection');
+        Route::post('/app/channels/linkedin/select/{selection}', [LinkedInConnectionController::class, 'select'])->middleware('throttle:20,1')->name('channels.linkedin.select');
+        Route::delete('/app/channels/linkedin/{connection}', [LinkedInConnectionController::class, 'disconnect'])->name('channels.linkedin.disconnect');
         Route::get('/app/social-media', [SocialMediaController::class, 'index'])->name('social-media.index');
         Route::put('/app/social-media/templates', [SocialMediaTemplateController::class, 'update'])
             ->middleware('throttle:30,1')->name('social-media.templates.update');

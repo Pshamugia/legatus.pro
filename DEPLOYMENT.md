@@ -64,6 +64,12 @@ META_REDIRECT_URI=https://your-domain.example/auth/meta/{provider}/callback
 META_FACEBOOK_SCOPES=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement
 META_INSTAGRAM_SCOPES=pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages
 
+LINKEDIN_CLIENT_ID=use_a_secret_manager
+LINKEDIN_CLIENT_SECRET=use_a_secret_manager
+LINKEDIN_REDIRECT_URI=https://your-domain.example/auth/linkedin/callback
+LINKEDIN_API_VERSION=202606
+LINKEDIN_SCOPES=openid,profile,r_organization_admin,w_organization_social
+
 LEGATUS_REGISTRATION_ENABLED=false
 LEGATUS_PRIVACY_EMAIL=privacy@your-domain.example
 LEGATUS_DEMO_LOGIN_ENABLED=false

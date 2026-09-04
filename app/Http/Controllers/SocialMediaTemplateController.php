@@ -24,11 +24,16 @@ class SocialMediaTemplateController extends Controller
             'templates.instagram.delivery_enabled' => ['nullable', 'boolean'],
             'templates.instagram.delivery_text' => ['nullable', 'string', 'max:600'],
             'templates.instagram.image_style' => ['nullable', Rule::in(SocialMediaTemplateService::IMAGE_STYLES)],
+            'templates.linkedin' => ['sometimes', 'array'],
+            'templates.linkedin.body_template' => ['required_with:templates.linkedin', 'string', 'max:2800'],
+            'templates.linkedin.delivery_enabled' => ['nullable', 'boolean'],
+            'templates.linkedin.delivery_text' => ['nullable', 'string', 'max:600'],
+            'templates.linkedin.image_style' => ['nullable', Rule::in(SocialMediaTemplateService::IMAGE_STYLES)],
         ]);
 
         $templates->save($tenant->agent(), $request->user(), $data['templates']);
 
         return redirect()->route('social-media.index')
-            ->with('social_success', 'Facebook and Instagram post templates were saved for this business.');
+            ->with('social_success', 'Social post templates were saved for this business.');
     }
 }

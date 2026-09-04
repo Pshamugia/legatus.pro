@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 
 class SocialMediaTemplateService
 {
-    public const PROVIDERS = ['facebook', 'instagram'];
+    public const PROVIDERS = ['facebook', 'instagram', 'linkedin'];
 
     public const IMAGE_STYLES = ['original', 'storefront', 'raw', 'framed', 'editorial', 'dark', 'brand'];
 
@@ -49,12 +49,13 @@ class SocialMediaTemplateService
     /** @param array<string, array<string, mixed>> $templates */
     public function save(Agent $agent, User $user, array $templates): void
     {
-        foreach (self::PROVIDERS as $provider) {
-            $this->renderer->validate($provider, $templates[$provider] ?? [], 'templates.'.$provider);
+        $providers = collect(self::PROVIDERS)->filter(fn (string $provider): bool => isset($templates[$provider]))->values();
+        foreach ($providers as $provider) {
+            $this->renderer->validate($provider, $templates[$provider], 'templates.'.$provider);
         }
 
-        DB::transaction(function () use ($agent, $user, $templates): void {
-            foreach (self::PROVIDERS as $provider) {
+        DB::transaction(function () use ($agent, $user, $templates, $providers): void {
+            foreach ($providers as $provider) {
                 $existing = $agent->socialMediaTemplates()->where('provider', $provider)->lockForUpdate()->first();
                 $values = [
                     'body_template' => trim((string) $templates[$provider]['body_template']),
