@@ -34,6 +34,24 @@ class OpenAiOrchestrationTest extends TestCase
         config(['services.openai.key' => 'test-key']);
         Http::fakeSequence()
             ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'delivery-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
             ->push([
                 'id' => 'delivery-final',
                 'output' => [[
@@ -78,6 +96,7 @@ class OpenAiOrchestrationTest extends TestCase
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
                     'is_catalog_follow_up' => false,
                     'recommendation_scope' => 'none',
                     'recommendation_query' => null,
@@ -140,6 +159,7 @@ class OpenAiOrchestrationTest extends TestCase
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
                     'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
                     'is_catalog_follow_up' => false,
                     'recommendation_scope' => 'none',
                     'recommendation_query' => null,
@@ -171,6 +191,66 @@ class OpenAiOrchestrationTest extends TestCase
             'დღეს დილით შევუკვეთე პროდუქტი მითითებულ მისამართზე.',
             json_encode($resolverInput, JSON_UNESCAPED_UNICODE),
         );
+    }
+
+    public function test_existing_order_delivery_status_is_handed_off_instead_of_repeating_general_policy(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery terms',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery terms',
+            'content' => 'Tbilisi delivery takes two business days.',
+            'content_hash' => hash('sha256', 'existing-order-delivery-handoff'),
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'existing-order-customer', 'status' => 'ai', 'channel' => 'facebook',
+        ]);
+        $policy = 'Tbilisi delivery takes two business days.';
+        $conversation->messages()->create(['role' => 'assistant', 'content' => $policy]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'I ordered two days ago. Can you check with the courier whether it will arrive today?',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'existing-order-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'delivery_request_type' => 'existing_order_status',
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond(
+            $agent,
+            $conversation,
+            'I ordered two days ago. Can you check with the courier whether it will arrive today?',
+        );
+
+        $this->assertTrue($reply['handoff']);
+        $this->assertSame('handoff', $reply['intent']);
+        $this->assertNotSame($policy, $reply['text']);
+        $this->assertContains('resolve_delivery_context', $reply['tools_used']);
+        $this->assertNotContains('calculate_delivery', $reply['tools_used']);
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertStringContainsString('order-tracking or courier-contact tool', $conversation->fresh()->handoff_reason);
+        Http::assertSentCount(2);
     }
 
     public function test_recent_product_attributes_are_supplied_for_relational_follow_ups(): void
