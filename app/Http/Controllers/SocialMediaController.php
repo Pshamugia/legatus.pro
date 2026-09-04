@@ -150,6 +150,45 @@ class SocialMediaController extends Controller
         return redirect()->route('social-media.index')->with('social_success', 'Social media schedule created. Posts are ready in the publishing queue.');
     }
 
+    public function update(Request $request, SocialMediaSchedule $schedule, TenantContext $tenant, SocialMediaScheduler $scheduler)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($schedule->agent_id === $tenant->agent()->id, 404);
+        $request->merge(['timing_mode' => $request->input('timing_mode', 'auto')]);
+        $data = $request->validate([
+            'starts_on' => ['required', 'date', 'after_or_equal:today'],
+            'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
+            'timing_mode' => ['required', Rule::in(['auto', 'custom'])],
+            'posting_times' => ['nullable', 'array'],
+            'posting_times.*' => ['required', 'date_format:H:i'],
+        ]);
+        $data['posts_per_day'] = $schedule->posts_per_day;
+        $data['timezone'] = $schedule->timezone;
+
+        if ($data['timing_mode'] === 'custom') {
+            $times = collect($data['posting_times'] ?? [])->map(fn ($time): string => (string) $time);
+            if ($times->count() !== (int) $schedule->posts_per_day) {
+                throw ValidationException::withMessages(['posting_times' => 'Choose one posting time for every daily post.']);
+            }
+            if ($times->unique()->count() !== $times->count()) {
+                throw ValidationException::withMessages(['posting_times' => 'Each daily posting time must be unique.']);
+            }
+            if ($data['starts_on'] === now($schedule->timezone)->toDateString()) {
+                $minimum = now($schedule->timezone)->addMinutes(2)->format('H:i');
+                if ($times->contains(fn (string $time): bool => $time < $minimum)) {
+                    throw ValidationException::withMessages(['posting_times' => 'For a schedule starting today, every posting time must still be in the future.']);
+                }
+            }
+            $data['posting_times'] = $times->sort()->values()->all();
+        } else {
+            $data['posting_times'] = null;
+        }
+
+        $scheduler->updateTiming($schedule, $data);
+
+        return back()->with('social_success', 'Schedule dates and posting times updated. Unpublished posts were rescheduled.');
+    }
+
     public function pause(SocialMediaSchedule $schedule, TenantContext $tenant)
     {
         $tenant->authorize(['owner', 'admin']);

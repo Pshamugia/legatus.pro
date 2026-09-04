@@ -102,6 +102,91 @@ class SocialMediaScheduler
         });
     }
 
+    public function updateTiming(SocialMediaSchedule $schedule, array $data): SocialMediaSchedule
+    {
+        $agent = $schedule->agent()->firstOrFail();
+        $products = $this->eligibleProductVariants(
+            $agent,
+            $schedule->categories ?? [],
+            $schedule->languages ?? [],
+            $schedule->providers,
+        )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
+        $previouslyPosted = $agent->socialMediaPosts()
+            ->where('social_media_schedule_id', '!=', $schedule->id)
+            ->whereIn('provider', $schedule->providers)
+            ->whereIn('status', ['scheduled', 'queued', 'published'])
+            ->whereNotNull('product_id')
+            ->pluck('product_id')
+            ->mapWithKeys(fn ($id): array => [(int) $id => true]);
+        $products = $products
+            ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
+            ->concat($products->filter(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id])))
+            ->values();
+        if ($products->isEmpty()) {
+            throw ValidationException::withMessages([
+                'starts_on' => 'No publishable products remain available for this schedule.',
+            ]);
+        }
+
+        $starts = CarbonImmutable::parse($data['starts_on'], $schedule->timezone)->startOfDay();
+        $ends = CarbonImmutable::parse($data['ends_on'], $schedule->timezone)->startOfDay();
+
+        return DB::transaction(function () use ($schedule, $agent, $data, $products, $starts, $ends): SocialMediaSchedule {
+            $lockedSchedule = SocialMediaSchedule::query()->whereKey($schedule->id)->lockForUpdate()->firstOrFail();
+            if ($lockedSchedule->copy_mode === 'ai') {
+                Agent::query()->whereKey($agent->id)->lockForUpdate()->firstOrFail();
+            }
+
+            // A queued post may already be owned by a worker, while published,
+            // failed, and skipped rows are immutable history. Only genuinely
+            // pending rows are safe to rebuild.
+            $lockedSchedule->posts()->where('status', 'scheduled')->delete();
+            $immutableSlots = $lockedSchedule->posts()->get(['scheduled_for'])
+                ->mapWithKeys(fn ($post): array => [$post->scheduled_for->utc()->format('Y-m-d H:i:s') => true]);
+
+            $lockedSchedule->update([
+                'starts_on' => $data['starts_on'],
+                'ends_on' => $data['ends_on'],
+                'posting_times' => $data['posting_times'] ?? null,
+            ]);
+
+            $productIndex = 0;
+            $nowUtc = CarbonImmutable::now('UTC');
+            for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
+                $remainingAiProducts = $lockedSchedule->copy_mode === 'ai'
+                    ? max(0, self::AI_DAILY_PRODUCT_LIMIT - $this->scheduledAiProductSlotsForDay($agent, $day))
+                    : 0;
+                $slots = isset($data['posting_times'])
+                    ? $this->customDailyTimes($day, $data['posting_times'])
+                    : $this->dailyTimes($day, (int) $lockedSchedule->posts_per_day);
+                foreach ($slots as $slot) {
+                    if ($slot->lte($nowUtc) || isset($immutableSlots[$slot->format('Y-m-d H:i:s')])) {
+                        continue;
+                    }
+                    $variant = $products[$productIndex % $products->count()];
+                    $productIndex++;
+                    $copyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
+                    if ($copyMode === 'ai') {
+                        $remainingAiProducts--;
+                    }
+                    foreach ($lockedSchedule->providers as $provider) {
+                        $lockedSchedule->posts()->create($this->postAttributes(
+                            $agent,
+                            $variant['product'],
+                            $provider,
+                            $slot,
+                            $lockedSchedule->template_snapshots[$provider],
+                            $variant['language'],
+                            $copyMode,
+                        ));
+                    }
+                }
+            }
+
+            return $lockedSchedule->refresh()->loadCount('posts');
+        });
+    }
+
     public function eligibleProducts(Agent $agent, array $categories = [], array $providers = []): Collection
     {
         $wanted = collect($categories)->map(fn ($value) => Str::lower(trim((string) $value)))->filter()->unique();

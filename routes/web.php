@@ -160,6 +160,8 @@ Route::middleware('auth')->group(function () {
             ->middleware('throttle:30,1')->name('social-media.templates.update');
         Route::post('/app/social-media/schedules', [SocialMediaController::class, 'store'])
             ->middleware('throttle:10,1')->name('social-media.store');
+        Route::put('/app/social-media/schedules/{schedule}', [SocialMediaController::class, 'update'])
+            ->middleware('throttle:20,1')->name('social-media.update');
         Route::patch('/app/social-media/schedules/{schedule}/pause', [SocialMediaController::class, 'pause'])
             ->name('social-media.pause');
         Route::delete('/app/social-media/schedules/{schedule}', [SocialMediaController::class, 'destroy'])

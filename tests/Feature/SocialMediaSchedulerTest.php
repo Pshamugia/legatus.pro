@@ -69,6 +69,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Classic frame')
             ->assertSee('AI Copywriter')
             ->assertSee('Original content')
+            ->assertSee('Save schedule')
             ->assertSee('Informative')
             ->assertSee('Luna writes up to 7 product posts per business each day')
             ->assertSee('Catalog design')
@@ -798,8 +799,86 @@ class SocialMediaSchedulerTest extends TestCase
         ]);
 
         $this->actingAs($secondUser)->patch(route('social-media.pause', $schedule))->assertNotFound();
+        $this->actingAs($secondUser)->put(route('social-media.update', $schedule), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'timing_mode' => 'auto',
+        ])->assertNotFound();
         $this->actingAs($secondUser)->delete(route('social-media.destroy', $schedule))->assertNotFound();
         $this->assertDatabaseHas('social_media_schedules', ['id' => $schedule->id, 'agent_id' => $firstAgent->id]);
+    }
+
+    public function test_schedule_dates_and_times_can_be_edited_without_changing_published_history(): void
+    {
+        [$user, $agent] = $this->tenant('editable-schedule');
+        $this->connections($agent);
+        foreach (range(1, 8) as $number) {
+            $agent->products()->create($this->product("Editable Product {$number}", 'General', 10));
+        }
+        $originalDate = CarbonImmutable::now('Asia/Tbilisi')->addDay()->toDateString();
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => $originalDate,
+            'ends_on' => $originalDate,
+            'posts_per_day' => 2,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+            'timing_mode' => 'custom',
+            'posting_times' => ['10:00', '18:00'],
+        ])->assertSessionHasNoErrors();
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $published = $schedule->posts()->orderBy('scheduled_for')->firstOrFail();
+        $originalPublishedFor = $published->scheduled_for->copy();
+        $published->update(['status' => 'published', 'published_at' => now()]);
+        $newDate = CarbonImmutable::now('Asia/Tbilisi')->addDays(3)->toDateString();
+
+        $this->actingAs($user)->put(route('social-media.update', $schedule), [
+            'starts_on' => $newDate,
+            'ends_on' => $newDate,
+            'timing_mode' => 'custom',
+            'posting_times' => ['11:15', '19:45'],
+        ])->assertSessionHasNoErrors();
+
+        $schedule->refresh();
+        $this->assertSame($newDate, $schedule->starts_on->toDateString());
+        $this->assertSame($newDate, $schedule->ends_on->toDateString());
+        $this->assertSame(['11:15', '19:45'], $schedule->posting_times);
+        $this->assertSame('published', $published->fresh()->status);
+        $this->assertTrue($published->fresh()->scheduled_for->equalTo($originalPublishedFor));
+        $this->assertSame(4, $schedule->posts()->where('status', 'scheduled')->count());
+        $this->assertSame(
+            ['11:15', '19:45'],
+            $schedule->posts()->where('status', 'scheduled')->get()->map(
+                fn ($post): string => $post->scheduled_for->timezone('Asia/Tbilisi')->format('H:i'),
+            )->unique()->sort()->values()->all(),
+        );
+        $this->assertTrue($schedule->posts()->where('status', 'scheduled')->get()->groupBy('scheduled_for')->every(
+            fn ($slotPosts): bool => $slotPosts->pluck('product_id')->unique()->count() === 1,
+        ));
+    }
+
+    public function test_schedule_edit_rejects_duplicate_or_incomplete_posting_times(): void
+    {
+        [$user, $agent] = $this->tenant('invalid-edit-times');
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today()->addDay(), 'ends_on' => today()->addDay(), 'posts_per_day' => 2,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'Asia/Tbilisi', 'status' => 'active',
+        ]);
+        $date = now('Asia/Tbilisi')->addDays(2)->toDateString();
+
+        $this->actingAs($user)->put(route('social-media.update', $schedule), [
+            'starts_on' => $date,
+            'ends_on' => $date,
+            'timing_mode' => 'custom',
+            'posting_times' => ['12:00', '12:00'],
+        ])->assertSessionHasErrors('posting_times');
+
+        $this->actingAs($user)->put(route('social-media.update', $schedule), [
+            'starts_on' => $date,
+            'ends_on' => $date,
+            'timing_mode' => 'custom',
+            'posting_times' => ['12:00'],
+        ])->assertSessionHasErrors('posting_times');
     }
 
     public function test_deleting_a_schedule_removes_its_posts_and_releases_ai_capacity(): void
