@@ -307,9 +307,13 @@ class PublicStorefrontCatalog
         usort($phrases, fn (array $left, array $right): int => $right['weight'] <=> $left['weight']);
 
         return collect([$query])
+            ->merge(collect($phrases)->pluck('text'))
+            // Try strong contiguous pieces of the customer's exact wording
+            // before inflection alternatives. Otherwise tokens derived from
+            // those alternatives can exhaust the bounded request budget and
+            // the storefront never receives the exact title portion.
             ->merge($alternatives)
             ->merge($alternativeTokens)
-            ->merge(collect($phrases)->pluck('text'))
             ->merge(collect($tokens)->sortByDesc(fn (string $token): int => mb_strlen($token)))
             ->filter(fn (string $candidate): bool => mb_strlen($candidate) >= 3)
             ->unique()

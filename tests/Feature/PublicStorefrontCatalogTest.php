@@ -168,6 +168,59 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertGreaterThanOrEqual(2, Http::recorded()->count());
     }
 
+    public function test_public_search_tries_the_exact_title_phrase_before_inflection_alternatives_exhaust_the_budget(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $productHtml = <<<'HTML'
+        <div id="search-results">
+          <div class="card book-card">
+            <a class="card-link" href="https://bukinistebi.ge/books/rur/3141"><img src="https://bukinistebi.ge/storage/rur.webp"></a>
+            <h2 class="book-title-strong">R.U.R. - როსუმის უნივერსალური რობოტები</h2>
+            <a class="book-author-link">კარელ ჩაპეკი</a>
+            <p>₾ <span>15.00</span></p>
+            <input class="quantity" name="quantity" type="number" value="120">
+            <button class="toggle-cart-btn" data-product-id="3141">კალათაში</button>
+          </div>
+        </div>
+        HTML;
+        Http::fake(function ($request) use ($productHtml) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+            if (str_contains($request->url(), '/search?title=')) {
+                return Http::response(
+                    ($parameters['title'] ?? null) === 'როსუმის უნივერსალური რობოტები'
+                        ? $productHtml
+                        : '<div id="search-results"></div>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+            if (str_contains($request->url(), '/books/rur/3141')) {
+                return Http::response('<div class="product-price"><strong>15 ₾</strong></div>');
+            }
+            if (str_contains($request->url(), '/search/suggest')) {
+                return Http::response(['items' => [], 'didYouMean' => null]);
+            }
+
+            return Http::response([], 404);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'კარელ ჩაპეკის R.U.R. როსუმის უნივერსალური რობოტები',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame('R.U.R. - როსუმის უნივერსალური რობოტები', data_get($result, 'products.0.name'));
+        $this->assertSame('კარელ ჩაპეკი', data_get($result, 'products.0.author'));
+        Http::assertSent(function ($request): bool {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+
+            return str_contains($request->url(), '/search?title=')
+                && ($parameters['title'] ?? null) === 'როსუმის უნივერსალური რობოტები';
+        });
+    }
+
     public function test_public_search_rejects_unrelated_recommendation_cards_on_an_empty_result_page(): void
     {
         [$agent, $conversation] = $this->context();
