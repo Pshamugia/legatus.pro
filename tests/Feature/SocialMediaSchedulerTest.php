@@ -847,10 +847,13 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertTrue($published->fresh()->scheduled_for->equalTo($originalPublishedFor));
         $this->assertSame(4, $schedule->posts()->where('status', 'scheduled')->count());
         $this->assertSame(
-            ['11:15', '19:45'],
-            $schedule->posts()->where('status', 'scheduled')->get()->map(
-                fn ($post): string => $post->scheduled_for->timezone('Asia/Tbilisi')->format('H:i'),
-            )->unique()->sort()->values()->all(),
+            [
+                CarbonImmutable::parse("{$newDate} 11:15", 'Asia/Tbilisi')->utc()->format('Y-m-d H:i:s'),
+                CarbonImmutable::parse("{$newDate} 19:45", 'Asia/Tbilisi')->utc()->format('Y-m-d H:i:s'),
+            ],
+            $schedule->posts()->where('status', 'scheduled')->orderBy('scheduled_for')->get()
+                ->unique(fn ($post): string => $post->getRawOriginal('scheduled_for'))
+                ->map(fn ($post): string => $post->getRawOriginal('scheduled_for'))->values()->all(),
         );
         $this->assertTrue($schedule->posts()->where('status', 'scheduled')->get()->groupBy('scheduled_for')->every(
             fn ($slotPosts): bool => $slotPosts->pluck('product_id')->unique()->count() === 1,
