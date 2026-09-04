@@ -154,7 +154,13 @@ class ChatController extends Controller
     {
         abort_unless($conversation->agent_id === $tenant->agent()->id, 404);
         $tenant->authorize(['owner', 'admin', 'agent']);
-        $conversation->update(['status' => 'human', 'handoff_reason' => $conversation->handoff_reason ?: 'Manual operator takeover.', 'outcome' => 'human_handoff', 'last_message_at' => now()]);
+        $conversation->update([
+            'status' => 'human',
+            'assigned_to' => auth()->user()->name,
+            'handoff_reason' => $conversation->handoff_reason ?: 'Manual operator takeover.',
+            'outcome' => 'human_handoff',
+            'last_message_at' => now(),
+        ]);
 
         return back();
     }

@@ -117,6 +117,22 @@ class ConversationEngine
         }
 
         $reply = $this->salesAgent->reply($agent, $text, $conversation);
+
+        // The model call happens outside a database lock and can take several
+        // seconds. An operator may open/take over the conversation meanwhile.
+        // Human ownership always wins: discard the completed AI draft before
+        // it is stored or dispatched by any channel.
+        $conversation->refresh();
+        if ($conversation->status === 'human' && ! ($reply['handoff'] ?? false)) {
+            $conversation->update(['last_message_at' => now()]);
+
+            return $this->rememberResponse($customerMessage, $this->humanQueueResponse(
+                $conversation,
+                $customerMessage,
+                $requestId,
+            ));
+        }
+
         $reply['text'] = PrivacyRedactor::text($reply['text']);
         $reply['products'] = $this->publicProducts($reply['products'] ?? [], $conversation);
         if ($reply['products'] !== []) {
@@ -160,6 +176,27 @@ class ConversationEngine
             'request_id' => $requestId,
             'conversation_id' => $conversation->id,
         ]);
+    }
+
+    private function humanQueueResponse(
+        Conversation $conversation,
+        Message $customerMessage,
+        ?string $requestId,
+    ): array {
+        return [
+            'text' => 'შეტყობინება მიღებულია — ოპერატორი უკვე ჩართულია და ამავე საუბარში გიპასუხებთ.',
+            'intent' => 'handoff',
+            'confidence' => 1,
+            'handoff' => true,
+            'escalation_reason' => $conversation->handoff_reason,
+            'products' => [],
+            'sources' => [],
+            'tools_used' => ['human_queue'],
+            'customer_message_id' => $customerMessage->public_id,
+            'cursor' => $customerMessage->id,
+            'request_id' => $requestId,
+            'conversation_id' => $conversation->id,
+        ];
     }
 
     private function replayResponse(Message $customerMessage, string $requestId): ?array

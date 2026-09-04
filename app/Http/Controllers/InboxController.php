@@ -25,6 +25,20 @@ class InboxController extends Controller
         $conversations = $query->get();
         $selected = $request->filled('conversation') ? $conversations->firstWhere('id', (int) $request->conversation) : $conversations->first();
 
+        // Explicitly opening a conversation means the signed-in operator is
+        // present and intends to handle it. Pause AI before rendering so a
+        // concurrent customer message cannot receive an automated reply.
+        if ($request->filled('conversation') && $selected && $selected->status !== 'closed') {
+            $tenant->authorize(['owner', 'admin', 'agent']);
+            $selected->update([
+                'status' => 'human',
+                'assigned_to' => auth()->user()->name,
+                'handoff_reason' => $selected->handoff_reason ?: 'Manual operator takeover.',
+                'outcome' => 'human_handoff',
+                'last_message_at' => now(),
+            ]);
+        }
+
         return view('inbox', compact('agent', 'conversations', 'selected', 'status', 'needsHumanCount'));
     }
 

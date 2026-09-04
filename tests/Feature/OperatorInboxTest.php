@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\User;
+use App\Services\ConversationEngine;
+use App\Services\SalesAgentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -35,6 +37,80 @@ class OperatorInboxTest extends TestCase
         $this->assertArrayNotHasKey('operator', $humanMessage->metadata);
         $this->post("/app/inbox/{$c->id}/release")->assertRedirect();
         $this->assertDatabaseHas('conversations', ['id' => $c->id, 'status' => 'ai', 'assigned_to' => null]);
+    }
+
+    public function test_opening_a_conversation_immediately_pauses_ai_until_release(): void
+    {
+        $c = $this->conversation();
+        $c->update([
+            'status' => 'ai',
+            'assigned_to' => null,
+            'handoff_reason' => null,
+            'outcome' => null,
+        ]);
+
+        $this->get('/app/inbox?conversation='.$c->id)->assertOk();
+
+        $this->assertDatabaseHas('conversations', [
+            'id' => $c->id,
+            'status' => 'human',
+            'assigned_to' => 'Demo Owner',
+            'handoff_reason' => 'Manual operator takeover.',
+        ]);
+
+        $this->post("/app/inbox/{$c->id}/release")->assertRedirect();
+        $this->assertDatabaseHas('conversations', [
+            'id' => $c->id,
+            'status' => 'ai',
+            'assigned_to' => null,
+        ]);
+    }
+
+    public function test_operator_takeover_during_model_call_discards_the_ai_reply(): void
+    {
+        $c = $this->conversation();
+        $c->update([
+            'status' => 'ai',
+            'assigned_to' => null,
+            'handoff_reason' => null,
+            'outcome' => null,
+        ]);
+        $agent = $c->agent;
+
+        $service = \Mockery::mock(SalesAgentService::class);
+        $service->shouldReceive('reply')->once()->andReturnUsing(function ($receivedAgent, $text, $conversation): array {
+            $conversation->update([
+                'status' => 'human',
+                'assigned_to' => 'Demo Owner',
+                'handoff_reason' => 'Manual operator takeover.',
+            ]);
+
+            return [
+                'text' => 'This AI draft must never reach the customer.',
+                'intent' => 'support',
+                'confidence' => 1,
+                'handoff' => false,
+                'products' => [],
+                'sources' => [],
+                'tools_used' => [],
+            ];
+        });
+
+        $result = (new ConversationEngine($service))->handle(
+            $agent,
+            'Can someone check this for me?',
+            $c->channel,
+            $c->visitor_id,
+        );
+
+        $this->assertTrue($result['handoff']);
+        $this->assertSame(['human_queue'], $result['tools_used']);
+        $this->assertSame('human', $c->fresh()->status);
+        $this->assertDatabaseMissing('messages', [
+            'conversation_id' => $c->id,
+            'role' => 'assistant',
+            'content' => 'This AI draft must never reach the customer.',
+        ]);
     }
 
     public function test_operator_can_close_a_conversation(): void
