@@ -221,6 +221,47 @@ class PublicStorefrontCatalogTest extends TestCase
         });
     }
 
+    public function test_public_search_finds_a_compound_title_even_when_the_customer_reverses_its_parts(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $productHtml = <<<'HTML'
+        <div id="search-results"><div class="card book-card">
+          <a class="card-link" href="https://bukinistebi.ge/books/compound/1430"><img src="https://bukinistebi.ge/storage/compound.webp"></a>
+          <h2 class="book-title-strong">ქალი ქვიშაში / ადამიანი ყუთი</h2>
+          <a class="book-author-link">კობო აბე</a><p>₾ <span>60.00</span></p>
+          <input class="quantity" name="quantity" value="1"><button class="toggle-cart-btn">კალათაში</button>
+        </div></div>
+        HTML;
+        Http::fake(function ($request) use ($productHtml) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+            if (str_contains($request->url(), '/search?title=')) {
+                return Http::response(
+                    ($parameters['title'] ?? null) === 'ქალი ქვიშაში'
+                        ? $productHtml
+                        : '<div id="search-results"></div>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+            if (str_contains($request->url(), '/books/compound/1430')) {
+                return Http::response('<div class="product-price"><strong>60 ₾</strong></div>');
+            }
+
+            return Http::response(['items' => [], 'didYouMean' => null]);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'კობო აბეს ადამიანი ყუთი და ქალი ქვიშაში',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame('ქალი ქვიშაში / ადამიანი ყუთი', data_get($result, 'products.0.name'));
+        $this->assertSame('კობო აბე', data_get($result, 'products.0.author'));
+        $this->assertNull($result['did_you_mean']);
+    }
+
     public function test_public_search_rejects_unrelated_recommendation_cards_on_an_empty_result_page(): void
     {
         [$agent, $conversation] = $this->context();

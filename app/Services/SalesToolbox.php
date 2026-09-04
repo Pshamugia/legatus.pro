@@ -1473,9 +1473,9 @@ class SalesToolbox
                         $length = max(mb_strlen($queryToken), mb_strlen($candidateToken));
                         $maximumDistance = min(2, max(1, (int) floor($length * .25)));
                         $candidateCollection = collect($candidateTokens)->values();
-                        $safeMultiTokenMatch = count($candidateTokens) === 1
-                            || ($candidate['kind'] === 'author' && $candidateIndex === count($candidateTokens) - 1)
-                            || $this->alignedSuggestionTokenCount($queryTokens, $candidateCollection) >= 2;
+                        $alignedTokens = $this->alignedSuggestionTokenCount($queryTokens, $candidateCollection);
+                        $safeMultiTokenMatch = $queryTokens->count() === 1
+                            || $alignedTokens >= 2;
                         if ($distance < 1
                             || $distance > $maximumDistance
                             || $distance >= $bestDistance

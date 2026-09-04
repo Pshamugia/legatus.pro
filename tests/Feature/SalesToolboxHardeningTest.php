@@ -384,6 +384,26 @@ class SalesToolboxHardeningTest extends TestCase
         }
     }
 
+    public function test_multi_word_product_lookup_never_suggests_an_unrelated_person_from_one_similar_word(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 2);
+        $product->update([
+            'name' => 'სხვა გამოცემა',
+            'search_text' => 'რეზო ადამია სხვა გამოცემა',
+            'metadata' => ['author' => 'რეზო ადამია'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'კობო აბეს ადამიან ყუთს ვეძებ',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertNull($result['did_you_mean']);
+    }
+
     public function test_product_search_suggests_a_long_georgian_title_with_one_inserted_letter(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

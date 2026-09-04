@@ -8,6 +8,7 @@ use App\Models\Reservation;
 use App\Services\SalesAgentService;
 use App\Services\SalesToolbox;
 use App\Services\OpenAiSalesOrchestrator;
+use App\Services\ConversationEngine;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -250,6 +251,61 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNotContains('calculate_delivery', $reply['tools_used']);
         $this->assertSame('human', $conversation->fresh()->status);
         $this->assertStringContainsString('order-tracking or courier-contact tool', $conversation->fresh()->handoff_reason);
+        Http::assertSentCount(2);
+    }
+
+    public function test_indirect_request_for_someone_else_creates_a_sticky_human_handoff(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://example.com/search',
+        ])]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'human-request-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_human_request' => true,
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []]);
+
+        $handoff = app(ConversationEngine::class)->handle(
+            $agent,
+            'შეიძლება სხვას დაველაპარაკო?',
+            'facebook',
+            'indirect-human-request',
+        );
+
+        $this->assertTrue($handoff['handoff']);
+        $conversation = $agent->conversations()->where('visitor_id', 'indirect-human-request')->firstOrFail();
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame('Customer requested a human operator.', $conversation->handoff_reason);
+
+        $confirmation = app(ConversationEngine::class)->handle(
+            $agent,
+            'დიახ',
+            'facebook',
+            'indirect-human-request',
+        );
+
+        $this->assertTrue($confirmation['handoff']);
+        $this->assertSame(['human_queue'], $confirmation['tools_used']);
+        $this->assertSame('human', $conversation->fresh()->status);
         Http::assertSentCount(2);
     }
 
