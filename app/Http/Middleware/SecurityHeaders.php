@@ -15,10 +15,14 @@ class SecurityHeaders
         $response = $next($request);
         $widget = $request->is('widget/*');
         $billing = $request->routeIs('billing.index');
+        $whatsAppSignup = $request->routeIs('channels.whatsapp.connect');
         $frameAncestors = $widget ? $this->widgetFrameAncestors($request) : "'none'";
         $paddleSources = $billing ? ' https://cdn.paddle.com https://*.paddle.com https://*.paddle.io' : '';
 
-        $response->headers->set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'nonce-{$nonce}'{$paddleSources}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'{$paddleSources}; frame-src 'self'{$paddleSources}; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors {$frameAncestors}");
+        $metaSources = $whatsAppSignup
+            ? ' https://connect.facebook.net https://www.facebook.com https://web.facebook.com'
+            : '';
+        $response->headers->set('Content-Security-Policy', "default-src 'self'; script-src 'self' 'nonce-{$nonce}'{$paddleSources}{$metaSources}; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'{$paddleSources}{$metaSources}; frame-src 'self'{$paddleSources}{$metaSources}; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors {$frameAncestors}");
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');

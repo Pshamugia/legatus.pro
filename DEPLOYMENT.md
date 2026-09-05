@@ -69,6 +69,12 @@ LINKEDIN_CLIENT_SECRET=use_a_secret_manager
 LINKEDIN_REDIRECT_URI=https://your-domain.example/auth/linkedin/callback
 LINKEDIN_API_VERSION=202606
 LINKEDIN_SCOPES=openid,profile,r_organization_admin,w_organization_social
+WHATSAPP_APP_ID=use_a_secret_manager
+WHATSAPP_APP_SECRET=use_a_secret_manager
+WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID=from_meta_whatsapp_embedded_signup
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=use_a_long_random_secret
+WHATSAPP_REDIRECT_URI=https://your-domain.example/app/channels/whatsapp/connect
+WHATSAPP_GRAPH_VERSION=v25.0
 
 LEGATUS_REGISTRATION_ENABLED=false
 LEGATUS_PRIVACY_EMAIL=privacy@your-domain.example

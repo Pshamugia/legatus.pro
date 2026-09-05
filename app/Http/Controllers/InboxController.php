@@ -64,7 +64,7 @@ class InboxController extends Controller
         $conversation->update(['status' => 'human', 'assigned_to' => auth()->user()->name, 'last_message_at' => now()]);
         $delivery = $dispatcher->dispatch($message)?->fresh();
 
-        if (in_array($conversation->channel, ['facebook', 'instagram'], true)) {
+        if (in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)) {
             if (! $delivery) {
                 return back()->with('error', 'Reply was saved, but the Meta channel is not connected. Reconnect it before replying again.');
             }

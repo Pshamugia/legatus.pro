@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\SendMetaMessage;
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\ChannelMessage;
 use App\Models\Conversation;
 use App\Models\Message;
@@ -18,7 +19,7 @@ class ChannelMessageDispatcher
         }
 
         $conversation = $message->conversation()->with('channelConnection')->first();
-        if (! $conversation instanceof Conversation || ! in_array($conversation->channel, ['facebook', 'instagram'], true)) {
+        if (! $conversation instanceof Conversation || ! in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)) {
             return null;
         }
 
@@ -46,7 +47,8 @@ class ChannelMessageDispatcher
 
         if (in_array($delivery->status, ['queued', 'retrying'], true)) {
             try {
-                SendMetaMessage::dispatch($delivery->id)->onQueue('channels')->afterCommit();
+                $job = $connection->provider === 'whatsapp' ? SendWhatsAppMessage::class : SendMetaMessage::class;
+                $job::dispatch($delivery->id)->onQueue('channels')->afterCommit();
             } catch (\Throwable) {
                 // The durable outbox row is authoritative; the scheduled
                 // sweeper will retry inserting the queue job.
@@ -93,7 +95,11 @@ class ChannelMessageDispatcher
     {
         // Instagram's text field must be fewer than 1000 Unicode characters;
         // Messenger allows 2000. Both branches preserve whole product links.
-        $maxCharacters = $provider === 'instagram' ? 999 : 2000;
+        $maxCharacters = match ($provider) {
+            'instagram' => 999,
+            'whatsapp' => 4096,
+            default => 2000,
+        };
         $content = trim($content);
         $selectedLinks = [];
 

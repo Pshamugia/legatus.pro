@@ -20,7 +20,7 @@ class ChannelController extends Controller
         $agent = $tenant->agent();
         $snippet = '<script src="'.route('widget.script', $agent).'" async></script>';
         $connections = method_exists($agent, 'channelConnections')
-            ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram', 'linkedin'])->get()
+            ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram', 'linkedin', 'whatsapp'])->get()
             : collect();
 
         $metaChannels = collect([
@@ -61,6 +61,18 @@ class ChannelController extends Controller
                 ? 'LinkedIn authorization expired. Reconnect to resume publishing.'
                 : $linkedinConnection?->last_error,
         ];
+        $whatsappConnection = $connections->firstWhere('provider', 'whatsapp');
+        $whatsappChannel = [
+            'connection' => $whatsappConnection,
+            'connected' => $whatsappConnection?->isActive() ?? false,
+            'account_name' => $whatsappConnection?->external_account_name,
+            'phone_number' => data_get($whatsappConnection?->metadata, 'display_phone_number'),
+            'connect_url' => Route::has('channels.whatsapp.connect') ? route('channels.whatsapp.connect') : null,
+            'disconnect_url' => $whatsappConnection && Route::has('channels.whatsapp.disconnect')
+                ? route('channels.whatsapp.disconnect', $whatsappConnection) : null,
+            'error' => $whatsappConnection?->token_expires_at?->isPast()
+                ? 'WhatsApp authorization expired. Reconnect to restore replies.' : $whatsappConnection?->last_error,
+        ];
 
         // Match the exact tenant-scoped catalog that customer conversations can use.
         $productCount = $agent->customerProducts()->where('is_active', true)->count();
@@ -93,6 +105,7 @@ class ChannelController extends Controller
             'metaChannels',
             'metaConnectUrl',
             'linkedinChannel',
+            'whatsappChannel',
             'productCount',
             'knowledgeSourceCount',
             'failedKnowledgeSources',

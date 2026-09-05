@@ -118,6 +118,27 @@
         </div>
         <p class="meta-security">Authorization happens on LinkedIn's official page. Legatus never sees your LinkedIn password.</p>
     </article>
+
+    <article class="channel-block" id="whatsapp-channel">
+        <div class="channel-block__head">
+            <div><span class="channel-number">5</span><div><h3>WhatsApp Business</h3><p>Let customers message your business number and receive grounded Legatus replies.</p></div></div>
+            <span @class(['channel-status', 'is-connected' => $whatsappChannel['connected']])>{{ $whatsappChannel['connected'] ? '✓ Connected' : 'Not connected' }}</span>
+        </div>
+        <div class="meta-channel-grid" style="grid-template-columns:1fr">
+            <div class="meta-channel-card" data-channel="whatsapp" data-status="{{ $whatsappChannel['connected'] ? 'connected' : 'disconnected' }}">
+                <div class="meta-channel-card__title"><span style="background:#e8f8ed;color:#128c4a">W</span><div><b>WhatsApp</b><small>{{ $whatsappChannel['connected'] ? 'Ready for customer conversations' : 'Business number connection required' }}</small></div></div>
+                <p>Incoming chats use the same Knowledge, safety rules, human handoff and Legatus Inbox as your other customer channels.</p>
+                @if($whatsappChannel['connected'])
+                    <div class="connected-account"><small>Connected business number</small><b>{{ $whatsappChannel['phone_number'] ?: $whatsappChannel['account_name'] }}</b></div>
+                    <div class="channel-actions"><a class="btn ghost" href="{{ route('inbox.index') }}">Open Inbox</a>@if($canManageChannels && $whatsappChannel['disconnect_url'])<form action="{{ $whatsappChannel['disconnect_url'] }}" method="POST">@csrf @method('DELETE')<button class="link-button" type="submit">Disconnect</button></form>@endif</div>
+                @else
+                    @if($whatsappChannel['error'])<p class="channel-error">{{ $whatsappChannel['error'] }}</p>@endif
+                    @if($canManageChannels && $whatsappChannel['connect_url'])<a class="btn" href="{{ $whatsappChannel['connect_url'] }}">Connect WhatsApp</a>@endif
+                @endif
+            </div>
+        </div>
+        <p class="meta-security">WhatsApp Status/Stories publishing is not shown because Meta does not provide a supported public Cloud API for it.</p>
+    </article>
 </section>
 
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">

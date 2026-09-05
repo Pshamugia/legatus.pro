@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Jobs\ProcessMetaInboundMessage;
 use App\Jobs\SendMetaMessage;
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\ChannelMessage;
 use App\Models\MetaOAuthSelection;
 use App\Support\ChannelOutboxSweepResult;
@@ -54,7 +55,8 @@ class ChannelOutboxService
                 })
                 ->orderBy('id')
                 ->limit($batch)
-                ->get(['id', 'direction']);
+                ->with('connection:id,provider')
+                ->get(['id', 'channel_connection_id', 'direction']);
 
             $dispatched = 0;
             $failedMessageIds = [];
@@ -63,7 +65,10 @@ class ChannelOutboxService
                     if ($message->direction === 'inbound') {
                         ProcessMetaInboundMessage::dispatch($message->id)->onQueue('channels');
                     } else {
-                        SendMetaMessage::dispatch($message->id)->onQueue('channels');
+                        $job = $message->connection?->provider === 'whatsapp'
+                            ? SendWhatsAppMessage::class
+                            : SendMetaMessage::class;
+                        $job::dispatch($message->id)->onQueue('channels');
                     }
                     $message->touch();
                     $dispatched++;

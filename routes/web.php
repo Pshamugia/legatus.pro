@@ -19,6 +19,8 @@ use App\Http\Controllers\SocialMediaImageController;
 use App\Http\Controllers\SocialMediaTemplateController;
 use App\Http\Controllers\SuperAdminController;
 use App\Http\Controllers\WidgetController;
+use App\Http\Controllers\WhatsAppConnectionController;
+use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\WorkspaceController;
 use App\Http\Middleware\RequireSuperAdmin;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -48,6 +50,10 @@ Route::withoutMiddleware([
     Route::post('/webhooks/meta', [MetaWebhookController::class, 'receive'])
         ->middleware('throttle:600,1')
         ->name('webhooks.meta.receive');
+    Route::get('/webhooks/whatsapp', [WhatsAppWebhookController::class, 'verify'])
+        ->middleware('throttle:120,1')->name('webhooks.whatsapp.verify');
+    Route::post('/webhooks/whatsapp', [WhatsAppWebhookController::class, 'receive'])
+        ->middleware('throttle:600,1')->name('webhooks.whatsapp.receive');
     Route::post('/webhooks/paddle', PaddleWebhookController::class)
         ->middleware('throttle:600,1')
         ->name('webhooks.paddle');
@@ -155,6 +161,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/app/channels/linkedin/select/{selection}', [LinkedInConnectionController::class, 'selection'])->name('channels.linkedin.selection');
         Route::post('/app/channels/linkedin/select/{selection}', [LinkedInConnectionController::class, 'select'])->middleware('throttle:20,1')->name('channels.linkedin.select');
         Route::delete('/app/channels/linkedin/{connection}', [LinkedInConnectionController::class, 'disconnect'])->name('channels.linkedin.disconnect');
+        Route::get('/app/channels/whatsapp/connect', [WhatsAppConnectionController::class, 'connect'])->name('channels.whatsapp.connect');
+        Route::post('/app/channels/whatsapp/connect', [WhatsAppConnectionController::class, 'store'])->middleware('throttle:10,1')->name('channels.whatsapp.store');
+        Route::delete('/app/channels/whatsapp/{connection}', [WhatsAppConnectionController::class, 'disconnect'])->name('channels.whatsapp.disconnect');
         Route::get('/app/social-media', [SocialMediaController::class, 'index'])->name('social-media.index');
         Route::put('/app/social-media/templates', [SocialMediaTemplateController::class, 'update'])
             ->middleware('throttle:30,1')->name('social-media.templates.update');
