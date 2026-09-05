@@ -551,6 +551,71 @@ class HybridModelRoutingTest extends TestCase
         $this->assertSame('gpt-5.6-luna', $models[array_key_last($models)]);
     }
 
+    public function test_custom_business_knowledge_is_retrieved_before_the_model_chooses_tools(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'custom-business-knowledge-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'That item is unavailable. Do you want another option?',
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text',
+            'source_scope' => 'business',
+            'name' => 'Special requests',
+            'status' => 'ready',
+            'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'policy',
+            'title' => 'Special requests',
+            'content' => 'Customers can request products not currently available at https://shop.example/special-request',
+            'content_hash' => hash('sha256', 'special-request-policy'),
+            'embedding' => [1.0, 0.0],
+        ]);
+        $this->enableHybridCanary();
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/embeddings')) {
+                return Http::response(['data' => [['index' => 0, 'embedding' => [1.0, 0.0]]]]);
+            }
+
+            return Http::response($this->strictResponse(
+                'business-knowledge-answer',
+                'Yes. Submit the request at https://shop.example/special-request',
+                [],
+                [],
+                [[
+                    'type' => 'policy',
+                    'product_id' => null,
+                    'amount' => null,
+                    'quantity' => null,
+                    'reference' => 'Special requests',
+                ]],
+            ));
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Can I request that unavailable product instead?',
+            $conversation,
+        );
+
+        $this->assertStringContainsString('https://shop.example/special-request', $reply['text']);
+        $this->assertContains('search_knowledge', $reply['tools_used']);
+        $this->assertTrue($this->responseRequests()->contains(
+            fn ($request): bool => str_contains(json_encode($request->data()), 'shop.example\\/special-request'),
+        ));
+    }
+
     private function enableHybridCanary(): void
     {
         config([

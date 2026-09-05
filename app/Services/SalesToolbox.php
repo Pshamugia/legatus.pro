@@ -407,15 +407,26 @@ class SalesToolbox
             return ['ok' => false, 'error' => 'A specific knowledge question is required.'];
         }
 
-        $targetScope = preg_match('/(?:მიწოდ|კურიერ|delivery|shipping|courier)/iu', $queryText) === 1
+        $requestedScope = in_array(($a['_source_scope'] ?? null), ['business', 'delivery', 'terms'], true)
+            ? (string) $a['_source_scope']
+            : null;
+        $targetScope = $requestedScope ?? (preg_match('/(?:მიწოდ|კურიერ|delivery|shipping|courier)/iu', $queryText) === 1
             ? 'delivery'
-            : (preg_match('/(?:წეს|პირობ|დაბრუნ|refund|return|გადახდ|payment|privacy|კონფიდენციალ|terms|warranty|გარანტ)/iu', $queryText) === 1 ? 'terms' : null);
+            : (preg_match('/(?:წეს|პირობ|დაბრუნ|refund|return|გადახდ|payment|privacy|კონფიდენციალ|terms|warranty|გარანტ)/iu', $queryText) === 1 ? 'terms' : null));
         $targetSourceIds = $targetScope
-            ? $agent->knowledgeSources()->whereIn('source_scope', [$targetScope, 'business'])->pluck('id')
+            ? $agent->knowledgeSources()
+                ->where('status', 'ready')
+                ->whereIn('source_scope', $requestedScope ? [$targetScope] : [$targetScope, 'business'])
+                ->pluck('id')
             : collect();
 
         try {
-            $semantic = $targetSourceIds->isEmpty() ? $this->embeddings->semanticSearch($agent, $queryText) : null;
+            $semantic = $this->embeddings->semanticSearch(
+                $agent,
+                $queryText,
+                5,
+                $targetScope ? $targetSourceIds->all() : null,
+            );
             if ($semantic) {
                 return ['ok' => true, 'method' => 'semantic', 'results' => $semantic];
             }

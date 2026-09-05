@@ -54,7 +54,7 @@ class EmbeddingService
         return $chunks->count();
     }
 
-    public function semanticSearch(Agent $agent, string $query, int $limit = 5): array
+    public function semanticSearch(Agent $agent, string $query, int $limit = 5, ?array $sourceIds = null): array
     {
         if (! config('services.openai.key')) {
             return [];
@@ -67,7 +67,12 @@ class EmbeddingService
 
         $candidateLimit = max(50, min(5000, (int) config('legatus.semantic_candidate_limit', 2000)));
 
-        return KnowledgeChunk::where('agent_id', $agent->id)
+        $candidates = KnowledgeChunk::where('agent_id', $agent->id);
+        if ($sourceIds !== null) {
+            $candidates->whereIn('knowledge_source_id', $sourceIds);
+        }
+
+        return $candidates
             ->whereNotNull('embedding')
             ->latest('id')
             ->limit($candidateLimit)
