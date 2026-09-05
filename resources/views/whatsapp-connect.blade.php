@@ -2,7 +2,7 @@
 
 @section('title', 'Connect WhatsApp · Legatus')
 
-@section('content')
+@section('body')
 <main class="container" style="max-width:760px;padding-top:48px;padding-bottom:70px">
     <section class="panel">
         <span class="eyebrow">WhatsApp Business</span>

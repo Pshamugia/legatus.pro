@@ -120,6 +120,19 @@ class WhatsAppTransportTest extends TestCase
             ->assertSeeText('Meta does not provide a supported public Cloud API for it.');
     }
 
+    public function test_embedded_signup_page_renders_its_visible_content(): void
+    {
+        [$user] = $this->tenant();
+        config()->set('whatsapp.app_id', 'app-id');
+        config()->set('whatsapp.configuration_id', 'config-id');
+
+        $this->actingAs($user)->get(route('channels.whatsapp.connect'))
+            ->assertOk()
+            ->assertSeeText('Connect your business number')
+            ->assertSeeText('Continue with Meta')
+            ->assertSee('config-id', false);
+    }
+
     public function test_embedded_signup_persists_encrypted_tenant_connection_and_subscribes_waba(): void
     {
         [$user, $agent] = $this->tenant();
