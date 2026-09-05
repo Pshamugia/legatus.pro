@@ -134,6 +134,27 @@ class WorkspaceNavigationUiTest extends TestCase
         $this->assertSame('Mobile Operator', $conversation->assigned_to);
     }
 
+    public function test_settings_and_social_media_render_mobile_safe_workspaces(): void
+    {
+        $user = User::factory()->create(['name' => 'Mobile Owner']);
+        $organization = $this->workspace($user, 'Mobile Workspace');
+        $this->actingAs($user)->withSession([TenantContext::SESSION_KEY => $organization->id]);
+
+        $this->get(route('settings.index'))
+            ->assertOk()
+            ->assertSee('settings-main', false)
+            ->assertSee('settings-layout', false)
+            ->assertSee('@media(max-width:680px)', false)
+            ->assertSee('.settings-team .conversation{align-items:flex-start;flex-wrap:wrap}', false);
+
+        $this->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('Social media scheduler')
+            ->assertSee('@media(max-width:650px)', false)
+            ->assertSee('.schedule-editor form{position:static;width:100%;max-width:100%', false)
+            ->assertSee('@media(max-width:380px)', false);
+    }
+
     private function workspace(User $user, string $name): Organization
     {
         $organization = Organization::create([

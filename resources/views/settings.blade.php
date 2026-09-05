@@ -22,14 +22,14 @@
 @endphp
 <div class="dash-shell">
     @include('partials.workspace-navigation', ['active' => 'settings'])
-    <main class="main">
+    <main class="main settings-main">
         <div class="topline">
             <div><span class="eyebrow">{{ $organization->name }} · {{ ucfirst($role) }}</span><h1>Workspace settings</h1></div>
         </div>
         @if(session('success'))<div class="panel" style="margin:18px 0;color:#267244">✓ {{ session('success') }}</div>@endif
         @if($errors->any())<div class="panel" style="margin:18px 0;color:#a33">{{ $errors->first() }}</div>@endif
-        <div class="content-grid" style="margin-top:22px">
-            <form class="panel" method="post" action="{{ route('settings.update') }}">
+        <div class="content-grid settings-layout" style="margin-top:22px">
+            <form class="panel settings-form" method="post" action="{{ route('settings.update') }}">
                 @csrf @method('PUT')
                 <h3>Business & AI identity</h3>
                 <p style="color:var(--muted);font-size:13px;line-height:1.55">Keep the business brand separate from the AI employee’s personal display name.</p>
@@ -120,7 +120,7 @@
                 @endif
             </form>
 
-            <section class="panel">
+            <section class="panel settings-team">
                 <h3>Team & permissions</h3>
                 @foreach($members as $member)
                     <div class="conversation">
@@ -182,7 +182,28 @@
     .theme-preview-frame button{float:right;margin:0 8px 8px;border:0;border-radius:8px;padding:6px 9px;background:var(--preview-accent);color:var(--preview-accent-foreground);font-size:9px;font-weight:700}
     .theme-status{display:block;min-height:18px;margin-top:7px;color:var(--muted);font-size:10px}
     .theme-status[data-state="error"]{color:#a33}
-    @media(max-width:680px){.theme-picker,.theme-custom-grid{grid-template-columns:1fr}.theme-preview{grid-template-columns:1fr}.theme-preview-launcher{justify-self:end}}
+    .settings-main,.settings-layout,.settings-form,.settings-team{min-width:0}
+    .settings-form input,.settings-form textarea,.settings-form select{max-width:100%;min-width:0}
+    .settings-team .conversation{min-width:0;align-items:center}
+    .settings-team .conversation .copy{min-width:0}
+    @media(max-width:850px){.settings-layout{grid-template-columns:minmax(0,1fr)!important}}
+    @media(max-width:680px){
+        .settings-main{overflow:hidden}
+        .settings-main .topline h1{font-size:24px}
+        .settings-layout{gap:14px}
+        .settings-form,.settings-team{padding:17px}
+        .theme-picker,.theme-custom-grid,.theme-preview{grid-template-columns:minmax(0,1fr)}
+        .theme-preview{padding:12px}
+        .theme-preview-launcher{justify-self:end;max-width:100%}
+        .theme-color-control{min-width:0}
+        .theme-color-control input[type="color"]{flex-basis:46px;width:46px}
+        .settings-team .conversation{align-items:flex-start;flex-wrap:wrap}
+        .settings-team .conversation .copy{flex:1 1 calc(100% - 50px)}
+        .settings-team .conversation .copy p{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+        .settings-team .conversation .pill{margin-left:49px}
+        .settings-team .conversation form{margin-left:auto}
+        .settings-form>.btn,.settings-team form>.btn{width:100%}
+    }
 </style>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 {

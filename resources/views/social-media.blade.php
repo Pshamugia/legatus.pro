@@ -261,7 +261,35 @@
 .ai-tone-picker{margin-top:14px;padding:15px;border:1px solid var(--line);border-radius:13px;background:#f8faf7}.ai-tone-picker[hidden]{display:none!important}.ai-tone-picker>strong{display:block;margin-bottom:10px;font-size:12px}.ai-tone-picker .choice-grid{grid-template-columns:repeat(3,1fr)}
 .image-style-picker{margin:0 0 20px;padding:0;border:0}.image-style-picker legend{font-size:13px;font-weight:800}.image-style-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin-top:11px}.image-style-option{cursor:pointer}.image-style-option input{position:absolute;opacity:0;pointer-events:none}.image-style-option strong{display:block;margin-top:5px;font-size:9px;text-align:center}.style-swatch{display:grid;place-items:center;aspect-ratio:1;border:2px solid transparent;border-radius:10px;background:#edf2ec;overflow:hidden}.style-swatch i{display:block;width:55%;height:70%;background:#fff;border:1px solid #ccd4ce}.style-swatch img{width:100%;height:100%;object-fit:cover}.image-style-option input:checked+.style-swatch{border-color:var(--green);box-shadow:0 0 0 3px rgba(30,91,69,.12)}.style-swatch.raw img{object-fit:cover}.style-swatch.raw i{width:72%;height:82%;background:#ddd}.style-swatch.framed{padding:11%;background:#f6f2e8;box-sizing:border-box}.style-swatch.framed img{object-fit:contain;background:#fff;box-shadow:0 0 0 4px #fff,0 0 0 6px #1f4a3c}.style-swatch.framed i{box-shadow:0 0 0 7px #fff,0 0 0 9px #1f4a3c}.style-swatch.editorial{padding:10%;background:#eef1eb;box-sizing:border-box}.style-swatch.editorial img{object-fit:contain;background:#fff;box-shadow:7px 7px 0 #beff49}.style-swatch.editorial i{box-shadow:8px 8px 0 #beff49}.style-swatch.dark{padding:11%;background:#131d1a;box-sizing:border-box}.style-swatch.dark img{object-fit:contain;background:#fff;box-shadow:0 0 0 5px #222f2a,0 0 0 7px #beff49}.style-swatch.dark i{box-shadow:0 0 0 6px #222f2a}.style-swatch.brand{padding:11%;background:#def5e5;box-sizing:border-box}.style-swatch.brand img{object-fit:contain;background:#fff;box-shadow:0 0 0 5px #fff,0 0 0 7px #185d46}.style-swatch.brand i{box-shadow:0 0 0 7px #185d46}.preview-image:not(.image-style-original):not(.image-style-raw){padding:8%;box-sizing:border-box}.preview-image:not(.image-style-original):not(.image-style-raw) img{object-fit:contain;background:#fff}.preview-image.image-style-framed{background:#f6f2e8}.preview-image.image-style-framed img{box-shadow:0 0 0 12px #fff,0 0 0 15px #1f4a3c}.preview-image.image-style-editorial{background:#eef1eb}.preview-image.image-style-editorial img{box-shadow:16px 16px 0 #beff49}.preview-image.image-style-dark{background:#131d1a}.preview-image.image-style-dark img{box-shadow:0 0 0 12px #222f2a,0 0 0 15px #beff49}.preview-image.image-style-brand{background:#def5e5}.preview-image.image-style-brand img{box-shadow:0 0 0 12px #fff,0 0 0 15px #185d46}
 @media(max-width:1100px){.template-workspace,.social-layout{grid-template-columns:1fr}.template-preview,.connection-panel{position:static}.template-preview{max-width:520px}}
-@media(max-width:650px){.template-panel,.schedule-form{padding:19px}.template-actions-row,.template-save-row{align-items:stretch;flex-direction:column}.platform-tabs{overflow-x:auto}.copy-template,.template-save-row .btn{width:100%}.form-grid.two,.choice-grid,.timing-mode-grid,.ai-tone-picker .choice-grid{grid-template-columns:1fr}.image-style-grid{grid-template-columns:repeat(3,1fr)}.schedule-row{align-items:flex-start;flex-wrap:wrap}.section-heading{align-items:flex-start}.status-pill{white-space:nowrap}}
+@media(max-width:650px){
+    .social-main{width:100%;min-width:0;overflow:hidden}
+    .social-main .topline h1{font-size:24px}
+    .template-panel,.schedule-form,.connection-panel,.schedule-list{min-width:0;padding:17px}
+    .template-actions-row,.template-save-row{align-items:stretch;flex-direction:column}
+    .platform-tabs{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:thin}
+    .platform-tab{flex:0 0 auto;padding-inline:11px}
+    .copy-template,.template-save-row .btn{width:100%}
+    .template-workspace,.template-editor,.template-preview,.social-layout{width:100%;min-width:0}
+    .template-preview{max-width:100%}
+    .form-grid.two,.choice-grid,.timing-mode-grid,.ai-tone-picker .choice-grid{grid-template-columns:minmax(0,1fr)}
+    .image-style-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .switch-row{align-items:flex-start}
+    .switch-row input{flex:0 0 44px}
+    .section-heading,.section-heading>div{align-items:flex-start}
+    .section-heading{flex-direction:column}
+    .section-heading>div>div{min-width:0}
+    .status-pill{white-space:normal}
+    .schedule-row,.upcoming-row{align-items:flex-start;flex-wrap:wrap}
+    .schedule-row>div:first-child,.upcoming-row>div{flex-basis:calc(100% - 70px)}
+    .schedule-row form{width:100%}
+    .schedule-row form .text-button{width:100%;padding:9px;text-align:left}
+    .schedule-editor{width:100%}
+    .schedule-editor form{position:static;width:100%;max-width:100%;margin-top:9px;box-shadow:none}
+    .edit-timing-options{align-items:flex-start;flex-direction:column}
+    .posting-times,.edit-posting-times{grid-template-columns:minmax(0,1fr)}
+    .prepared-caption{overflow-wrap:anywhere}
+}
+@media(max-width:380px){.image-style-grid{grid-template-columns:minmax(0,1fr)}.template-panel,.schedule-form,.connection-panel,.schedule-list{padding:14px}}
 </style>
 
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
