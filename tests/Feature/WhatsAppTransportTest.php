@@ -28,6 +28,17 @@ class WhatsAppTransportTest extends TestCase
         config()->set('whatsapp.graph_version', 'v25.0');
     }
 
+    public function test_webhook_verification_accepts_meta_query_parameters_after_php_normalization(): void
+    {
+        $this->get('/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=123')
+            ->assertForbidden();
+
+        $this->get('/webhooks/whatsapp?hub.mode=subscribe&hub.verify_token=verify-whatsapp&hub.challenge=123')
+            ->assertOk()
+            ->assertSeeText('123')
+            ->assertHeaderMissing('Set-Cookie');
+    }
+
     public function test_signed_text_webhook_is_tenant_scoped_queued_and_deduplicated(): void
     {
         Queue::fake();

@@ -16,15 +16,18 @@ class WhatsAppWebhookController extends Controller
     {
         $token = (string) config('whatsapp.verify_token');
         abort_if($token === '', 503, 'WhatsApp webhook verification is not configured.');
+
+        $mode = (string) ($request->query('hub.mode') ?? $request->query('hub_mode', ''));
+        $providedToken = (string) ($request->query('hub.verify_token') ?? $request->query('hub_verify_token', ''));
+        $challenge = (string) ($request->query('hub.challenge') ?? $request->query('hub_challenge', ''));
         abort_unless(
-            $request->query('hub.mode') === 'subscribe'
-            && is_string($request->query('hub.verify_token'))
-            && hash_equals($token, (string) $request->query('hub.verify_token'))
-            && filled($request->query('hub.challenge')),
+            $mode === 'subscribe'
+            && $challenge !== ''
+            && hash_equals($token, $providedToken),
             403,
         );
 
-        return response((string) $request->query('hub.challenge'), 200)->header('Content-Type', 'text/plain');
+        return response($challenge, 200)->header('Content-Type', 'text/plain');
     }
 
     public function receive(Request $request): Response
