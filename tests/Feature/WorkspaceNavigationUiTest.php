@@ -101,6 +101,39 @@ class WorkspaceNavigationUiTest extends TestCase
             ->assertDontSee('data-workspace-switcher="Outdated imported brand"', false);
     }
 
+    public function test_mobile_inbox_exposes_a_list_then_a_full_operator_workspace(): void
+    {
+        $user = User::factory()->create(['name' => 'Mobile Operator']);
+        $organization = $this->workspace($user, 'Mobile Store');
+        $agent = $organization->agents()->firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'mobile-customer',
+            'customer_name' => 'Mobile Customer',
+            'status' => 'ai',
+            'channel' => 'web',
+            'last_message_at' => now(),
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'I need help on mobile.']);
+
+        $this->actingAs($user)->withSession([TenantContext::SESSION_KEY => $organization->id])
+            ->get(route('inbox.index'))
+            ->assertOk()
+            ->assertSee('class="inbox-layout"', false)
+            ->assertSee('class="inbox-list"', false)
+            ->assertSee('Mobile Customer');
+
+        $this->get(route('inbox.index', ['conversation' => $conversation->id]))
+            ->assertOk()
+            ->assertSee('class="inbox-layout has-mobile-selection"', false)
+            ->assertSee('class="inbox-mobile-back"', false)
+            ->assertSee('id="operator-reply"', false)
+            ->assertSee('Reply as a human operator...');
+
+        $conversation->refresh();
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame('Mobile Operator', $conversation->assigned_to);
+    }
+
     private function workspace(User $user, string $name): Organization
     {
         $organization = Organization::create([
