@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Legatus — AI Shopping Assistant, Social Media Manager & Copywriter')
-@section('description', 'Legatus combines an AI shopping assistant, automated Facebook and Instagram publishing, and an AI copywriter in one platform.')
+@section('description', 'Legatus combines an AI shopping assistant, customer conversations across web and social channels, automated publishing, and an AI copywriter in one platform.')
 
 @section('body')
 @php
@@ -41,7 +41,7 @@
         <section>
             <span class="tag"><span class="dot"></span> AI team for sales, content &amp; social media</span>
             <h1>Sell more. Post smarter. <em>Write faster.</em></h1>
-            <p>Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter — all in one platform. It helps customers choose the right products, creates content in three distinct styles, and automatically publishes posts to Facebook and Instagram.</p>
+            <p>Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter — all in one platform. It supports customer conversations on your website, Facebook, Instagram, and WhatsApp, creates content in three distinct styles, and automatically publishes social posts.</p>
             <div class="actions">
                 <a class="btn lime" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
                 <a class="btn ghost" href="#how-it-works">See how it works ↓</a>
@@ -104,8 +104,23 @@
 
     <section class="metrics capability-metrics" aria-label="Legatus capabilities">
         <div class="metric"><b>AI Shopping Assistant</b><span>Answers questions, recommends verified products, and helps customers choose 24/7.</span></div>
-        <div class="metric"><b>Social Media Manager</b><span>Plans and automatically publishes product posts to Facebook and Instagram.</span></div>
+        <div class="metric"><b>Social Media Manager</b><span>Handles customer conversations across connected channels and publishes product posts to Facebook and Instagram.</span></div>
         <div class="metric"><b>AI Copywriter</b><span>Creates Simple, Creative, and Informative copy for every scheduled product.</span></div>
+    </section>
+
+    <section class="channel-section" aria-labelledby="channel-section-title">
+        <div class="channel-section-copy">
+            <span class="eyebrow">Connected customer journey</span>
+            <h2 id="channel-section-title">One assistant across every customer channel.</h2>
+            <p>Legatus keeps the same verified business knowledge, conversation context, and human handoff workflow wherever customers reach you.</p>
+        </div>
+        <div class="channel-grid">
+            <article class="channel-card"><span class="channel-mark">W</span><div><h3>Website</h3><p>Shopping guidance and verified answers, available 24/7.</p></div><span class="channel-status is-live">Available</span></article>
+            <article class="channel-card"><span class="channel-mark">f</span><div><h3>Facebook</h3><p>Messenger conversations and automated product publishing.</p></div><span class="channel-status is-live">Available</span></article>
+            <article class="channel-card"><span class="channel-mark">I</span><div><h3>Instagram</h3><p>Direct messages and scheduled product content.</p></div><span class="channel-status is-live">Available</span></article>
+            <article class="channel-card"><span class="channel-mark">WA</span><div><h3>WhatsApp Business</h3><p>The same grounded assistant for customer conversations.</p></div><span class="channel-status is-pilot">Pilot</span></article>
+            <article class="channel-card"><span class="channel-mark">in</span><div><h3>LinkedIn</h3><p>Company Page publishing is next in the social workspace.</p></div><span class="channel-status is-soon">Coming soon</span></article>
+        </div>
     </section>
 
     <section class="trust-section" id="trust" aria-labelledby="trust-title">
@@ -124,7 +139,7 @@
         </div>
         <div class="launch-steps-grid">
             <article class="panel"><span>01</span><h3>Connect your website</h3><p>Legatus instantly learns your products and business rules.</p></article>
-            <article class="panel"><span>02</span><h3>Turn on your channels</h3><p>Chat starts working automatically on your website, Facebook, and Instagram.</p></article>
+            <article class="panel"><span>02</span><h3>Turn on your channels</h3><p>Connect website, Facebook, Instagram, or WhatsApp conversations from one workspace.</p></article>
             <article class="panel"><span>03</span><h3>Delegate the routine</h3><p>AI answers customers with verified information and plans posts months in advance.</p></article>
         </div>
     </section>
@@ -176,7 +191,7 @@
     </footer>
 </div>
 <style>
-.hero{grid-template-columns:minmax(0,1fr) minmax(440px,.9fr);gap:48px}.hero h1{font-size:clamp(48px,5vw,68px)}.hero>section:first-child>p{max-width:660px}.proof{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 24px}.product-demo{transform:none}.demo-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:0 15px 14px}.demo-tab{border:1px solid var(--line);border-radius:11px;padding:10px 7px;background:#f6f8f5;color:var(--muted);font:700 11px 'DM Sans';cursor:pointer}.demo-tab.is-active{border-color:var(--green);background:var(--green);color:#fff}.demo-pane{min-height:410px}.social-demo,.copy-demo{padding:22px;border-radius:20px;background:#f4f6f2}.social-demo-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:18px}.social-demo-head>div{display:flex;flex-direction:column;gap:5px}.social-calendar{display:grid;gap:10px}.social-calendar>div{display:grid;grid-template-columns:42px 90px 1fr;align-items:center;gap:9px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#fff}.social-calendar b{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--lime)}.social-calendar span{font-size:12px;font-weight:800}.social-calendar small{color:var(--muted)}.social-demo-note{display:flex;align-items:center;gap:11px;margin-top:16px;padding:14px;border-radius:13px;background:var(--green);color:#fff}.social-demo-note>span{display:grid;place-items:center;flex:0 0 30px;height:30px;border-radius:50%;background:var(--lime);color:var(--ink);font-weight:900}.social-demo-note p{margin:0;color:#d4e4de;font-size:12px;line-height:1.5}.social-demo-note b{color:#fff}.copy-product{display:flex;align-items:center;gap:12px;margin-bottom:14px}.copy-product>div{display:flex;flex-direction:column;gap:5px}.copy-cover{display:grid;place-items:center;flex:0 0 52px;height:66px;border-radius:7px;background:linear-gradient(145deg,var(--green),#0e2920);color:var(--lime);font:800 20px Manrope}.copy-demo article{padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:#fff}.copy-demo article+article{margin-top:9px}.copy-demo article span{display:inline-flex;padding:4px 8px;border-radius:99px;background:#edf4e8;color:var(--green);font-size:10px;font-weight:800}.copy-demo article p{margin:7px 0 0;color:var(--muted);font-size:12px;line-height:1.5}.capability-metrics{padding-top:15px}.capability-metrics .metric{border-top:3px solid var(--green)}.capability-metrics .metric b{font-size:20px}.trust-section{padding:30px 0 45px;border-top:1px solid var(--line)}.trust-copy{max-width:720px}.trust-copy h2{font-size:36px;margin:10px 0}.trust-metrics{padding:20px 0 0}.trust-metrics .metric b{font-size:25px}
+.hero{grid-template-columns:minmax(0,1fr) minmax(440px,.9fr);gap:48px}.hero h1{font-size:clamp(48px,5vw,68px)}.hero>section:first-child>p{max-width:660px}.proof{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 24px}.product-demo{transform:none}.demo-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:0 15px 14px}.demo-tab{border:1px solid var(--line);border-radius:11px;padding:10px 7px;background:#f6f8f5;color:var(--muted);font:700 11px 'DM Sans';cursor:pointer}.demo-tab.is-active{border-color:var(--green);background:var(--green);color:#fff}.demo-pane{min-height:410px}.social-demo,.copy-demo{padding:22px;border-radius:20px;background:#f4f6f2}.social-demo-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:18px}.social-demo-head>div{display:flex;flex-direction:column;gap:5px}.social-calendar{display:grid;gap:10px}.social-calendar>div{display:grid;grid-template-columns:42px 90px 1fr;align-items:center;gap:9px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#fff}.social-calendar b{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--lime)}.social-calendar span{font-size:12px;font-weight:800}.social-calendar small{color:var(--muted)}.social-demo-note{display:flex;align-items:center;gap:11px;margin-top:16px;padding:14px;border-radius:13px;background:var(--green);color:#fff}.social-demo-note>span{display:grid;place-items:center;flex:0 0 30px;height:30px;border-radius:50%;background:var(--lime);color:var(--ink);font-weight:900}.social-demo-note p{margin:0;color:#d4e4de;font-size:12px;line-height:1.5}.social-demo-note b{color:#fff}.copy-product{display:flex;align-items:center;gap:12px;margin-bottom:14px}.copy-product>div{display:flex;flex-direction:column;gap:5px}.copy-cover{display:grid;place-items:center;flex:0 0 52px;height:66px;border-radius:7px;background:linear-gradient(145deg,var(--green),#0e2920);color:var(--lime);font:800 20px Manrope}.copy-demo article{padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:#fff}.copy-demo article+article{margin-top:9px}.copy-demo article span{display:inline-flex;padding:4px 8px;border-radius:99px;background:#edf4e8;color:var(--green);font-size:10px;font-weight:800}.copy-demo article p{margin:7px 0 0;color:var(--muted);font-size:12px;line-height:1.5}.capability-metrics{padding-top:15px}.capability-metrics .metric{border-top:3px solid var(--green)}.capability-metrics .metric b{font-size:20px}.channel-section{padding:36px 0 70px;border-top:1px solid var(--line)}.channel-section-copy{display:grid;grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr);gap:18px 48px;align-items:end;margin-bottom:28px}.channel-section-copy .eyebrow{grid-column:1/-1}.channel-section-copy h2{font-size:36px;line-height:1.15;margin:0}.channel-section-copy p{color:var(--muted);line-height:1.7;margin:0}.channel-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}.channel-card{grid-column:span 2;position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;padding:20px;border:1px solid var(--line);border-radius:17px;background:#fff;min-height:158px}.channel-card:nth-child(4){grid-column:2/span 2}.channel-card h3{margin:2px 0 7px}.channel-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}.channel-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:var(--green);color:var(--lime);font:800 13px Manrope}.channel-status{position:absolute;left:76px;bottom:17px;padding:5px 8px;border-radius:99px;font-size:10px;font-weight:800}.channel-status.is-live{background:#e9f8dc;color:#477426}.channel-status.is-pilot{background:#fff4d5;color:#7d5c00}.channel-status.is-soon{background:#eef0ef;color:#65716d}.trust-section{padding:30px 0 45px;border-top:1px solid var(--line)}.trust-copy{max-width:720px}.trust-copy h2{font-size:36px;margin:10px 0}.trust-metrics{padding:20px 0 0}.trust-metrics .metric b{font-size:25px}
 .launch-steps{padding:25px 0 70px}.launch-steps-copy{text-align:center;max-width:680px;margin:0 auto 28px}.launch-steps-copy h2{font-size:38px;margin:10px 0}.launch-steps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.launch-steps-grid article>span{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--lime);font-weight:800}.launch-steps-grid h3{margin:18px 0 8px}.launch-steps-grid p{color:var(--muted);font-size:14px;line-height:1.65;margin:0}
 .billing-option{padding:28px;min-width:0}.billing-option h3{font-size:38px;margin:18px 0 4px}.billing-option>p{color:var(--muted);min-height:48px}.billing-option-featured{border:2px solid var(--green)}.billing-package-picker{position:relative;margin-top:12px}.billing-package-picker summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#f8faf8;cursor:pointer;font-weight:750;list-style:none}.billing-package-picker summary::-webkit-details-marker{display:none}.billing-package-picker[open] summary{border-color:var(--green);border-radius:12px 12px 0 0}.billing-package-picker label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px;border:1px solid var(--green);border-top:0;border-radius:0 0 12px 12px;background:#fff;cursor:pointer}.billing-package-picker input{width:18px;height:18px;accent-color:var(--green)}.billing-package-picker label span{display:flex;flex-direction:column;gap:3px}.billing-package-picker label small{color:var(--muted);font-size:11px;line-height:1.35}.billing-package-picker label b{color:var(--green);font-size:12px;white-space:nowrap}.billing-checkout-link{display:block;width:100%;margin-top:14px;text-align:center}.creative-preview{margin-top:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#f3f4f2}.creative-preview h3{font-size:24px;margin:8px 0}.creative-preview p{margin:0;color:var(--muted)}.creative-badge{padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;font-weight:800;white-space:nowrap}
 @media(max-width:850px){
@@ -184,6 +199,7 @@
     .hero>section{min-width:0}
     .demo-head{gap:14px;flex-wrap:wrap}
     .demo-head>.tag{max-width:100%;white-space:normal}
+    .channel-section-copy{grid-template-columns:1fr;align-items:start}.channel-section-copy .eyebrow{grid-column:auto}.channel-card,.channel-card:nth-child(4){grid-column:span 3}
 }
 @media(max-width:600px){
     .wrap{padding-inline:16px}
@@ -206,6 +222,7 @@
     .bubble{max-width:94%;padding:11px 12px;font-size:13px}
     .metrics{padding:22px 0 55px}
     .metric{padding:20px 12px}
+    .channel-section{padding:24px 0 52px}.channel-section-copy h2{font-size:30px}.channel-grid{grid-template-columns:1fr}.channel-card,.channel-card:nth-child(4){grid-column:auto;min-height:150px}
     .launch-steps{padding:10px 0 48px}
     .launch-steps-copy h2{font-size:32px}
     .launch-steps-grid{grid-template-columns:1fr}
