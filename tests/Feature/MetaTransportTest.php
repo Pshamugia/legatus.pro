@@ -504,6 +504,63 @@ class MetaTransportTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_text_sent_with_a_customer_image_cannot_produce_a_false_catalog_denial(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-split-image');
+        $payload = [
+            'object' => 'page',
+            'entry' => [[
+                'id' => 'page-split-image',
+                'messaging' => [
+                    [
+                        'sender' => ['id' => 'split-image-customer'],
+                        'recipient' => ['id' => 'page-split-image'],
+                        'timestamp' => 1784512800000,
+                        'message' => [
+                            'mid' => 'split-image-mid',
+                            'attachments' => [['type' => 'image', 'payload' => ['url' => 'https://scontent.xx.fbcdn.net/book.jpg']]],
+                        ],
+                    ],
+                    [
+                        'sender' => ['id' => 'split-image-customer'],
+                        'recipient' => ['id' => 'page-split-image'],
+                        'timestamp' => 1784512801000,
+                        'message' => [
+                            'mid' => 'split-image-question-mid',
+                            'text' => 'Do you have this product?',
+                        ],
+                    ],
+                ],
+            ]],
+        ];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        $this->metaWebhook($body, 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret'))->assertOk();
+
+        $records = $connection->channelMessages()->where('direction', 'inbound')->orderBy('id')->get();
+        $this->assertCount(2, $records);
+
+        // Process the text first to reproduce parallel queue workers handling Meta events out of order.
+        foreach ($records->reverse() as $record) {
+            (new ProcessMetaInboundMessage($record->id))->handle(
+                app(ConversationEngine::class),
+                app(ChannelMessageDispatcher::class),
+            );
+        }
+
+        $conversation = $connection->conversations()->sole();
+        $assistantMessages = $conversation->messages()->where('role', 'assistant')->get();
+        $this->assertCount(1, $assistantMessages);
+        $this->assertTrue($assistantMessages->every(
+            fn ($message): bool => (bool) data_get($message->metadata, 'image_recognition_unavailable')
+                && str_contains($message->content, 'cannot reliably recognize'),
+        ));
+        $allReplies = $assistantMessages->pluck('content')->implode(' ');
+        $this->assertStringNotContainsString('exact product was not found', $allReplies);
+        $this->assertStringNotContainsString('similar alternatives', $allReplies);
+        Http::assertNothingSent();
+    }
+
     public function test_meta_product_image_is_preserved_safely_and_analyzed_as_multimodal_input(): void
     {
         Queue::fake();

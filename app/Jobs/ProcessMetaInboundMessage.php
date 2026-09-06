@@ -104,7 +104,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 ]);
 
                 $customerInput = $text;
-                if ($record->message_type === 'attachment') {
+                if ($record->message_type === 'attachment' || $this->immediatelyFollowsCustomerImage($record)) {
                     $this->replyThatImageRecognitionIsUnavailable($record, $connection, $senderId, $text, $dispatcher);
 
                     return;
@@ -157,6 +157,28 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'processed_at' => now(),
                 ]);
             });
+    }
+
+    private function immediatelyFollowsCustomerImage(ChannelMessage $record): bool
+    {
+        $previous = ChannelMessage::query()
+            ->where('channel_connection_id', $record->channel_connection_id)
+            ->where('direction', 'inbound')
+            ->where('provider_sender_id', $record->provider_sender_id)
+            ->where('id', '<', $record->id)
+            ->latest('id')
+            ->first();
+
+        if (! $previous || $previous->message_type !== 'attachment') {
+            return false;
+        }
+
+        $previousAt = $previous->received_at ?? $previous->created_at;
+        $currentAt = $record->received_at ?? $record->created_at;
+
+        return $previousAt !== null
+            && $currentAt !== null
+            && $previousAt->diffInSeconds($currentAt) <= 15;
     }
 
     private function discloseAiIdentityOnFirstReply(
@@ -227,6 +249,15 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 'processed_at' => now(),
             ]);
             if ($conversation->status === 'human') {
+                return null;
+            }
+
+            $recentLimitation = $conversation->messages()
+                ->where('role', 'assistant')
+                ->where('created_at', '>=', now()->subSeconds(30))
+                ->latest('id')
+                ->first();
+            if ((bool) data_get($recentLimitation?->metadata, 'image_recognition_unavailable')) {
                 return null;
             }
 
