@@ -18,6 +18,7 @@ use App\Http\Controllers\SocialMediaController;
 use App\Http\Controllers\SocialMediaImageController;
 use App\Http\Controllers\SocialMediaTemplateController;
 use App\Http\Controllers\SuperAdminController;
+use App\Http\Controllers\UiLocaleController;
 use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\WhatsAppConnectionController;
 use App\Http\Controllers\WhatsAppWebhookController;
@@ -31,6 +32,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::get('/', [AgentController::class, 'landing'])->name('landing');
+Route::post('/language', [UiLocaleController::class, 'update'])->name('ui-locale.update');
 Route::view('/privacy', 'privacy')->name('privacy');
 Route::view('/terms', 'terms')->name('terms');
 Route::view('/refund-policy', 'refund-policy')->name('refund-policy');

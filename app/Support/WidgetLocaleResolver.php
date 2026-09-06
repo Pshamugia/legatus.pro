@@ -19,7 +19,7 @@ class WidgetLocaleResolver
             return $requestedLocale;
         }
 
-        $country = $this->configuredCountry($request) ?? $this->countryForIp($request->ip());
+        $country = $this->country($request);
         if ($country !== null) {
             return $country === 'GE' ? 'ka' : 'en';
         }
@@ -27,6 +27,11 @@ class WidgetLocaleResolver
         // Unknown locations must not be inferred from the browser language:
         // visitors can prefer Georgian while being outside Georgia (and vice versa).
         return 'en';
+    }
+
+    public function country(Request $request): ?string
+    {
+        return $this->configuredCountry($request) ?? $this->countryForIp($request->ip());
     }
 
     private function configuredCountry(Request $request): ?string
