@@ -106,6 +106,39 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertDontSee('?lang=en');
     }
 
+    public function test_live_preview_uses_the_businesses_first_configured_website_language(): void
+    {
+        [$user, $agent] = $this->tenant('primary-language-preview');
+        $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'language',
+            'taxonomy_label' => 'Georgian',
+            'name' => 'Website language: Georgian',
+            'url' => 'https://shop.example/?lang=ka',
+            'status' => 'ready',
+            'progress' => 100,
+        ]);
+        $product = $agent->products()->create($this->product('English base product', 'Books', 2));
+        $product->update(['metadata' => array_replace_recursive($product->metadata, [
+            'localized' => [
+                'Georgian' => [
+                    'name' => 'ქართული პროდუქტი',
+                    'description' => 'ქართული პროდუქტის აღწერა.',
+                    'category' => 'წიგნები',
+                    'product_url' => 'https://shop.example/products/georgian-product?lang=ka',
+                ],
+            ],
+        ])]);
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $response = $this->actingAs($user)->get(route('social-media.index'));
+        $response->assertOk()
+            ->assertSee('ქართული პროდუქტი')
+            ->assertSee('?lang=ka')
+            ->assertDontSee('English base product');
+        $this->assertSame('ქართული პროდუქტის აღწერა.', $response->viewData('previewProduct')['description']);
+    }
+
     public function test_multi_channel_schedule_does_not_repeat_products_while_unused_products_remain(): void
     {
         [$user, $agent] = $this->tenant('cross-channel-product-rotation');

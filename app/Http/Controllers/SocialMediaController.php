@@ -32,6 +32,8 @@ class SocialMediaController extends Controller
             ])->filter(fn ($value): bool => is_scalar($value))->map(fn ($value) => trim((string) $value))->filter()->unique(fn ($value) => Str::lower($value))->sort()->values();
         $languages = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
             ->pluck('taxonomy_label')->filter()->unique(fn ($value) => Str::lower(trim((string) $value)))->sort()->values();
+        $primaryLanguage = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
+            ->oldest('id')->value('taxonomy_label');
         $schedules = $agent->socialMediaSchedules()
             ->withCount([
                 'posts',
@@ -42,7 +44,13 @@ class SocialMediaController extends Controller
             ->orderBy('scheduled_for')->limit(12)->get();
         $canManage = in_array($tenant->role(), ['owner', 'admin'], true);
         $templates = $templateService->configurations($agent);
-        $sampleCandidates = $products->sortByDesc(fn ($product): int => $product->socialDescription() !== null ? 1 : 0);
+        $sampleCandidates = $products->sortByDesc(function ($product) use ($primaryLanguage): int {
+            $localizedMap = (array) data_get($product->metadata, 'localized', []);
+            $localized = filled($primaryLanguage) ? (array) ($localizedMap[$primaryLanguage] ?? []) : [];
+
+            return (filled(data_get($localized, 'name')) && filled(data_get($localized, 'product_url')) ? 2 : 0)
+                + ($product->socialDescription($primaryLanguage) !== null ? 1 : 0);
+        });
         $sample = $sampleCandidates->first(function ($product): bool {
             $url = data_get($product->metadata, 'product_url');
 
@@ -50,17 +58,21 @@ class SocialMediaController extends Controller
                 && ($product->catalogDesignImageUrl() !== null || $product->publicImageUrl() !== null);
         }) ?? $sampleCandidates->first(fn ($product): bool => $product->stock > 0 && $this->publicHttpUrl(data_get($product->metadata, 'product_url')));
         $primaryImage = $sample ? $primaryImages->resolve($sample) : null;
-        $catalogImage = $sample ? ($sample->catalogDesignImageUrl() ?: $sample->publicImageUrl()) : null;
+        $localizedMap = $sample ? (array) data_get($sample->metadata, 'localized', []) : [];
+        $localizedPreview = $sample && filled($primaryLanguage)
+            ? (array) ($localizedMap[$primaryLanguage] ?? [])
+            : [];
+        $catalogImage = $sample ? ($sample->catalogDesignImageUrl() ?: $sample->publicImageUrl() ?: data_get($localizedPreview, 'image')) : null;
         $previewProduct = $sample ? [
-            'title' => (string) $sample->name,
-            'description' => Str::limit(trim(preg_replace('/\s+/u', ' ', strip_tags((string) $sample->socialDescription())) ?? ''), 400, '…'),
+            'title' => (string) data_get($localizedPreview, 'name', $sample->name),
+            'description' => Str::limit(trim(preg_replace('/\s+/u', ' ', strip_tags((string) (data_get($localizedPreview, 'description') ?: $sample->socialDescription()))) ?? ''), 400, '…'),
             'price' => number_format((float) $sample->price, 2, '.', ' ').' '.strtoupper((string) data_get($sample->metadata, 'currency', data_get($agent->organization?->settings, 'currency', 'GEL'))),
-            'category' => (string) $sample->category,
-            'url' => (string) data_get($sample->metadata, 'product_url'),
+            'category' => (string) data_get($localizedPreview, 'category', $sample->category),
+            'url' => (string) data_get($localizedPreview, 'product_url', data_get($sample->metadata, 'product_url')),
             // Preserve the catalog's curated/branded image. The localized
             // crawl image is only a fallback when the catalog has none.
             'image' => $catalogImage,
-            'raw_image' => $sample->publicImageUrl(),
+            'raw_image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
             'title' => 'Product title',
