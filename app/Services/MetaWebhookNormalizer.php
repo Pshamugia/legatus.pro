@@ -111,11 +111,20 @@ class MetaWebhookNormalizer
             $attachments = collect((array) ($message['attachments'] ?? []))
                 ->map(fn ($attachment): array => [
                     'type' => (string) ($attachment['type'] ?? 'file'),
+                    'url' => is_string(data_get($attachment, 'payload.url'))
+                        ? data_get($attachment, 'payload.url')
+                        : null,
                 ])
                 ->take(5)
                 ->values()
                 ->all();
-            if (($text === null || $text === '') && $attachments !== []) {
+            $hasImage = collect($attachments)->contains(fn ($attachment): bool =>
+                $attachment['type'] === 'image' && filled($attachment['url'])
+            );
+            if ($hasImage) {
+                $type = 'attachment';
+                $text = ($text === null || $text === '') ? '[Customer sent an image.]' : $text;
+            } elseif (($text === null || $text === '') && $attachments !== []) {
                 $type = 'attachment';
                 $labels = collect($attachments)->pluck('type')->unique()->implode(', ');
                 $text = "[Customer sent an attachment: {$labels}]";

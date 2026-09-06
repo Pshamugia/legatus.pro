@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
 use App\Services\MetaGraphClient;
+use App\Services\VisualAttachmentAnalyzer;
 use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -458,6 +459,54 @@ class MetaTransportTest extends TestCase
         $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
         $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
         $this->assertStringNotContainsString('INTERNAL_MACHINE_TOKEN', $conversation->messages()->pluck('content')->implode(' '));
+    }
+
+    public function test_meta_product_image_is_preserved_safely_and_analyzed_as_multimodal_input(): void
+    {
+        Queue::fake();
+        config()->set('services.openai.key', 'test-openai-key');
+        $connection = $this->connection('facebook', 'page-vision');
+        $imageUrl = 'https://scontent.xx.fbcdn.net/customer-product.jpg';
+        $payload = [
+            'object' => 'page',
+            'entry' => [[
+                'id' => 'page-vision',
+                'messaging' => [[
+                    'sender' => ['id' => 'vision-customer'],
+                    'recipient' => ['id' => 'page-vision'],
+                    'timestamp' => 1784512800000,
+                    'message' => [
+                        'mid' => 'vision-mid',
+                        'text' => 'Do you have something like this in black?',
+                        'attachments' => [['type' => 'image', 'payload' => ['url' => $imageUrl]]],
+                    ],
+                ]],
+            ]],
+        ];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        $this->metaWebhook($body, 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret'))->assertOk();
+
+        $inbound = $connection->channelMessages()->sole();
+        $this->assertSame('attachment', $inbound->message_type);
+        $this->assertFalse((bool) $inbound->payload['requires_human']);
+        $this->assertSame($imageUrl, data_get($inbound->payload, 'attachments.0.url'));
+
+        Http::fake([
+            $imageUrl => Http::response('fake-jpeg-bytes', 200, ['Content-Type' => 'image/jpeg']),
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'type' => 'message',
+                    'content' => [['type' => 'output_text', 'text' => 'A rounded wooden dining chair with a woven beige seat.']],
+                ]],
+            ]),
+        ]);
+
+        $description = app(VisualAttachmentAnalyzer::class)->describe($connection, $inbound->payload['attachments']);
+
+        $this->assertSame('A rounded wooden dining chair with a woven beige seat.', $description);
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/responses'
+            && data_get($request->data(), 'input.0.content.1.type') === 'input_image'
+            && str_starts_with((string) data_get($request->data(), 'input.0.content.1.image_url'), 'data:image/jpeg;base64,'));
     }
 
     public function test_connect_route_uses_oauth_state_and_never_exposes_app_secret(): void
