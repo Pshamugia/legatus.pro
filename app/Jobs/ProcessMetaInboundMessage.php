@@ -173,12 +173,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             return false;
         }
 
-        $previousAt = $previous->received_at ?? $previous->created_at;
-        $currentAt = $record->received_at ?? $record->created_at;
-
-        return $previousAt !== null
-            && $currentAt !== null
-            && $previousAt->diffInSeconds($currentAt) <= 15;
+        return true;
     }
 
     private function discloseAiIdentityOnFirstReply(
@@ -240,6 +235,9 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 'channel_connection_id' => $connection->id,
                 'external_thread_id' => $senderId,
                 'last_message_at' => now(),
+                'context' => collect((array) $conversation->context)
+                    ->except(['active_catalog_scope', 'last_catalog_product_ids'])
+                    ->all(),
             ]);
             $record->update([
                 'conversation_id' => $conversation->id,
