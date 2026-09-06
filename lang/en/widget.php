@@ -6,6 +6,7 @@ return [
     'greeting' => 'Hello! 👋 :introduction What are you looking for? I can recommend products based on your preferences, budget, and needs.',
     'demo_greeting' => 'Hello! 👋 :introduction I can help you choose products, verify prices and availability, arrange delivery, and handle wholesale inquiries. What are you looking for?',
     'status' => '● Online · AI shopping assistant',
+    'status_human' => '● Human operator is handling this conversation',
     'demo_status' => '● Online · AI sales & shopping ambassador · Powered by Legatus',
     'powered_by' => 'Powered by Legatus',
     'new_conversation' => 'New conversation',

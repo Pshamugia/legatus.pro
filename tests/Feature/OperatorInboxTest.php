@@ -61,7 +61,7 @@ class OperatorInboxTest extends TestCase
         ]);
     }
 
-    public function test_opening_a_conversation_immediately_pauses_ai_until_release(): void
+    public function test_opening_a_conversation_does_not_pause_ai(): void
     {
         $c = $this->conversation();
         $c->update([
@@ -75,16 +75,9 @@ class OperatorInboxTest extends TestCase
 
         $this->assertDatabaseHas('conversations', [
             'id' => $c->id,
-            'status' => 'human',
-            'assigned_to' => 'Demo Owner',
-            'handoff_reason' => 'Manual operator takeover.',
-        ]);
-
-        $this->post("/app/inbox/{$c->id}/release")->assertRedirect();
-        $this->assertDatabaseHas('conversations', [
-            'id' => $c->id,
             'status' => 'ai',
             'assigned_to' => null,
+            'handoff_reason' => null,
         ]);
     }
 

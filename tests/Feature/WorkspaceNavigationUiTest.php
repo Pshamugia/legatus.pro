@@ -126,12 +126,12 @@ class WorkspaceNavigationUiTest extends TestCase
             ->assertOk()
             ->assertSee('class="inbox-layout has-mobile-selection"', false)
             ->assertSee('class="inbox-mobile-back"', false)
-            ->assertSee('id="operator-reply"', false)
-            ->assertSee('Reply as a human operator...');
+            ->assertSee('Pause AI & take over', false)
+            ->assertDontSee('id="operator-reply"', false);
 
         $conversation->refresh();
-        $this->assertSame('human', $conversation->status);
-        $this->assertSame('Mobile Operator', $conversation->assigned_to);
+        $this->assertSame('ai', $conversation->status);
+        $this->assertNull($conversation->assigned_to);
     }
 
     public function test_settings_and_social_media_render_mobile_safe_workspaces(): void

@@ -28,6 +28,8 @@ class WidgetChannelTest extends TestCase
             ->assertSee('new URL(product.url)', false)
             ->assertSee('X-Legatus-Visitor-Token')
             ->assertSee('setInterval(pollHistory, 2500)', false)
+            ->assertSee("setConversationStatus(data.status)", false)
+            ->assertSee('Human operator is handling this conversation')
             ->assertSee('if (data.text)', false)
             ->assertDontSee('name="csrf-token"', false)
             ->assertDontSee('visitor_id:');

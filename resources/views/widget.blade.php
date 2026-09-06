@@ -31,7 +31,7 @@
         <span class="avatar">{{ mb_strtoupper(mb_substr($assistantName, 0, 1)) }}</span>
         <div class="identity">
             <b>{{ $assistantName }} · {{ $agent->business_name }}</b>
-            <small>{{ $widgetCopy['status'] }}</small>
+            <small id="conversation-status">{{ $widgetCopy['status'] }}</small>
             <span class="powered">{{ $widgetCopy['powered_by'] }}</span>
         </div>
         <span class="head-actions">
@@ -285,6 +285,12 @@
         });
     }
 
+    function setConversationStatus(status) {
+        const label = document.querySelector('#conversation-status');
+        if (!label) return;
+        label.textContent = status === 'human' ? phrase('status_human') : phrase('status');
+    }
+
     async function pollHistory() {
         if (!visitorToken || polling || sending) return;
         polling = true;
@@ -298,6 +304,7 @@
             }
             if (!response.ok) return;
             const data = await response.json();
+            setConversationStatus(data.status);
             (data.messages || []).forEach(renderMessage);
             cursor = Math.max(cursor, Number(data.cursor) || 0);
         } finally {
@@ -360,6 +367,7 @@
             if (!response.ok) throw new Error(data.message || `Request failed: ${response.status}`);
 
             saveToken(data.visitor_token);
+            if (data.handoff) setConversationStatus('human');
             if (data.customer_message_id) seen.add(data.customer_message_id);
             if (data.message_id) seen.add(data.message_id);
             if (data.text) {
