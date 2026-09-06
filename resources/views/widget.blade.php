@@ -362,9 +362,11 @@
             saveToken(data.visitor_token);
             if (data.customer_message_id) seen.add(data.customer_message_id);
             if (data.message_id) seen.add(data.message_id);
-            add(data.text, 'ai', data.products || [], {
-                messageId: data.message_id || null,
-            });
+            if (data.text) {
+                add(data.text, 'ai', data.products || [], {
+                    messageId: data.message_id || null,
+                });
+            }
         } catch (error) {
             add(phrase(error.name === 'AbortError' ? 'timed_out' : 'connection_interrupted'), 'ai');
         } finally {

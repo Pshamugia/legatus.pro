@@ -8,7 +8,6 @@ use App\Models\Message;
 use App\Models\Reservation;
 use App\Support\PrivacyRedactor;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Str;
 
 /**
  * Channel-neutral conversation runtime.
@@ -85,35 +84,14 @@ class ConversationEngine
             }
         }
 
-        if ($conversation->status === 'human' && $this->canResumeAi($conversation, $text)) {
-            $conversation->update([
-                'status' => 'ai',
-                'handoff_reason' => null,
-                'handoff_summary' => null,
-                'suggested_reply' => null,
-                'assigned_to' => null,
-                'outcome' => null,
-            ]);
-            $conversation->refresh();
-        }
-
         if ($conversation->status === 'human') {
             $conversation->update(['last_message_at' => now()]);
 
-            return $this->rememberResponse($customerMessage, [
-                'text' => 'შეტყობინება მიღებულია — ოპერატორი უკვე ჩართულია და ამავე საუბარში გიპასუხებთ.',
-                'intent' => 'handoff',
-                'confidence' => 1,
-                'handoff' => true,
-                'escalation_reason' => $conversation->handoff_reason,
-                'products' => [],
-                'sources' => [],
-                'tools_used' => ['human_queue'],
-                'customer_message_id' => $customerMessage->public_id,
-                'cursor' => $customerMessage->id,
-                'request_id' => $requestId,
-                'conversation_id' => $conversation->id,
-            ]);
+            return $this->rememberResponse($customerMessage, $this->humanQueueResponse(
+                $conversation,
+                $customerMessage,
+                $requestId,
+            ));
         }
 
         $reply = $this->salesAgent->reply($agent, $text, $conversation);
@@ -184,7 +162,7 @@ class ConversationEngine
         ?string $requestId,
     ): array {
         return [
-            'text' => 'შეტყობინება მიღებულია — ოპერატორი უკვე ჩართულია და ამავე საუბარში გიპასუხებთ.',
+            'text' => null,
             'intent' => 'handoff',
             'confidence' => 1,
             'handoff' => true,
@@ -276,62 +254,6 @@ class ConversationEngine
                 'discount_percent' => ($discount = data_get($product, 'metadata.discount_percent')) !== null ? (float) $discount : null,
             ];
         })->values()->all();
-    }
-
-    private function canResumeAi(Conversation $conversation, string $newMessage): bool
-    {
-        if ($this->customerRequestsHuman($newMessage)) {
-            return false;
-        }
-
-        $reason = Str::lower((string) $conversation->handoff_reason);
-
-        $stickyReason = Str::contains($reason, [
-            'customer requested a human',
-            'manual operator takeover',
-            'manager approval',
-            'discount approval',
-            'discount exceeds',
-            'მომხმარებელმა მოითხოვა ოპერატორი',
-            'ოპერატორთან დაკავშირება მოითხოვა',
-            'მენეჯერის დადასტურება',
-            'ფასდაკლებას მენეჯერის',
-        ]);
-        if ($stickyReason) {
-            return false;
-        }
-
-        // Merely claiming a technical escalation must not trap every later
-        // customer message in the human queue. Keep real operator ownership
-        // sticky once an operator has actually replied; otherwise a fresh,
-        // ordinary request may return to the AI automatically.
-        if ($conversation->assigned_to !== null && $conversation->messages()->where('role', 'human')->exists()) {
-            return false;
-        }
-
-        // An unassigned safety escalation must not permanently disable the AI
-        // for every later customer question. Only deliberate human ownership
-        // and approval workflows remain sticky.
-        return true;
-    }
-
-    private function customerRequestsHuman(string $message): bool
-    {
-        return Str::contains(Str::lower($message), [
-            'ოპერატორი',
-            'ოპერატორთან',
-            'ადამიანი',
-            'ადამიანთან',
-            'კონსულტანტი',
-            'კონსულტანტთან',
-            'მენეჯერი',
-            'მენეჯერთან',
-            'human agent',
-            'human support',
-            'real person',
-            'operator',
-            'manager',
-        ]);
     }
 
     private function defaultCustomerName(string $channel): string

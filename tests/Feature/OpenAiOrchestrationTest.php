@@ -305,6 +305,7 @@ class OpenAiOrchestrationTest extends TestCase
 
         $this->assertTrue($confirmation['handoff']);
         $this->assertSame(['human_queue'], $confirmation['tools_used']);
+        $this->assertNull($confirmation['text']);
         $this->assertSame('human', $conversation->fresh()->status);
         Http::assertSentCount(2);
     }

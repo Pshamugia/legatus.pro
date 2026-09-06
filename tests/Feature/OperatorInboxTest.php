@@ -39,6 +39,27 @@ class OperatorInboxTest extends TestCase
         $this->assertDatabaseHas('conversations', ['id' => $c->id, 'status' => 'ai', 'assigned_to' => null]);
     }
 
+    public function test_resuming_ai_waits_for_the_customers_next_message(): void
+    {
+        $c = $this->conversation();
+        $this->get('/app/inbox?conversation='.$c->id)
+            ->assertOk()
+            ->assertSee('AI paused')
+            ->assertSee('Resume AI');
+        $c->messages()->create(['role' => 'human', 'content' => 'The operator has answered the question.']);
+        $assistantCount = $c->messages()->where('role', 'assistant')->count();
+
+        $this->post("/app/inbox/{$c->id}/release")->assertRedirect();
+
+        $this->assertSame('ai', $c->fresh()->status);
+        $this->assertSame($assistantCount, $c->messages()->where('role', 'assistant')->count());
+        $this->assertDatabaseHas('messages', [
+            'conversation_id' => $c->id,
+            'role' => 'system',
+            'content' => 'Conversation returned to Legatus.',
+        ]);
+    }
+
     public function test_opening_a_conversation_immediately_pauses_ai_until_release(): void
     {
         $c = $this->conversation();
@@ -105,6 +126,7 @@ class OperatorInboxTest extends TestCase
 
         $this->assertTrue($result['handoff']);
         $this->assertSame(['human_queue'], $result['tools_used']);
+        $this->assertNull($result['text']);
         $this->assertSame('human', $c->fresh()->status);
         $this->assertDatabaseMissing('messages', [
             'conversation_id' => $c->id,

@@ -422,9 +422,12 @@ class GuardrailsAndOutcomesTest extends TestCase
         $conversation->update(['status' => 'human', 'handoff_reason' => 'Manager approval']);
 
         $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Any update?', 'visitor_token' => $identity['token']])
-            ->assertOk()->assertJsonPath('tools_used.0', 'human_queue');
+            ->assertOk()
+            ->assertJsonPath('tools_used.0', 'human_queue')
+            ->assertJsonPath('text', null);
 
         $this->assertSame(1, $conversation->messages()->where('role', 'customer')->count());
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
         $this->assertSame(0, AgentRun::where('conversation_id', $conversation->id)->count());
     }
 

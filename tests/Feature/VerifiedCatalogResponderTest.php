@@ -692,7 +692,7 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertNull($reply);
     }
 
-    public function test_technical_tool_handoff_recovers_but_a_real_operator_handoff_stays_owned(): void
+    public function test_every_handoff_stays_paused_until_explicit_release(): void
     {
         [$agent, $conversation] = $this->context();
         $agent->products()->create([
@@ -710,20 +710,15 @@ class VerifiedCatalogResponderTest extends TestCase
 
         $reply = app(ConversationEngine::class)->handle($agent, 'იაშვილის რა გაქვთ?', 'widget', $conversation->visitor_id);
 
-        $this->assertFalse($reply['handoff']);
-        $this->assertSame('ai', $conversation->fresh()->status);
-        $this->assertStringContainsString('პაოლო იაშვილი', $reply['text']);
-
-        $conversation->refresh()->update(['status' => 'human', 'handoff_reason' => 'Customer requested a human operator.']);
+        $this->assertTrue($reply['handoff']);
+        $this->assertNull($reply['text']);
+        $this->assertSame(['human_queue'], $reply['tools_used']);
         $this->assertSame('human', $conversation->fresh()->status);
-        $this->assertSame('Customer requested a human operator.', $conversation->fresh()->handoff_reason);
-        $human = app(ConversationEngine::class)->handle($agent, 'იაშვილის რა გაქვთ?', 'widget', $conversation->visitor_id);
-        $this->assertTrue($human['handoff'], json_encode($human, JSON_UNESCAPED_UNICODE));
-        $this->assertSame(['human_queue'], $human['tools_used']);
+        $this->assertSame('Required verification tool was not called for the recommendation intent.', $conversation->fresh()->handoff_reason);
         Http::assertNothingSent();
     }
 
-    public function test_unassigned_delivery_handoff_does_not_block_a_new_catalog_request(): void
+    public function test_unassigned_handoff_stays_paused_until_an_operator_resumes_ai(): void
     {
         [$agent, $conversation] = $this->context();
         $politics = $agent->products()->create([
@@ -750,10 +745,12 @@ class VerifiedCatalogResponderTest extends TestCase
             $conversation->visitor_id,
         );
 
-        $this->assertFalse($reply['handoff']);
-        $this->assertSame('ai', $conversation->fresh()->status);
-        $this->assertSame([$politics->id], collect($reply['products'])->pluck('id')->all());
-        $this->assertNull($conversation->fresh()->handoff_reason);
+        $this->assertTrue($reply['handoff']);
+        $this->assertNull($reply['text']);
+        $this->assertSame(['human_queue'], $reply['tools_used']);
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame([], $reply['products']);
+        $this->assertNotNull($conversation->fresh()->handoff_reason);
         Http::assertNothingSent();
     }
 
@@ -791,7 +788,7 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertSame(['human_queue'], $explicit['tools_used']);
     }
 
-    public function test_claimed_technical_handoff_without_an_operator_reply_does_not_trap_new_requests(): void
+    public function test_claimed_technical_handoff_never_resumes_from_a_customer_message(): void
     {
         [$agent, $conversation] = $this->context();
         $operator = User::factory()->create();
@@ -815,10 +812,12 @@ class VerifiedCatalogResponderTest extends TestCase
             $conversation->visitor_id,
         );
 
-        $this->assertFalse($reply['handoff']);
-        $this->assertSame('ai', $conversation->fresh()->status);
-        $this->assertNull($conversation->fresh()->assigned_to);
-        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertTrue($reply['handoff']);
+        $this->assertNull($reply['text']);
+        $this->assertSame(['human_queue'], $reply['tools_used']);
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame((string) $operator->id, $conversation->fresh()->assigned_to);
+        $this->assertSame([], $reply['products']);
         Http::assertNothingSent();
     }
 
