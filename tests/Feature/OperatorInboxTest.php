@@ -45,7 +45,8 @@ class OperatorInboxTest extends TestCase
         $this->get('/app/inbox?conversation='.$c->id)
             ->assertOk()
             ->assertSee('AI paused')
-            ->assertSee('Resume AI');
+            ->assertSee('Resume AI')
+            ->assertSee('min-width:150px', false);
         $c->messages()->create(['role' => 'human', 'content' => 'The operator has answered the question.']);
         $assistantCount = $c->messages()->where('role', 'assistant')->count();
 
