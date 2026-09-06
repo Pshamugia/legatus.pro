@@ -166,6 +166,27 @@ class SocialMediaSchedulerTest extends TestCase
         ));
     }
 
+    public function test_one_schedule_stops_when_every_unused_product_has_been_reserved(): void
+    {
+        [$user, $agent] = $this->tenant('single-schedule-no-repeat');
+        $this->connections($agent);
+        foreach (range(1, 3) as $number) {
+            $agent->products()->create($this->product("Finite Product {$number}", 'General', 2));
+        }
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 5,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $posts = $agent->socialMediaPosts()->get();
+        $this->assertCount(3, $posts);
+        $this->assertCount(3, $posts->pluck('product_id')->unique());
+    }
+
     public function test_linkedin_uses_the_same_product_slot_and_publishes_an_image_post(): void
     {
         [$user, $agent] = $this->tenant('linkedin-scheduler');
@@ -211,7 +232,69 @@ class SocialMediaSchedulerTest extends TestCase
             && data_get($request->data(), 'content.media.id') === 'urn:li:image:image-1');
     }
 
-    public function test_new_schedules_prefer_unposted_products_then_restart_after_catalog_exhaustion(): void
+    public function test_legacy_duplicate_is_skipped_before_it_can_be_published_again(): void
+    {
+        [$user, $agent] = $this->tenant('publish-time-duplicate-guard');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Already Published Product', 'General', 2));
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $published = $agent->socialMediaPosts()->firstOrFail();
+        $published->update(['status' => 'published', 'published_at' => now()]);
+        $duplicate = $published->replicate();
+        $duplicate->status = 'queued';
+        $duplicate->published_at = null;
+        $duplicate->provider_post_id = null;
+        $duplicate->scheduled_for = now();
+        $duplicate->save();
+
+        (new PublishSocialMediaPost($duplicate->id))->handle(
+            app(MetaGraphClient::class),
+            app(SocialMediaTemplateRenderer::class),
+        );
+
+        $this->assertSame('skipped', $duplicate->fresh()->status);
+        $this->assertSame('This product was already published on this channel.', $duplicate->fresh()->failure_reason);
+    }
+
+    public function test_product_that_sells_out_after_scheduling_is_skipped_before_publish(): void
+    {
+        [$user, $agent] = $this->tenant('publish-time-stock-guard');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Later Sold Out Product', 'General', 2));
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $post = $agent->socialMediaPosts()->firstOrFail();
+        $post->update(['status' => 'queued']);
+        $product->update(['stock' => 0]);
+
+        (new PublishSocialMediaPost($post->id))->handle(
+            app(MetaGraphClient::class),
+            app(SocialMediaTemplateRenderer::class),
+        );
+
+        $this->assertSame('skipped', $post->fresh()->status);
+        $this->assertSame(
+            'The public product is no longer active, in stock, or publishable on this channel.',
+            $post->fresh()->failure_reason,
+        );
+    }
+
+    public function test_new_schedules_never_reuse_products_after_catalog_exhaustion(): void
     {
         [$user, $agent] = $this->tenant('cross-schedule-product-rotation');
         $this->connections($agent);
@@ -227,15 +310,17 @@ class SocialMediaSchedulerTest extends TestCase
         ];
 
         $chosenProducts = collect();
-        foreach (range(1, 4) as $iteration) {
+        foreach (range(1, 3) as $iteration) {
             $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
             $schedule = $agent->socialMediaSchedules()->latest('id')->firstOrFail();
             $this->assertSame(1, $schedule->posts()->pluck('product_id')->unique()->count());
             $chosenProducts->push((int) $schedule->posts()->value('product_id'));
         }
 
-        $this->assertCount(3, $chosenProducts->take(3)->unique());
-        $this->assertContains($chosenProducts->last(), $chosenProducts->take(3));
+        $this->assertCount(3, $chosenProducts->unique());
+        $this->actingAs($user)->post(route('social-media.store'), $payload)
+            ->assertSessionHasErrors('categories');
+        $this->assertSame(3, $agent->socialMediaSchedules()->count());
     }
 
     public function test_storefront_image_choice_is_visible_only_when_the_primary_image_contract_is_available(): void

@@ -49,6 +49,22 @@ class PublishSocialMediaPost implements ShouldQueue
             return;
         }
 
+        $alreadyPublished = SocialMediaPost::query()
+            ->where('agent_id', $post->agent_id)
+            ->where('provider', $post->provider)
+            ->where('product_id', $post->product_id)
+            ->where('status', 'published')
+            ->whereKeyNot($post->id)
+            ->exists();
+        if ($alreadyPublished) {
+            $post->update([
+                'status' => 'skipped',
+                'failure_reason' => 'This product was already published on this channel.',
+            ]);
+
+            return;
+        }
+
         $template = data_get($post->schedule->template_snapshots, $post->provider);
         $copyMode = $post->copy_mode ?: $post->schedule->copy_mode;
         if ($copyMode === 'ai') {

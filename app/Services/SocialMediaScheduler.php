@@ -37,7 +37,6 @@ class SocialMediaScheduler
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
         $products = $products
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
-            ->concat($products->filter(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id])))
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
@@ -78,7 +77,10 @@ class SocialMediaScheduler
                     ? $this->customDailyTimes($day, $data['posting_times'])
                     : $this->dailyTimes($day, (int) $data['posts_per_day']);
                 foreach ($slots as $slot) {
-                    $variant = $products[$productIndex % $products->count()];
+                    if (! $products->has($productIndex)) {
+                        break 2;
+                    }
+                    $variant = $products[$productIndex];
                     $productIndex++;
                     $postCopyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
                     if ($postCopyMode === 'ai') {
@@ -112,15 +114,17 @@ class SocialMediaScheduler
             $schedule->providers,
         )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
         $previouslyPosted = $agent->socialMediaPosts()
-            ->where('social_media_schedule_id', '!=', $schedule->id)
             ->whereIn('provider', $schedule->providers)
             ->whereIn('status', ['scheduled', 'queued', 'published'])
+            ->where(function ($query) use ($schedule): void {
+                $query->where('social_media_schedule_id', '!=', $schedule->id)
+                    ->orWhereIn('status', ['queued', 'published']);
+            })
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
         $products = $products
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
-            ->concat($products->filter(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id])))
             ->values();
         if ($products->isEmpty()) {
             throw ValidationException::withMessages([
@@ -163,7 +167,10 @@ class SocialMediaScheduler
                     if ($slot->lte($nowUtc) || isset($immutableSlots[$slot->format('Y-m-d H:i:s')])) {
                         continue;
                     }
-                    $variant = $products[$productIndex % $products->count()];
+                    if (! $products->has($productIndex)) {
+                        break 2;
+                    }
+                    $variant = $products[$productIndex];
                     $productIndex++;
                     $copyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
                     if ($copyMode === 'ai') {
