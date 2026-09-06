@@ -82,6 +82,30 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Open public product');
     }
 
+    public function test_live_preview_uses_primary_storefront_copy_instead_of_an_arbitrary_localization(): void
+    {
+        [$user, $agent] = $this->tenant('localized-preview');
+        $product = $agent->products()->create($this->product('ქართული პროდუქტი', 'ქართული კატეგორია', 2));
+        $product->update(['metadata' => array_replace_recursive($product->metadata, [
+            'product_url' => 'https://shop.example/products/georgian-product',
+            'localized' => [
+                'English' => [
+                    'name' => 'English product title',
+                    'description' => 'English localized description.',
+                    'product_url' => 'https://shop.example/products/georgian-product?lang=en',
+                ],
+            ],
+        ])]);
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('ქართული პროდუქტი')
+            ->assertSee('https://shop.example/products/georgian-product')
+            ->assertDontSee('English product title')
+            ->assertDontSee('?lang=en');
+    }
+
     public function test_multi_channel_schedule_does_not_repeat_products_while_unused_products_remain(): void
     {
         [$user, $agent] = $this->tenant('cross-channel-product-rotation');

@@ -49,21 +49,18 @@ class SocialMediaController extends Controller
             return $product->stock > 0 && $this->publicHttpUrl($url)
                 && ($product->catalogDesignImageUrl() !== null || $product->publicImageUrl() !== null);
         }) ?? $sampleCandidates->first(fn ($product): bool => $product->stock > 0 && $this->publicHttpUrl(data_get($product->metadata, 'product_url')));
-        $localizedPreview = $sample ? collect((array) data_get($sample->metadata, 'localized', []))
-            ->first(fn ($variant): bool => filled(trim((string) data_get($variant, 'description')))
-                && $this->publicHttpUrl(data_get($variant, 'product_url'))) : null;
         $primaryImage = $sample ? $primaryImages->resolve($sample) : null;
-        $catalogImage = $sample ? ($sample->catalogDesignImageUrl() ?: $sample->publicImageUrl() ?: data_get($localizedPreview, 'image')) : null;
+        $catalogImage = $sample ? ($sample->catalogDesignImageUrl() ?: $sample->publicImageUrl()) : null;
         $previewProduct = $sample ? [
-            'title' => (string) data_get($localizedPreview, 'name', $sample->name),
+            'title' => (string) $sample->name,
             'description' => Str::limit(trim(preg_replace('/\s+/u', ' ', strip_tags((string) $sample->socialDescription())) ?? ''), 400, '…'),
             'price' => number_format((float) $sample->price, 2, '.', ' ').' '.strtoupper((string) data_get($sample->metadata, 'currency', data_get($agent->organization?->settings, 'currency', 'GEL'))),
-            'category' => (string) data_get($localizedPreview, 'category', $sample->category),
-            'url' => (string) data_get($localizedPreview, 'product_url', data_get($sample->metadata, 'product_url')),
+            'category' => (string) $sample->category,
+            'url' => (string) data_get($sample->metadata, 'product_url'),
             // Preserve the catalog's curated/branded image. The localized
             // crawl image is only a fallback when the catalog has none.
             'image' => $catalogImage,
-            'raw_image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
+            'raw_image' => $sample->publicImageUrl(),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
             'title' => 'Product title',
