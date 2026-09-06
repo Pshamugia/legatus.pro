@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter — all in one platform. It supports customer conversations on your website, Facebook, Instagram, and WhatsApp, creates content in three distinct styles, and automatically publishes social posts.' => 'Legatus არის თქვენი AI სავაჭრო ასისტენტი, სოციალური მედიის მენეჯერი და ქოფირაითერი — ყველაფერი ერთ პლატფორმაში. ის მართავს მომხმარებელთა დიალოგებს თქვენს ვებსაიტზე, Facebook-ზე, Instagram-სა და WhatsApp-ში, ქმნის კონტენტს სამ განსხვავებულ სტილში და სოციალურ პოსტებს ავტომატურად აქვეყნებს.',
     'Legatus — AI Shopping Assistant, Social Media Manager &amp; Copywriter' => 'Legatus — AI სავაჭრო ასისტენტი, სოციალური მედიის მენეჯერი და ქოფირაითერი',
     'Legatus combines an AI shopping assistant, customer conversations across web and social channels, automated publishing, and an AI copywriter in one platform.' => 'Legatus ერთ პლატფორმაში აერთიანებს AI სავაჭრო ასისტენტს, მომხმარებელთა დიალოგებს ვებსა და სოციალურ არხებში, ავტომატურ გამოქვეყნებასა და AI ქოფირაითერს.',
     'Legatus combines an AI shopping assistant, social media manager, and copywriter in one platform.' => 'Legatus ერთ პლატფორმაში აერთიანებს AI სავაჭრო ასისტენტს, სოციალური მედიის მენეჯერსა და ქოფირაითერს.',

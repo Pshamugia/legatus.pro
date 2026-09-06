@@ -33,6 +33,7 @@
             @else
                 <a href="{{ route('login') }}">Sign in</a>
             @endauth
+            @include('partials.ui-locale-switcher')
             <a class="btn" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
         </div>
     </nav>

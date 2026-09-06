@@ -9,6 +9,7 @@
             @else
                 <a class="btn" href="{{ route('login') }}">Sign in</a>
             @endif
+            @include('partials.ui-locale-switcher')
         </span>
     </nav>
 </header>

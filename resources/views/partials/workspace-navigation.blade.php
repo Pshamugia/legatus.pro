@@ -41,6 +41,7 @@
         </a>
         @if($navigationUser?->isSuperAdmin())<a class="app-topbar-link" href="{{ route('super-admin.index') }}">Super Admin</a>@endif
         @if($navigationCanManage)<a class="app-topbar-link" href="{{ route('onboarding') }}">Business setup</a>@endif
+        @include('partials.ui-locale-switcher')
         @include('partials.workspace-switcher')
         <a class="app-add-business" href="{{ $navigationAddBusinessUrl }}">+ Add business</a>
         <form class="app-logout-form" method="post" action="{{ route('logout') }}">
@@ -66,6 +67,8 @@
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}"><span class="app-nav-glyph">ST</span> Settings</a>
         </nav>
 
+        @include('partials.ui-locale-switcher', ['variant' => 'sidebar'])
+
         <div class="app-side-footer">
             <a class="app-add-business" href="{{ $navigationAddBusinessUrl }}">+ Add business</a>
             <div class="app-side-account">
@@ -86,6 +89,7 @@
                 <span class="app-business-brand-copy"><strong>{{ $navigationBusinessName }}</strong><small>Workspace on Legatus</small></span>
             </a>
             @include('partials.workspace-switcher')
+            @include('partials.ui-locale-switcher')
             <a class="app-add-business" href="{{ $navigationAddBusinessUrl }}" title="Add business"><span aria-hidden="true">+</span><span class="app-mobile-add-label"> Add business</span></a>
             <form class="app-logout-form" method="post" action="{{ route('logout') }}">
                 @csrf

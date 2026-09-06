@@ -27,7 +27,7 @@ class UiLocalizationTest extends TestCase
     {
         $server = ['GEOIP_COUNTRY_CODE' => 'GE'];
 
-        $this->withServerVariables($server)->get(route('landing'))
+        $response = $this->withServerVariables($server)->get(route('landing'))
             ->assertOk()
             ->assertHeader('Content-Language', 'ka')
             ->assertSee('<html lang="ka">', false)
@@ -37,6 +37,9 @@ class UiLocalizationTest extends TestCase
             ->assertSee('value="en"', false)
             ->assertSee('const updatePricing', false)
             ->assertDontSee('updateფასები', false);
+
+        $response->assertSee('Legatus არის თქვენი AI სავაჭრო ასისტენტი');
+        $this->assertMatchesRegularExpression('/<div class="navlinks">.*class="ui-locale"/s', $response->getContent());
 
         $this->withServerVariables($server)->post(route('ui-locale.update'), ['locale' => 'en'])
             ->assertRedirect();
@@ -53,7 +56,7 @@ class UiLocalizationTest extends TestCase
         $this->seed();
         $user = User::firstOrFail();
 
-        $this->actingAs($user)
+        $response = $this->actingAs($user)
             ->withServerVariables(['GEOIP_COUNTRY_CODE' => 'GE'])
             ->get(route('onboarding'))
             ->assertOk()
@@ -62,6 +65,7 @@ class UiLocalizationTest extends TestCase
             ->assertSee('ბიზნესის გამართვა')
             ->assertSee('ინბოქსი')
             ->assertSee('პარამეტრები');
+        $this->assertMatchesRegularExpression('/class="menu app-primary-nav".*class="ui-locale is-sidebar"/s', $response->getContent());
     }
 
     public function test_foreign_and_unknown_visitors_are_forced_to_english_without_a_switcher(): void
