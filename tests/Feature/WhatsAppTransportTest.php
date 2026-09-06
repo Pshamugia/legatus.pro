@@ -92,6 +92,29 @@ class WhatsAppTransportTest extends TestCase
             && $request['to'] === '995555111222');
     }
 
+    public function test_queued_ai_reply_is_suppressed_if_a_human_takes_over_before_whatsapp_delivery(): void
+    {
+        Queue::fake();
+        $connection = $this->connection();
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'whatsapp-human-race',
+            'external_thread_id' => '995555111222',
+            'channel' => 'whatsapp',
+            'status' => 'ai',
+        ]);
+        $assistant = $conversation->messages()->create(['role' => 'assistant', 'content' => 'Stale AI draft']);
+        $delivery = app(ChannelMessageDispatcher::class)->dispatch($assistant);
+        $conversation->update(['status' => 'human', 'assigned_to' => 'Meta inbox']);
+        Http::fake();
+
+        (new SendWhatsAppMessage($delivery->id))->handle(app(WhatsAppCloudClient::class));
+
+        $this->assertSame('ignored', $delivery->fresh()->status);
+        $this->assertStringContainsString('human operator controls', $delivery->fresh()->failure_reason);
+        Http::assertNothingSent();
+    }
+
     public function test_free_form_reply_fails_closed_outside_twenty_four_hour_window(): void
     {
         Queue::fake();

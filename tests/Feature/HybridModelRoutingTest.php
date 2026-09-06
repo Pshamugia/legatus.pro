@@ -564,6 +564,10 @@ class HybridModelRoutingTest extends TestCase
             'role' => 'assistant',
             'content' => 'That item is unavailable. Do you want another option?',
         ]);
+        $conversation->messages()->create([
+            'role' => 'human',
+            'content' => 'The business operator confirmed a special request can be investigated.',
+        ]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'text',
             'source_scope' => 'business',
@@ -613,6 +617,10 @@ class HybridModelRoutingTest extends TestCase
         $this->assertContains('search_knowledge', $reply['tools_used']);
         $this->assertTrue($this->responseRequests()->contains(
             fn ($request): bool => str_contains(json_encode($request->data()), 'shop.example\\/special-request'),
+        ));
+        $this->assertTrue(Http::recorded()->contains(
+            fn ($pair): bool => str_ends_with($pair[0]->url(), '/embeddings')
+                && str_contains(json_encode($pair[0]->data()), 'business operator confirmed'),
         ));
     }
 

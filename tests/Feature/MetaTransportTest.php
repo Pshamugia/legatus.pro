@@ -142,6 +142,29 @@ class MetaTransportTest extends TestCase
             && $request['messaging_type'] === 'RESPONSE');
     }
 
+    public function test_queued_ai_reply_is_suppressed_if_a_human_takes_over_before_meta_delivery(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-human-race');
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'meta-human-race',
+            'external_thread_id' => 'customer-human-race',
+            'channel' => 'facebook',
+            'status' => 'ai',
+        ]);
+        $assistant = $conversation->messages()->create(['role' => 'assistant', 'content' => 'Stale AI draft']);
+        $delivery = app(ChannelMessageDispatcher::class)->dispatch($assistant);
+        $conversation->update(['status' => 'human', 'assigned_to' => 'Meta inbox']);
+        Http::fake();
+
+        (new SendMetaMessage($delivery->id))->handle(app(MetaGraphClient::class));
+
+        $this->assertSame('ignored', $delivery->fresh()->status);
+        $this->assertStringContainsString('human operator controls', $delivery->fresh()->failure_reason);
+        Http::assertNothingSent();
+    }
+
     public function test_instagram_webhook_and_send_support_the_linked_facebook_page_id(): void
     {
         Queue::fake();

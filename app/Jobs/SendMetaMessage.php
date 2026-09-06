@@ -40,8 +40,19 @@ class SendMetaMessage implements ShouldBeUnique, ShouldQueue
     public function handle(MetaGraphClient $meta): void
     {
         Cache::lock('meta-outbound:'.$this->channelMessageId, 60)->block(10, function () use ($meta): void {
-            $record = ChannelMessage::query()->with('connection')->find($this->channelMessageId);
+            $record = ChannelMessage::query()->with(['connection', 'conversation'])->find($this->channelMessageId);
             if (! $record || in_array($record->status, ['sent', 'delivered', 'read', 'delivery_unknown', 'failed', 'ignored'], true)) {
+                return;
+            }
+
+            if (data_get($record->payload, 'role') === 'assistant' && $record->conversation?->status !== 'ai') {
+                $record->update([
+                    'status' => 'ignored',
+                    'failure_reason' => 'AI reply suppressed because a human operator controls the conversation.',
+                    'payload' => $this->minimalPayload($record),
+                    'processed_at' => now(),
+                ]);
+
                 return;
             }
 

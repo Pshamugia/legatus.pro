@@ -1709,10 +1709,13 @@ class OpenAiOrchestrationTest extends TestCase
 
         $responsesRequest = Http::recorded()->map(fn ($pair) => $pair[0])->first(fn ($request) => str_ends_with($request->url(), '/responses'));
         $providerInput = json_encode($responsesRequest->data()['input']);
+        $providerInstructions = (string) $responsesRequest->data()['instructions'];
         $this->assertStringNotContainsString('operator.private@example.com', $providerInput);
         $this->assertStringNotContainsString('+995 555 123 456', $providerInput);
+        $this->assertStringContainsString('Human business operator to customer', $providerInput);
         $this->assertStringContainsString('[email redacted]', $providerInput);
         $this->assertStringContainsString('[phone redacted]', $providerInput);
+        $this->assertStringContainsString('authoritative statements made by the business', $providerInstructions);
         $this->assertStringContainsString('operator.private@example.com', $operator->fresh()->content);
     }
 }

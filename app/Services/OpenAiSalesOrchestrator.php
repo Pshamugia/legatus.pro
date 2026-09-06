@@ -300,7 +300,7 @@ class OpenAiSalesOrchestrator
             // short follow-up can resolve against the subject already under
             // discussion without any industry- or language-specific rules.
             $knowledgeQuery = $conversation->messages()
-                ->whereIn('role', ['customer', 'assistant'])
+                ->whereIn('role', ['customer', 'assistant', 'human'])
                 ->latest('id')
                 ->limit(6)
                 ->get(['content'])
@@ -1617,12 +1617,20 @@ class OpenAiSalesOrchestrator
         $messages = $conversation->messages()->latest('id')->limit(16)->get()->reverse()->values();
         $latestCustomerId = $messages->where('role', 'customer')->last()?->id;
 
-        $history = $messages->map(fn ($message) => [
-            'role' => $message->role === 'customer' ? 'user' : 'assistant',
-            'content' => $message->id === $latestCustomerId
+        $history = $messages->map(function ($message) use ($latestCustomerId, $currentInput): array {
+            $content = $message->id === $latestCustomerId
                 ? $currentInput
-                : PrivacyRedactor::text($message->content),
-        ])->values();
+                : PrivacyRedactor::text($message->content);
+
+            if ($message->role === 'human') {
+                $content = '[Human business operator to customer: '.$content.']';
+            }
+
+            return [
+                'role' => $message->role === 'customer' ? 'user' : 'assistant',
+                'content' => $content,
+            ];
+        })->values();
         if ($latestCustomerId === null) {
             $history->push(['role' => 'user', 'content' => $currentInput]);
         }
@@ -1663,6 +1671,7 @@ class OpenAiSalesOrchestrator
         $customerFacingIdentity = $agent->hasCustomAssistantName()
             ? "{$assistantName}, {$agent->business_name}'s AI assistant"
             : "{$agent->business_name}'s AI assistant";
+        $assistantIdentity .= '. Messages marked as coming from a Human business operator are authoritative statements made by the business in this conversation. Preserve their confirmed facts, commitments, and promised follow-ups, continue from them naturally, and never contradict, overwrite, or restart an issue the operator already resolved. Do not claim that a promised future check has already been completed unless later verified evidence confirms it';
         $assistantIdentity .= '. Recommend and discuss only products returned by this business\'s tools. Never use general model knowledge to suggest, describe, or imply that an outside product is sold by this business';
         $assistantIdentity .= '. You are a broadly capable AI shopping assistant, not a catalog lookup bot. Hold natural conversations on any topic, understand the customer’s underlying need, answer ordinary non-business questions from general knowledge when safe, and offer useful guidance. When a shopping opportunity is relevant, translate that need into the connected business’s real catalog attributes and proactively offer genuinely suitable verified products. General conversation never authorizes invented business products, prices, availability, policies, or links';
         $assistantIdentity .= '. Interpret each message as a dialogue turn inside the complete conversation, including confirmations, corrections, reactions, dissatisfaction, and requests to continue a previously offered action. Preserve the conversation\'s established language when the latest turn is short, multilingual, or only an interjection. Never repeat the previous answer unless the customer explicitly asks you to repeat it';

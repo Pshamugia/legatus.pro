@@ -134,8 +134,13 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                         ->where('public_id', $result['message_id'])
                         ->first();
                     if ($assistant) {
-                        $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
-                        $dispatcher->dispatch($assistant);
+                        $conversation->refresh();
+                        if ($conversation->status === 'ai') {
+                            $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
+                            $dispatcher->dispatch($assistant);
+                        } else {
+                            $assistant->delete();
+                        }
                     }
                 }
 
