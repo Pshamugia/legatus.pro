@@ -69,8 +69,7 @@ class InboxController extends Controller
     {
         $this->own($conversation, $tenant);
         $tenant->authorize(['owner', 'admin', 'agent']);
-        $conversation->update(['status' => 'ai', 'assigned_to' => null, 'priority' => 'normal', 'last_message_at' => now()]);
-        $conversation->messages()->create(['role' => 'system', 'content' => 'Conversation returned to Legatus.']);
+        $this->returnToAi($conversation);
 
         return back()->with('success', 'Legatus is handling this conversation again.');
     }
@@ -79,9 +78,9 @@ class InboxController extends Controller
     {
         $this->own($conversation, $tenant);
         $tenant->authorize(['owner', 'admin', 'agent']);
-        $conversation->update(['status' => 'closed', 'outcome' => $conversation->outcome ?: 'resolved', 'resolved_at' => now(), 'last_message_at' => now()]);
+        $this->returnToAi($conversation);
 
-        return back()->with('success', 'Conversation closed.');
+        return to_route('inbox.index')->with('success', 'Conversation closed and returned to Legatus.');
     }
 
     public function poll(Conversation $conversation, TenantContext $tenant)
@@ -119,6 +118,21 @@ class InboxController extends Controller
     private function own(Conversation $conversation, TenantContext $tenant): void
     {
         abort_unless($conversation->agent_id === $tenant->agent()->id, 404);
+    }
+
+    private function returnToAi(Conversation $conversation): void
+    {
+        $wasHuman = $conversation->status === 'human';
+        $conversation->update([
+            'status' => 'ai',
+            'assigned_to' => null,
+            'priority' => 'normal',
+            'resolved_at' => null,
+            'last_message_at' => now(),
+        ]);
+        if ($wasHuman) {
+            $conversation->messages()->create(['role' => 'system', 'content' => 'Conversation returned to Legatus.']);
+        }
     }
 
     private function deliveryStatus($message): ?string

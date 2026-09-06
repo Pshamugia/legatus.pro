@@ -129,11 +129,36 @@ class OperatorInboxTest extends TestCase
         ]);
     }
 
-    public function test_operator_can_close_a_conversation(): void
+    public function test_leaving_a_human_conversation_returns_it_to_ai_without_generating_a_reply(): void
     {
         $c = $this->conversation();
-        $this->post("/app/inbox/{$c->id}/close")->assertRedirect();
-        $this->assertDatabaseHas('conversations', ['id' => $c->id, 'status' => 'closed']);
+        $assistantCount = $c->messages()->where('role', 'assistant')->count();
+
+        $this->post("/app/inbox/{$c->id}/close")->assertRedirect(route('inbox.index'));
+
+        $this->assertDatabaseHas('conversations', [
+            'id' => $c->id,
+            'status' => 'ai',
+            'assigned_to' => null,
+        ]);
+        $this->assertSame($assistantCount, $c->messages()->where('role', 'assistant')->count());
+        $this->assertDatabaseHas('messages', [
+            'conversation_id' => $c->id,
+            'role' => 'system',
+            'content' => 'Conversation returned to Legatus.',
+        ]);
+    }
+
+    public function test_human_inbox_registers_automatic_ai_release_when_the_operator_leaves(): void
+    {
+        $c = $this->conversation();
+
+        $this->get('/app/inbox?conversation='.$c->id)
+            ->assertOk()
+            ->assertSee('Close & resume AI', false)
+            ->assertSee('const automaticReleaseUrl', false)
+            ->assertSee("window.addEventListener('pagehide'", false)
+            ->assertSee('navigator.sendBeacon(automaticReleaseUrl, data)', false);
     }
 
     public function test_reply_composer_is_rendered_immediately_after_the_message_list(): void
