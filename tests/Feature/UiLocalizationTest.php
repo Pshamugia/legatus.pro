@@ -39,6 +39,8 @@ class UiLocalizationTest extends TestCase
             ->assertDontSee('updateფასები', false);
 
         $response->assertSee('Legatus არის თქვენი AI სავაჭრო ასისტენტი');
+        $response->assertSee("html[lang=\"ka\"] .hero h1", false)
+            ->assertSee("fonts/archyedt-bold-webfont.ttf", false);
         $this->assertMatchesRegularExpression('/<div class="navlinks">.*class="ui-locale"/s', $response->getContent());
 
         $this->withServerVariables($server)->post(route('ui-locale.update'), ['locale' => 'en'])
