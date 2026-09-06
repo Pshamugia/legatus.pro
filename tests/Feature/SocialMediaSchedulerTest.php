@@ -339,7 +339,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('https://shop.example/storage/books/exact-thumb-image.jpg', $post->image_url);
     }
 
-    public function test_storefront_primary_image_contract_does_not_change_the_other_image_styles(): void
+    public function test_styled_images_use_the_plain_storefront_photo_instead_of_catalog_design(): void
     {
         [$user, $agent] = $this->tenant('storefront-primary-image-framed');
         $this->connections($agent);
@@ -348,7 +348,10 @@ class SocialMediaSchedulerTest extends TestCase
         $metadata['image'] = 'https://shop.example/images/generated-catalog-design.jpg';
         $product->update(['metadata' => $metadata]);
         $this->mock(ProductPagePrimaryImageResolver::class)
-            ->shouldNotReceive('resolve');
+            ->shouldReceive('resolve')
+            ->once()
+            ->withArgs(fn ($resolvedProduct, $language): bool => $resolvedProduct->is($product) && $language === null)
+            ->andReturn('https://shop.example/images/plain-storefront-photo.jpg');
         Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
 
         $this->actingAs($user)->put(route('social-media.templates.update'), [
@@ -375,7 +378,7 @@ class SocialMediaSchedulerTest extends TestCase
         ])->assertRedirect(route('social-media.index'));
 
         $this->assertSame(
-            'https://shop.example/images/generated-catalog-design.jpg',
+            'https://shop.example/images/plain-storefront-photo.jpg',
             $agent->socialMediaPosts()->sole()->image_url,
         );
     }

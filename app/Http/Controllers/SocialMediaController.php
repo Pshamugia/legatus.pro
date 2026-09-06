@@ -57,7 +57,7 @@ class SocialMediaController extends Controller
             return $product->stock > 0 && $this->publicHttpUrl($url)
                 && ($product->catalogDesignImageUrl() !== null || $product->publicImageUrl() !== null);
         }) ?? $sampleCandidates->first(fn ($product): bool => $product->stock > 0 && $this->publicHttpUrl(data_get($product->metadata, 'product_url')));
-        $primaryImage = $sample ? $primaryImages->resolve($sample) : null;
+        $primaryImage = $sample ? $primaryImages->resolve($sample, $primaryLanguage) : null;
         $localizedMap = $sample ? (array) data_get($sample->metadata, 'localized', []) : [];
         $localizedPreview = $sample && filled($primaryLanguage)
             ? (array) ($localizedMap[$primaryLanguage] ?? [])
@@ -72,7 +72,7 @@ class SocialMediaController extends Controller
             // Preserve the catalog's curated/branded image. The localized
             // crawl image is only a fallback when the catalog has none.
             'image' => $catalogImage,
-            'raw_image' => data_get($localizedPreview, 'image', $sample->publicImageUrl()),
+            'raw_image' => $primaryImage ?: data_get($localizedPreview, 'image', $sample->publicImageUrl()),
             'business_name' => (string) ($agent->business_name ?: $agent->name),
         ] : [
             'title' => 'Product title',
@@ -86,15 +86,16 @@ class SocialMediaController extends Controller
         ];
 
         $previewSource = $previewProduct['image'];
+        $plainSource = $previewProduct['raw_image'] ?: $previewSource;
         $previewProduct['style_images'] = collect(SocialMediaTemplateService::IMAGE_STYLES)
-            ->mapWithKeys(fn (string $style): array => [
-                $style => $style === 'storefront'
-                    ? $primaryImage
-                    : ($previewSource ? $imageDesigner->render(
-                        $style === 'raw' ? ($previewProduct['raw_image'] ?: $previewSource) : $previewSource,
-                        $style,
-                    ) : null),
-            ])->all();
+            ->mapWithKeys(function (string $style) use ($primaryImage, $previewSource, $plainSource, $imageDesigner): array {
+                return [$style => match ($style) {
+                    'original' => $previewSource,
+                    'storefront' => $primaryImage,
+                    'raw' => $plainSource,
+                    default => $plainSource ? $imageDesigner->render($plainSource, $style) : null,
+                }];
+            })->all();
 
         return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'canManage', 'templates', 'previewProduct'));
     }

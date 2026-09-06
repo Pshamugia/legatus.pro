@@ -301,18 +301,14 @@ class SocialMediaScheduler
         $localized = $language ? (array) ($localizedMap[$language] ?? []) : [];
         $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
         $style = (string) ($template['image_style'] ?? 'original');
-        $primaryImage = $style === 'storefront' ? $this->primaryImages->resolve($product, $language) : null;
+        $primaryImage = $style !== 'original' ? $this->primaryImages->resolve($product, $language) : null;
         $catalogImage = $product->catalogDesignImageUrl() ?: $product->publicImageUrl();
-        $sourceImage = $style === 'raw'
-            ? ($localized['image'] ?? $catalogImage)
-            : ($style === 'storefront' && $primaryImage
-                ? $primaryImage
-                : ($catalogImage ?: ($localized['image'] ?? null)));
-        $image = $sourceImage
-            ? ($style === 'storefront' && $primaryImage
-                ? $primaryImage
-                : $this->images->render($sourceImage, $style === 'storefront' ? 'original' : $style))
-            : null;
+        $plainImage = $primaryImage ?: ($localized['image'] ?? $product->publicImageUrl() ?: $catalogImage);
+        $image = match ($style) {
+            'original' => $catalogImage,
+            'storefront', 'raw' => $plainImage,
+            default => $plainImage ? $this->images->render($plainImage, $style) : null,
+        };
         $title = (string) ($localized['name'] ?? $product->name);
         $descriptionValue = $product->socialDescription($language);
         $description = trim(strip_tags((string) $descriptionValue));
