@@ -433,6 +433,80 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('failed exact bundle lookup never proves that entity-family items are absent', (string) $contextRequest->data()['instructions']);
     }
 
+    public function test_two_named_products_are_searched_as_independent_catalog_identities(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://example.com/search?q={query}',
+        ])]);
+        $products = $agent->products()->where('stock', '>', 0)->take(2)->get();
+        $this->assertCount(2, $products);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'multi-product-identity-customer',
+            'status' => 'ai',
+            'channel' => 'instagram',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'multi-product-resolution', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_human_request' => false,
+                    'is_catalog_follow_up' => true,
+                    'catalog_scope_action' => 'replace',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => $products[0]->name,
+                    'resolved_queries' => $products->pluck('name')->all(),
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'multi-product-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I found both requested products.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => $products->pluck('id')->all(),
+                    'sources' => [],
+                    'factual_claims' => $products->map(fn ($product): array => [
+                        'type' => 'product',
+                        'product_id' => $product->id,
+                        'amount' => null,
+                        'quantity' => null,
+                        'reference' => null,
+                    ])->all(),
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            $products->pluck('name')->implode(' and '),
+            $conversation,
+        );
+
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $queries = collect($run->tools_used)
+            ->where('name', 'search_products')
+            ->pluck('arguments.query')
+            ->values()
+            ->all();
+        $this->assertSame($products->pluck('name')->all(), $queries);
+        $this->assertSame($products->pluck('id')->all(), collect($reply['products'])->pluck('id')->all());
+    }
+
     public function test_more_results_keeps_the_verified_category_scope_and_excludes_shown_products(): void
     {
         $this->seed();
