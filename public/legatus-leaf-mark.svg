@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Legatus">
-  <g fill="none" stroke="#153c30" stroke-width="4.5" stroke-linecap="square" stroke-linejoin="miter">
-    <path d="M32 4C43 14 46 25 32 39 18 25 21 14 32 4Z"/>
-    <path d="M31 56C17 55 8 45 8 25c15 3 23 13 23 31Z"/>
-    <path d="M33 56c14-1 23-11 23-31-15 3-23 13-23 31Z"/>
-    <path d="M32 57V15M32 34l-8-10M31 50 17 35M33 50l14-15"/>
-  </g>
-</svg>

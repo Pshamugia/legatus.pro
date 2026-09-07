@@ -6,7 +6,7 @@
 @include('partials.auth-navigation')
 <div class="chatpage" style="min-height:calc(100vh - 78px)">
     <div class="form-card" style="width:min(440px,100%)">
-        <a class="brand" href="/"><img class="mark" src="{{ asset('legatus-leaf-mark.svg') }}" alt="" style="background:transparent;border-radius:0"> Legatus</a>
+        <a class="brand" href="/"><span class="mark">L</span> Legatus</a>
         <h1 style="margin-top:32px">Welcome back.</h1>
         <p style="color:var(--muted)">Sign in to your AI sales team.</p>
 

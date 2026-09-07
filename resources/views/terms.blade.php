@@ -5,7 +5,7 @@
 
 @section('body')
 <main class="legal-page">
-    <a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-leaf-mark.svg') }}" alt="" style="background:transparent;border-radius:0"> Legatus</a>
+    <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
     <article class="legal-card">
         <span class="eyebrow">Effective 20 July 2026</span>
         <h1>Terms of Service</h1>
