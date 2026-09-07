@@ -31,7 +31,8 @@ class UiLocalizationTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Language', 'ka')
             ->assertSee('<html lang="ka">', false)
-            ->assertSee('გაყიდე მეტი')
+            ->assertSee('Legatus — შენი AI')
+            ->assertSee('მოურავი')
             ->assertSee('AI სავაჭრო ასისტენტი, სოციალური მედიის მენეჯერი და ქოფირაითერი')
             ->assertSee('ინტერფეისის ენა')
             ->assertSee('value="en"', false)
@@ -49,8 +50,9 @@ class UiLocalizationTest extends TestCase
         $this->withServerVariables($server)->get(route('landing'))
             ->assertOk()
             ->assertSee('<html lang="en">', false)
-            ->assertSee('Sell more.')
-            ->assertDontSee('გაყიდე მეტი');
+            ->assertSee('Legatus — your AI')
+            ->assertSee('steward')
+            ->assertDontSee('შენი AI მოურავი');
     }
 
     public function test_georgian_locale_applies_to_the_authenticated_admin(): void
@@ -78,7 +80,8 @@ class UiLocalizationTest extends TestCase
                 ->get(route('landing'))
                 ->assertOk()
                 ->assertSee('<html lang="en">', false)
-                ->assertSee('Sell more.')
+                ->assertSee('Legatus — your AI')
+                ->assertSee('steward')
                 ->assertDontSee('Interface language')
                 ->assertDontSee('გაყიდე მეტი');
         }

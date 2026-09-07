@@ -17,6 +17,8 @@ return [
     'Sign in' => 'შესვლა',
     'Sign out' => 'გასვლა',
     'AI team for sales, content &amp; social media' => 'AI გუნდი გაყიდვების, კონტენტისა და სოციალური მედიისთვის',
+    'Legatus — your AI' => 'Legatus — შენი AI',
+    'steward' => 'მოურავი',
     'Sell more. Post smarter.' => 'გაყიდე მეტი. გამოაქვეყნე ჭკვიანურად.',
     'Write faster.' => 'წერე სწრაფად.',
     'See how it works' => 'ნახე როგორ მუშაობს',

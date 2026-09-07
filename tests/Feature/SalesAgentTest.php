@@ -21,7 +21,8 @@ class SalesAgentTest extends TestCase
     {
         $this->get('/')
             ->assertOk()
-            ->assertSee('Sell more. Post smarter.')
+            ->assertSee('Legatus — your AI')
+            ->assertSee('steward')
             ->assertSee('Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter')
             ->assertSee('AI team for sales, content &amp; social media', false)
             ->assertSee('data-demo-tab="shopping"', false)

@@ -41,7 +41,7 @@
     <main class="hero" id="product">
         <section>
             <span class="tag"><span class="dot"></span> AI team for sales, content &amp; social media</span>
-            <h1>Sell more. Post smarter. <em>Write faster.</em></h1>
+            <h1>Legatus — your AI <em>steward</em></h1>
             <p>Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter — all in one platform. It supports customer conversations on your website, Facebook, Instagram, and WhatsApp, creates content in three distinct styles, and automatically publishes social posts.</p>
             <div class="actions">
                 <a class="btn lime" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
