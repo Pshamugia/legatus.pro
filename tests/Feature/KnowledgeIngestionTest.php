@@ -624,6 +624,12 @@ HTML;
             ->assertSee('visibleCategoryLimit=5', false)
             ->assertSee('id="toggle-categories"', false)
             ->assertSee('id="category-feedback"', false)
+            ->assertSee('knowledge-group--catalog', false)
+            ->assertSee('knowledge-group--search', false)
+            ->assertSee('knowledge-group--languages', false)
+            ->assertSee('knowledge-group--categories', false)
+            ->assertSee('knowledge-group--sitemap', false)
+            ->assertSee('knowledge-section--business', false)
             ->assertSee('A new category form was added below.', false)
             ->assertDontSee('<input required name="categories[', false)
             ->assertDontSee('<input required name="languages[', false);
