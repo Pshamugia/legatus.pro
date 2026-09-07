@@ -312,7 +312,7 @@ class SocialMediaScheduler
         $catalogImage = $product->catalogDesignImageUrl() ?: $product->publicImageUrl();
         $plainImage = $primaryImage ?: ($localized['image'] ?? $product->publicImageUrl() ?: $catalogImage);
         $image = match ($style) {
-            'original' => $catalogImage,
+            'original' => $catalogImage ? $this->images->render($catalogImage, 'original') : null,
             'storefront', 'raw' => $plainImage,
             default => $plainImage ? $this->images->render($plainImage, $style) : null,
         };

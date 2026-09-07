@@ -366,6 +366,52 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('https://shop.example/product.png', app(SocialMediaImageDesigner::class)->render('https://shop.example/product.png', 'raw'));
     }
 
+    public function test_catalog_design_renderer_is_used_by_preview_and_scheduled_posts(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD is required for social image rendering.');
+        }
+
+        Storage::fake('public');
+        [$user, $agent] = $this->tenant('catalog-design-rendering');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Designed Product', 'General', 2));
+        // A square crop can still be a flat cover photo. It must not be
+        // mistaken for an already prepared square catalog composition.
+        $source = imagecreatetruecolor(400, 400);
+        imagefill($source, 0, 0, imagecolorallocate($source, 196, 172, 138));
+        imagefilledrectangle($source, 115, 20, 285, 380, imagecolorallocate($source, 66, 69, 59));
+        imagefilledrectangle($source, 125, 30, 275, 370, imagecolorallocate($source, 196, 172, 138));
+        ob_start();
+        imagepng($source);
+        $png = (string) ob_get_clean();
+        imagedestroy($source);
+        Http::fake([
+            'https://shop.example/images/product.jpg' => Http::response($png, 200, ['Content-Type' => 'image/png']),
+            '*' => Http::response('', 404),
+        ]);
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('/media/social/', false);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $this->assertStringContainsString('/media/social/', (string) $agent->socialMediaPosts()->sole()->image_url);
+        $rendered = imagecreatefromstring(Storage::disk('public')->get(Storage::disk('public')->files('social-media')[0]));
+        $leftBackground = imagecolorat($rendered, 250, 540);
+        imagedestroy($rendered);
+        $this->assertGreaterThan(220, ($leftBackground >> 16) & 0xFF);
+        $this->assertGreaterThan(220, ($leftBackground >> 8) & 0xFF);
+        $this->assertGreaterThan(220, $leftBackground & 0xFF);
+    }
+
     public function test_catalog_design_keeps_an_already_prepared_square_artwork_intact(): void
     {
         $source = imagecreatetruecolor(400, 400);

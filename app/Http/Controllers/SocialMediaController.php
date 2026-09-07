@@ -90,7 +90,7 @@ class SocialMediaController extends Controller
         $previewProduct['style_images'] = collect(SocialMediaTemplateService::IMAGE_STYLES)
             ->mapWithKeys(function (string $style) use ($primaryImage, $previewSource, $plainSource, $imageDesigner): array {
                 return [$style => match ($style) {
-                    'original' => $previewSource,
+                    'original' => $previewSource ? $imageDesigner->render($previewSource, 'original') : null,
                     'storefront' => $primaryImage,
                     'raw' => $plainSource,
                     default => $plainSource ? $imageDesigner->render($plainSource, $style) : null,
