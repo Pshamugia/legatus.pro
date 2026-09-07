@@ -158,7 +158,9 @@ class CommerceConnectorTest extends TestCase
 
         $this->assertNotSame($secret, DB::table('commerce_connections')->value('secret'));
 
-        Http::fake(function (Request $request) use ($secret) {
+        $catalogUpdatedAt = now()->toIso8601String();
+
+        Http::fake(function (Request $request) use ($secret, $catalogUpdatedAt) {
             $parts = parse_url($request->url());
             $requestUri = ($parts['path'] ?? '/').(isset($parts['query']) ? '?'.$parts['query'] : '');
             $timestamp = $request->header('X-Legatus-Timestamp')[0] ?? '';
@@ -184,7 +186,7 @@ class CommerceConnectorTest extends TestCase
                         'purchasable' => true,
                         'url' => 'https://8.8.8.8/books/42',
                         'image_url' => 'https://8.8.8.8/books/42.jpg',
-                        'updated_at' => now()->toIso8601String(),
+                        'updated_at' => $catalogUpdatedAt,
                     ]],
                     'meta' => [
                         'sync_mode' => 'authoritative_snapshot',

@@ -3,7 +3,7 @@
 @section('body')
 @php($hasBillingAccess = $subscription?->grantsAccess() ?? false)
 <div class="chatpage" style="display:block;padding:40px 24px"><main style="max-width:1050px;margin:auto">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:20px"><a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-mark.svg') }}" alt="" style="background:transparent;border-radius:0"> Legatus</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn ghost">Log out</button></form></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:20px"><a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-leaf-mark.svg') }}" alt="" style="background:transparent;border-radius:0"> Legatus</a><form method="post" action="{{ route('logout') }}">@csrf<button class="btn ghost">Log out</button></form></div>
     <section style="text-align:center;margin:55px auto 34px;max-width:700px">
         <span class="tag"><span class="dot"></span>{{ $hasBillingAccess ? 'Workspace activated' : '2-day free trial' }}</span>
         <h1 style="font-size:44px;letter-spacing:-2px;margin:18px 0 10px">{{ $hasBillingAccess ? 'You’re all set' : 'Activate '.$organization->name }}</h1>
