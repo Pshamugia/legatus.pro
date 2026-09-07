@@ -614,6 +614,21 @@ HTML;
             ->assertDontSee('Connected knowledge');
     }
 
+    public function test_category_editor_is_compact_and_optional_blank_rows_do_not_block_saving(): void
+    {
+        $this->seed();
+
+        $response = $this->actingAs(User::firstOrFail())->get(route('knowledge.index'));
+
+        $response->assertOk()
+            ->assertSee('visibleCategoryLimit=5', false)
+            ->assertSee('id="toggle-categories"', false)
+            ->assertSee('id="category-feedback"', false)
+            ->assertSee('A new category form was added below.', false)
+            ->assertDontSee('<input required name="categories[', false)
+            ->assertDontSee('<input required name="languages[', false);
+    }
+
     public function test_live_knowledge_status_is_tenant_scoped_and_excludes_heavy_chunks(): void
     {
         $this->seed();
@@ -655,7 +670,12 @@ HTML;
             'sitemap_url' => 'https://shop.example/sitemap.xml',
         ]);
 
-        $response->assertOk()->assertJsonCount(7, 'source_ids');
+        $response->assertOk()
+            ->assertJsonCount(7, 'source_ids')
+            ->assertJsonFragment([
+                'name' => 'Thriller',
+                'url' => 'https://shop.example/category/thriller',
+            ]);
         $this->assertDatabaseHas('knowledge_sources', [
             'agent_id' => $agent->id, 'source_scope' => 'catalog', 'url' => 'https://shop.example/products',
         ]);

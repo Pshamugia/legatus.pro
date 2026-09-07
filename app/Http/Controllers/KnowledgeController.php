@@ -359,7 +359,20 @@ class KnowledgeController extends Controller
         $message = count($sourceIds).' website knowledge sources were saved. Synchronization was not started automatically.';
 
         return $request->expectsJson()
-            ? response()->json(['message' => $message, 'source_ids' => $sourceIds])
+            ? response()->json([
+                'message' => $message,
+                'source_ids' => $sourceIds,
+                'category_sources' => $agent->knowledgeSources()
+                    ->where('source_scope', 'category')
+                    ->get()
+                    ->map(fn (KnowledgeSource $source): array => [
+                        'id' => $source->id,
+                        'name' => $source->taxonomy_label,
+                        'url' => $source->url,
+                        'status' => $source->status,
+                    ])
+                    ->values(),
+            ])
             : back()->with('success', $message);
     }
 
