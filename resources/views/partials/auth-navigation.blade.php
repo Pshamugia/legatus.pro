@@ -1,6 +1,6 @@
 <header class="wrap">
     <nav class="nav" aria-label="Public navigation">
-        <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
+        <a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-mark.svg') }}" alt=""> Legatus</a>
         <span class="navlinks">
             <a href="{{ route('landing') }}#product">Product</a>
             <a href="{{ route('landing') }}#how-it-works">How it works</a>

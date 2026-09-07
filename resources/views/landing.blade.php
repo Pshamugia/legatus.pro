@@ -22,7 +22,7 @@
 
 <div class="wrap">
     <nav class="nav">
-        <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
+        <a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-mark.svg') }}" alt=""> Legatus</a>
         <div class="navlinks">
             <a href="#product">Product</a>
             <a href="#trust">Trust</a>

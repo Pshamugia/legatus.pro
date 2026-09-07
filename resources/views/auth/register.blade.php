@@ -4,7 +4,7 @@
 @include('partials.auth-navigation')
 <div class="chatpage" style="min-height:calc(100vh - 78px)">
     <div class="form-card" style="width:min(520px,100%)">
-        <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
+        <a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-mark.svg') }}" alt=""> Legatus</a>
         <h1 style="margin-top:28px">Create your sales team.</h1>
         <form method="post" action="{{ route('register.store') }}">
             @csrf

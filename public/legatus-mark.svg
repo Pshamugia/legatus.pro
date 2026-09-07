@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Legatus">
   <rect width="64" height="64" rx="18" fill="#153c30"/>
-  <path d="M20 15h9v27h18v8H20z" fill="#d9ff72"/>
-  <circle cx="45" cy="20" r="5" fill="#fff" opacity=".9"/>
+  <g fill="none" stroke="#d9ff72" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 39V19"/>
+    <path d="M32 9c9 6 11 14 0 24-11-10-9-18 0-24Z"/>
+    <path d="M32 47C22 47 15 42 13 31c10-1 18 3 19 16Z"/>
+    <path d="M32 47c10 0 17-5 19-16-10-1-18 3-19 16Z"/>
+    <path d="M32 32 26 22M32 47l-11-9m11 9 11-9"/>
+  </g>
+  <path d="M32 46v9h12" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

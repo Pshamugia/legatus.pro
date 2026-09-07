@@ -5,7 +5,7 @@
 
 @section('body')
 <main class="legal-page">
-    <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
+    <a class="brand" href="{{ route('landing') }}"><img class="mark" src="{{ asset('legatus-mark.svg') }}" alt=""> Legatus</a>
     <article class="legal-card">
         <span class="eyebrow">Privacy control</span>
         <h1>Data deletion instructions</h1>
