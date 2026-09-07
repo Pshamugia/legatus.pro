@@ -79,6 +79,12 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         }
 
         if ((bool) data_get($record->payload, 'requires_human', false)) {
+            if ($record->message_type === 'attachment') {
+                $this->replyThatAttachmentCannotBeRead($record, $connection, $senderId, $text, $dispatcher);
+
+                return;
+            }
+
             $reason = 'The customer sent media or an ungrounded postback that requires human review.';
             $preserved = $this->preserveWithoutPausingAi($record, $reason, transportFailure: false);
             $updates = $preserved
@@ -105,7 +111,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
                 $customerInput = $text;
                 if ($record->message_type === 'attachment' || $this->immediatelyFollowsCustomerImage($record)) {
-                    $this->replyThatImageRecognitionIsUnavailable($record, $connection, $senderId, $text, $dispatcher);
+                    $this->replyThatAttachmentCannotBeRead($record, $connection, $senderId, $text, $dispatcher);
 
                     return;
                 }
@@ -206,7 +212,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         $assistant->update(['content' => $disclosure.($content !== '' ? "\n\n{$content}" : '')]);
     }
 
-    private function replyThatImageRecognitionIsUnavailable(
+    private function replyThatAttachmentCannotBeRead(
         ChannelMessage $record,
         ChannelConnection $connection,
         string $senderId,
@@ -225,11 +231,17 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'customer_name' => ucfirst($connection->provider).' customer',
                     'channel' => $connection->provider,
                     'status' => 'ai',
-                ]);
+            ]);
             $caption = str_starts_with($text, '[Customer sent an image') ? '[Customer sent an image.]' : PrivacyRedactor::text($text);
+            $isImage = collect(data_get($record->payload, 'attachments', []))
+                ->contains(fn ($attachment): bool => data_get($attachment, 'type') === 'image')
+                || $this->immediatelyFollowsCustomerImage($record);
             $customer = $conversation->messages()->firstOrCreate(
                 ['request_id' => $record->idempotency_key],
-                ['role' => 'customer', 'content' => $caption, 'metadata' => ['image_received' => true]],
+                ['role' => 'customer', 'content' => $caption, 'metadata' => [
+                    'attachment_received' => true,
+                    'image_received' => $isImage,
+                ]],
             );
             $conversation->update([
                 'channel_connection_id' => $connection->id,
@@ -255,19 +267,25 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 ->where('created_at', '>=', now()->subSeconds(30))
                 ->latest('id')
                 ->first();
-            if ((bool) data_get($recentLimitation?->metadata, 'image_recognition_unavailable')) {
+            if ((bool) data_get($recentLimitation?->metadata, 'attachment_unavailable')) {
                 return null;
             }
 
             $context = $conversation->messages()->latest('id')->limit(8)->pluck('content')->implode("\n");
             $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $text."\n".$context) === 1;
-            $reply = $georgian
-                ? 'ბოდიში, ფოტოს შინაარსის სანდოდ ამოცნობა ჯერ არ შემიძლია. მომწერეთ პროდუქტის სათაური, ავტორი, ბრენდი ან მოდელი ტექსტურად და კატალოგში ზუსტად გადავამოწმებ.'
-                : 'Sorry, I cannot reliably recognize the contents of photos yet. Please send the product title, author, brand, or model as text and I will check the catalog accurately.';
+            $reply = match (true) {
+                $georgian && $isImage => 'ბოდიში, ფოტოს შინაარსის სანდოდ ამოცნობა არ შემიძლია. მომწერეთ პროდუქტის სათაური, ავტორი, ბრენდი ან მოდელი ტექსტურად და კატალოგში ზუსტად გადავამოწმებ.',
+                $georgian => 'ბოდიში, გამოგზავნილი ფაილის შინაარსის წაკითხვა არ შემიძლია. მომწერეთ მოთხოვნა ტექსტურად და დაგეხმარებით.',
+                $isImage => 'Sorry, I cannot reliably recognize the contents of photos. Please send the product title, author, brand, or model as text and I will check the catalog accurately.',
+                default => 'Sorry, I cannot read the contents of the attached file. Please send your request as text and I will help.',
+            };
 
             return $conversation->messages()->firstOrCreate(
                 ['request_id' => 'image-unavailable:'.$record->idempotency_key],
-                ['role' => 'assistant', 'content' => $reply, 'confidence' => 1, 'metadata' => ['image_recognition_unavailable' => true]],
+                ['role' => 'assistant', 'content' => $reply, 'confidence' => 1, 'metadata' => [
+                    'attachment_unavailable' => true,
+                    'image_recognition_unavailable' => $isImage,
+                ]],
             );
         }, 3);
 

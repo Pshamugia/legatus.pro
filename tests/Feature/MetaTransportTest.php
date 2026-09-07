@@ -459,8 +459,12 @@ class MetaTransportTest extends TestCase
         $conversation = $connection->conversations()->firstOrFail();
         $this->assertSame('ai', $conversation->status);
         $this->assertSame(2, $conversation->messages()->where('role', 'customer')->count());
-        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
-        $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
+        $this->assertSame(1, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame(1, $connection->channelMessages()->where('direction', 'outbound')->count());
+        $this->assertTrue((bool) data_get(
+            $conversation->messages()->where('role', 'assistant')->sole()->metadata,
+            'attachment_unavailable',
+        ));
         $this->assertStringNotContainsString('INTERNAL_MACHINE_TOKEN', $conversation->messages()->pluck('content')->implode(' '));
     }
 
@@ -497,7 +501,7 @@ class MetaTransportTest extends TestCase
         $conversation = $connection->conversations()->firstOrFail();
         $assistant = $conversation->messages()->where('role', 'assistant')->sole();
         $this->assertSame('ai', $conversation->status);
-        $this->assertStringContainsString('ფოტოს შინაარსის სანდოდ ამოცნობა ჯერ არ შემიძლია', $assistant->content);
+        $this->assertStringContainsString('ფოტოს შინაარსის სანდოდ ამოცნობა არ შემიძლია', $assistant->content);
         $this->assertTrue((bool) data_get($assistant->metadata, 'image_recognition_unavailable'));
         $this->assertDatabaseHas('channel_messages', [
             'message_id' => $assistant->id,
