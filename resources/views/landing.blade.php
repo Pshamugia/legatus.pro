@@ -154,8 +154,8 @@
         <div class="billing-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
             @foreach([
                 ['id' => 'monthly', 'key' => 'monthly', 'label' => 'Monthly', 'chat' => '$30', 'social' => '$60', 'chat_note' => 'billed every month', 'social_note' => 'Chat + Social · billed every month', 'addon' => '+$30/month', 'featured' => false],
-                ['id' => 'six-months', 'key' => 'six_months', 'label' => '6 months', 'chat' => '$162', 'social' => '$324', 'chat_note' => 'billed every 6 months · save $18 ($27/month)', 'social_note' => 'Chat + Social · billed every 6 months · save $36 ($54/month)', 'addon' => '+$162/6 months', 'featured' => false],
-                ['id' => 'annual', 'key' => 'yearly', 'label' => 'Annual', 'chat' => '$288', 'social' => '$576', 'chat_note' => 'billed every year · save $72 ($24/month)', 'social_note' => 'Chat + Social · billed every year · save $144 ($48/month)', 'addon' => '+$288/year', 'featured' => true],
+                ['id' => 'six-months', 'key' => 'six_months', 'label' => '6 months', 'chat' => '$162', 'social' => '$324', 'chat_note' => 'billed every 6 months · save $18', 'social_note' => 'Chat + Social · billed every 6 months · save $36', 'addon' => '+$162/6 months', 'featured' => false],
+                ['id' => 'annual', 'key' => 'yearly', 'label' => 'Annual', 'chat' => '$288', 'social' => '$576', 'chat_note' => 'billed every year · save $72', 'social_note' => 'Chat + Social · billed every year · save $144', 'addon' => '+$288/year', 'featured' => true],
             ] as $period)
                 @php
                     $checkoutRoute = auth()->check()
@@ -163,11 +163,8 @@
                         : (config('legatus.registration_enabled')
                             ? route('register', ['period' => $period['key'], 'package' => 'chat'])
                             : $primaryRoute);
-                    $uiTranslations = app()->getLocale() === 'ka' ? trans('ui', [], 'ka') : [];
-                    $chatNote = $uiTranslations[$period['chat_note']] ?? $period['chat_note'];
-                    $socialNote = $uiTranslations[$period['social_note']] ?? $period['social_note'];
                 @endphp
-                <article class="panel billing-option{{ $period['featured'] ? ' billing-option-featured' : '' }}" data-chat-price="{{ $period['chat'] }}" data-social-price="{{ $period['social'] }}" data-chat-note="{{ $chatNote }}" data-social-note="{{ $socialNote }}" data-checkout-base="{{ $checkoutRoute }}" data-period="{{ $period['key'] }}">
+                <article class="panel billing-option{{ $period['featured'] ? ' billing-option-featured' : '' }}" data-chat-price="{{ $period['chat'] }}" data-social-price="{{ $period['social'] }}" data-chat-note="{{ $period['chat_note'] }}" data-social-note="{{ $period['social_note'] }}" data-checkout-base="{{ $checkoutRoute }}" data-period="{{ $period['key'] }}">
                     <span class="eyebrow">{{ $period['label'] }}</span>
                     <details class="billing-package-picker">
                         <summary><span class="billing-package-name">Legatus Chat</span><span aria-hidden="true">⌄</span></summary>
@@ -178,7 +175,7 @@
                         </label>
                     </details>
                     <h3 aria-live="polite">{{ $period['chat'] }}</h3>
-                    <p>{{ $chatNote }}</p>
+                    <p>{{ $period['chat_note'] }}</p>
                     <a class="btn billing-checkout-link{{ $period['featured'] ? ' lime' : '' }}" href="{{ $checkoutRoute }}">Start free trial</a>
                 </article>
             @endforeach
