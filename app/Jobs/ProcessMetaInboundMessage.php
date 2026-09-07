@@ -52,7 +52,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         $connection = $record->connection;
         if (! $connection || ! $connection->isActive()) {
             $reason = 'The Meta channel connection is unavailable.';
-            $preserved = $this->preserveForHuman($record, $reason);
+            $preserved = $this->preserveWithoutPausingAi($record, $reason);
             $updates = [
                 'status' => 'failed',
                 'failure_reason' => $reason,
@@ -80,7 +80,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
         if ((bool) data_get($record->payload, 'requires_human', false)) {
             $reason = 'The customer sent media or an ungrounded postback that requires human review.';
-            $preserved = $this->preserveForHuman($record, $reason, transportFailure: false);
+            $preserved = $this->preserveWithoutPausingAi($record, $reason, transportFailure: false);
             $updates = $preserved
                 ? ['status' => 'processed', 'payload' => $this->minimalPayload($record), 'processed_at' => now()]
                 : ['status' => 'failed', 'failure_reason' => $reason, 'failed_at' => now()];
@@ -282,7 +282,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
         $record = ChannelMessage::query()->find($this->channelMessageId);
         if ($record) {
-            $preserved = $this->preserveForHuman($record, $reason);
+            $preserved = $this->preserveWithoutPausingAi($record, $reason);
             $updates = [
                 'status' => 'failed',
                 'failure_reason' => $reason,
@@ -295,11 +295,8 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    /**
-     * Fail closed without losing the customer's request. The operator gets a
-     * redacted inbox message before the encrypted transport payload is erased.
-     */
-    private function preserveForHuman(ChannelMessage $record, string $reason, bool $transportFailure = true): bool
+    /** Preserve a redacted customer request without inventing human ownership. */
+    private function preserveWithoutPausingAi(ChannelMessage $record, string $reason, bool $transportFailure = true): bool
     {
         try {
             return DB::transaction(function () use ($record, $reason, $transportFailure): bool {
@@ -325,14 +322,14 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                         'visitor_id' => $customerId,
                         'customer_name' => ucfirst($connection->provider).' customer',
                         'channel' => $connection->provider,
-                        'status' => 'human',
+                        'status' => 'ai',
                     ]);
 
                 $safeText = PrivacyRedactor::text($text);
                 $metadata = [
                     'contact_evidence' => PrivacyRedactor::contactEvidence($text),
-                    'human_handoff' => true,
-                    'handoff_reason' => $reason,
+                    'automatic_processing_failure' => true,
+                    'processing_failure_reason' => $reason,
                     'channel_message_id' => $locked->id,
                 ];
                 if ($transportFailure) {
@@ -349,16 +346,15 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 $conversation->update([
                     'channel_connection_id' => $connection->id,
                     'external_thread_id' => $senderId,
-                    'status' => 'human',
-                    'assigned_to' => 'Meta inbox',
-                    'priority' => 'high',
-                    'intent' => 'handoff',
-                    'handoff_reason' => $reason,
-                    'handoff_summary' => $transportFailure
-                        ? 'A customer request needs human attention because automated Meta processing could not complete safely.'
-                        : 'The customer sent media or a postback that Legatus intentionally did not interpret without grounded text.',
-                    'suggested_reply' => 'Please review the customer request and reply from the operator inbox.',
-                    'outcome' => 'human_handoff',
+                    'status' => 'ai',
+                    'assigned_to' => null,
+                    'priority' => 'normal',
+                    'intent' => null,
+                    'handoff_reason' => null,
+                    'handoff_summary' => null,
+                    'suggested_reply' => null,
+                    'outcome' => null,
+                    'resolved_at' => null,
                     'last_message_at' => now(),
                 ]);
                 $locked->update([

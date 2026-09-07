@@ -84,6 +84,23 @@ class ConversationEngine
             }
         }
 
+        $automaticMetaPause = $conversation->status === 'human'
+            && $conversation->assigned_to === 'Meta inbox'
+            && ! $conversation->messages()->where('role', 'human')->exists();
+        if ($automaticMetaPause) {
+            $conversation->update([
+                'status' => 'ai',
+                'assigned_to' => null,
+                'priority' => 'normal',
+                'intent' => null,
+                'handoff_reason' => null,
+                'handoff_summary' => null,
+                'suggested_reply' => null,
+                'outcome' => null,
+                'resolved_at' => null,
+            ]);
+        }
+
         if ($conversation->status === 'human') {
             $conversation->update(['last_message_at' => now()]);
 

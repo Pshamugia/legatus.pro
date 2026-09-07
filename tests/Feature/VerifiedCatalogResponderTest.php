@@ -718,6 +718,35 @@ class VerifiedCatalogResponderTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_legacy_automatic_meta_pause_resumes_when_no_human_ever_replied(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $conversation->update([
+            'status' => 'human',
+            'assigned_to' => 'Meta inbox',
+            'handoff_reason' => 'Inbound Meta message processing failed after safe retries.',
+        ]);
+        $agent->products()->create([
+            'name' => 'Test Product',
+            'sku' => 'META-RESUME-1',
+            'search_text' => 'Test Product',
+            'price' => 20,
+            'stock' => 1,
+            'is_active' => true,
+        ]);
+
+        $reply = app(ConversationEngine::class)->handle(
+            $agent,
+            'Test Product',
+            $conversation->channel,
+            $conversation->visitor_id,
+        );
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertNull($conversation->fresh()->assigned_to);
+    }
+
     public function test_unassigned_handoff_stays_paused_until_an_operator_resumes_ai(): void
     {
         [$agent, $conversation] = $this->context();

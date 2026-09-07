@@ -345,7 +345,7 @@ class MetaTransportTest extends TestCase
         Queue::assertPushed(SendMetaMessage::class, 1);
     }
 
-    public function test_expired_connection_inbound_is_redacted_and_preserved_for_the_human_inbox(): void
+    public function test_expired_connection_inbound_is_redacted_without_falsely_pausing_ai(): void
     {
         Queue::fake();
         $connection = $this->connection('facebook', 'page-expired-inbound');
@@ -372,9 +372,8 @@ class MetaTransportTest extends TestCase
         $this->assertArrayNotHasKey('text', $inbound->payload);
         $this->assertDatabaseHas('conversations', [
             'id' => $inbound->conversation_id,
-            'status' => 'human',
-            'priority' => 'high',
-            'assigned_to' => 'Meta inbox',
+            'status' => 'ai',
+            'assigned_to' => null,
             'channel_connection_id' => $connection->id,
             'external_thread_id' => 'expired-customer',
         ]);
@@ -404,7 +403,11 @@ class MetaTransportTest extends TestCase
         $inbound->refresh();
         $this->assertSame('failed', $inbound->status);
         $this->assertTrue($inbound->payload['content_removed']);
-        $this->assertDatabaseHas('conversations', ['id' => $inbound->conversation_id, 'status' => 'human']);
+        $this->assertDatabaseHas('conversations', [
+            'id' => $inbound->conversation_id,
+            'status' => 'ai',
+            'assigned_to' => null,
+        ]);
         $customer = $inbound->message()->firstOrFail();
         $this->assertSame('Email me at [email redacted] when ready.', $customer->content);
         $this->assertSame($inbound->idempotency_key, $customer->request_id);
@@ -413,7 +416,7 @@ class MetaTransportTest extends TestCase
         $this->assertSame(1, $customer->conversation->messages()->where('request_id', $inbound->idempotency_key)->count());
     }
 
-    public function test_attachment_only_and_ungrounded_postback_events_go_to_a_human_without_ai_inference(): void
+    public function test_attachment_only_and_ungrounded_postback_events_are_preserved_without_pausing_ai(): void
     {
         Queue::fake();
         $connection = $this->connection('facebook', 'page-unsupported-media');
@@ -454,7 +457,7 @@ class MetaTransportTest extends TestCase
         }
 
         $conversation = $connection->conversations()->firstOrFail();
-        $this->assertSame('human', $conversation->status);
+        $this->assertSame('ai', $conversation->status);
         $this->assertSame(2, $conversation->messages()->where('role', 'customer')->count());
         $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
         $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
