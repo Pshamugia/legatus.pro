@@ -244,6 +244,12 @@ html[lang="ka"] .creative-preview h3{font-family:'Legatus Archy','Noto Sans Geor
     .navlinks .btn{padding:9px 10px}
     .proof{grid-template-columns:1fr}
 }
+.hero>section:first-child>h1{font-size:clamp(22px,3.15vw,42px);white-space:nowrap}
+html[lang="ka"] body .hero h1{font-size:clamp(18px,3.15vw,42px);line-height:1.08;letter-spacing:-.4px}
+@media(max-width:600px){
+    .hero>section:first-child>h1{font-size:clamp(18px,5.35vw,22px);letter-spacing:-.75px}
+    html[lang="ka"] body .hero h1{font-size:clamp(17px,5.35vw,22px);letter-spacing:-.25px}
+}
 </style>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 document.addEventListener('DOMContentLoaded', () => {
