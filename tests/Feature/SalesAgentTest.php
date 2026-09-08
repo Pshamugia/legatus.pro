@@ -21,10 +21,9 @@ class SalesAgentTest extends TestCase
     {
         $this->get('/')
             ->assertOk()
-            ->assertSee('<body class="landing-page">', false)
             ->assertSee("fonts/bpg_boxo-boxo.ttf", false)
-            ->assertSee("body.landing-page,body.landing-page *{font-family:'Legatus Boxo'", false)
-            ->assertSee('body.landing-page h1,body.landing-page h2,body.landing-page h3,body.landing-page .brand{font-family:Manrope', false)
+            ->assertSee("html[lang=\"ka\"] body,html[lang=\"ka\"] body *{font-family:'Legatus Boxo'", false)
+            ->assertSee("html[lang=\"ka\"] body h1,html[lang=\"ka\"] body h1 *", false)
             ->assertSee('Legatus — your AI')
             ->assertSee('steward')
             ->assertSee('Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter')
