@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\PublishSocialMediaPost;
 use App\Models\SocialMediaPost;
+use App\Services\SocialMediaScheduler;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -13,10 +14,11 @@ class DispatchSocialMediaPosts extends Command
 
     protected $description = 'Queue due social media posts exactly once';
 
-    public function handle(): int
+    public function handle(SocialMediaScheduler $scheduler): int
     {
-        $ids = DB::transaction(function (): array {
+        $ids = DB::transaction(function () use ($scheduler): array {
             $posts = SocialMediaPost::query()
+                ->with('schedule.agent')
                 ->where('status', 'scheduled')
                 ->where('scheduled_for', '<=', now('UTC'))
                 ->whereHas('schedule', fn ($query) => $query->where('status', 'active'))
@@ -24,9 +26,21 @@ class DispatchSocialMediaPosts extends Command
                 ->lockForUpdate()
                 ->limit(100)
                 ->get();
-            $posts->each->update(['status' => 'queued']);
 
-            return $posts->pluck('id')->all();
+            $ids = collect();
+            $posts->groupBy(fn (SocialMediaPost $post): string => $post->social_media_schedule_id.'|'.$post->getRawOriginal('scheduled_for'))
+                ->each(function ($slotPosts) use ($scheduler, $ids): void {
+                    $first = $slotPosts->first();
+                    $safeIds = $scheduler->prepareDueSlot($first->schedule, $first->scheduled_for);
+                    if ($safeIds === []) {
+                        return;
+                    }
+
+                    SocialMediaPost::query()->whereIn('id', $safeIds)->where('status', 'scheduled')->update(['status' => 'queued']);
+                    $ids->push(...$safeIds);
+                });
+
+            return $ids->all();
         });
 
         foreach ($ids as $id) {

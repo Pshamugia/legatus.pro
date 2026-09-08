@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Agent;
 use App\Models\SocialMediaSchedule;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -194,6 +195,117 @@ class SocialMediaScheduler
         });
     }
 
+    /**
+     * Revalidate one multi-channel product slot immediately before it is
+     * claimed by the queue. A stale product is replaced for every channel in
+     * the slot, so one rejected product never silently consumes a posting
+     * time or makes the selected channels diverge.
+     *
+     * @return list<int> IDs that are safe to queue
+     */
+    public function prepareDueSlot(SocialMediaSchedule $schedule, CarbonInterface $scheduledFor): array
+    {
+        $slotPosts = $schedule->posts()
+            ->where('scheduled_for', $scheduledFor)
+            ->lockForUpdate()
+            ->get();
+        $pending = $slotPosts->where('status', 'scheduled')->values();
+        if ($pending->isEmpty()) {
+            return [];
+        }
+
+        $slotPostIds = $slotPosts->pluck('id');
+        $productIds = $pending->pluck('product_id')->filter()->unique();
+        $product = $productIds->count() === 1
+            ? $schedule->agent->customerProducts()->find($productIds->first())
+            : null;
+        $alreadyPublished = $product && $schedule->agent->socialMediaPosts()
+            ->where('product_id', $product->id)
+            ->where('status', 'published')
+            ->whereNotIn('id', $slotPostIds)
+            ->exists();
+
+        if ($product && ! $alreadyPublished && $pending->every(
+            fn ($post): bool => $this->productIsPublishableForPost($product, $post),
+        )) {
+            return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        }
+
+        // Published and already-claimed products are globally unavailable for
+        // replacement. Future scheduled products may be pulled forward; their
+        // own slot will be revalidated in exactly the same way when it is due.
+        $reservedProductIds = $schedule->agent->socialMediaPosts()
+            ->whereNotIn('id', $slotPostIds)
+            ->where(function ($query) use ($scheduledFor): void {
+                $query->whereIn('status', ['queued', 'published'])
+                    ->orWhere(function ($due) use ($scheduledFor): void {
+                        $due->where('status', 'scheduled')
+                            ->where('scheduled_for', '<=', $scheduledFor);
+                    });
+            })
+            ->whereNotNull('product_id')
+            ->pluck('product_id')
+            ->mapWithKeys(fn ($id): array => [(int) $id => true]);
+
+        $wantedLanguage = $pending->pluck('language')->unique()->count() === 1
+            ? $pending->first()->language
+            : null;
+        $replacement = $this->eligibleProductVariants(
+            $schedule->agent,
+            $schedule->categories ?? [],
+            $schedule->languages ?? [],
+            $schedule->providers ?? $pending->pluck('provider')->all(),
+        )
+            ->when($wantedLanguage !== null, fn (Collection $variants): Collection => $variants->where('language', $wantedLanguage))
+            ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
+            ->reject(fn (array $variant): bool => (int) $variant['product']->id === (int) $product?->id)
+            ->unique(fn (array $variant): int => (int) $variant['product']->id)
+            ->first();
+
+        if (! $replacement) {
+            $pending->each->update([
+                'status' => 'skipped',
+                'failure_reason' => 'No unused publishable product was available to replace this slot.',
+            ]);
+
+            return [];
+        }
+
+        foreach ($pending as $post) {
+            $template = data_get($schedule->template_snapshots, $post->provider);
+            if (! is_array($template)) {
+                $pending->each->update([
+                    'status' => 'skipped',
+                    'failure_reason' => 'This slot could not be replaced because its template snapshot is unavailable.',
+                ]);
+
+                return [];
+            }
+
+            $attributes = $this->postAttributes(
+                $schedule->agent,
+                $replacement['product'],
+                $post->provider,
+                CarbonImmutable::instance($scheduledFor),
+                $template,
+                $replacement['language'],
+                $post->copy_mode ?: $schedule->copy_mode ?: 'original',
+            );
+            unset($attributes['agent_id'], $attributes['provider'], $attributes['status'], $attributes['scheduled_for']);
+            $post->update($attributes + [
+                'attempts' => 0,
+                'provider_post_id' => null,
+                'published_at' => null,
+                'failure_reason' => null,
+                'ai_generation_attempted_at' => null,
+                'ai_generated_at' => null,
+                'ai_model' => null,
+            ]);
+        }
+
+        return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
+    }
+
     public function eligibleProducts(Agent $agent, array $categories = [], array $providers = []): Collection
     {
         $wanted = collect($categories)->map(fn ($value) => Str::lower(trim((string) $value)))->filter()->unique();
@@ -349,5 +461,20 @@ class SocialMediaScheduler
         return is_string($url)
             && filter_var($url, FILTER_VALIDATE_URL)
             && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true);
+    }
+
+    private function productIsPublishableForPost($product, $post): bool
+    {
+        $localized = $post->language
+            ? (array) data_get($product->metadata, 'localized.'.$post->language, [])
+            : [];
+        $url = (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url'));
+        $image = $product->catalogDesignImageUrl() ?: $product->publicImageUrl() ?: ($localized['image'] ?? null);
+
+        return $product->agent_id === $post->agent_id
+            && $product->is_active
+            && $product->stock > 0
+            && $this->publicHttpUrl($url)
+            && (! in_array($post->provider, ['instagram', 'linkedin'], true) || $this->publicHttpUrl($image));
     }
 }

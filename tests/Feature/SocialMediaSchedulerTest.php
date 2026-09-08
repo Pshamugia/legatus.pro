@@ -941,6 +941,88 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
     }
 
+    public function test_due_multi_channel_slot_replaces_an_already_published_product_before_queueing(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('replace-published-due-slot');
+        $this->connections($agent);
+        $publishedProduct = $agent->products()->create($this->product('Published Product', 'General', 3));
+        $replacement = $agent->products()->create($this->product('Unused Replacement', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram']);
+        $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $publishedProduct->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => now('UTC')->subHours(2), 'published_at' => now('UTC')->subHours(2),
+            'title' => $publishedProduct->name, 'description' => $publishedProduct->description,
+            'product_url' => data_get($publishedProduct->metadata, 'product_url'), 'image_url' => $publishedProduct->publicImageUrl(),
+            'caption' => 'Previously published',
+        ]);
+        $dueAt = now('UTC')->subMinute();
+        foreach (['facebook', 'instagram'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $publishedProduct->id, 'provider' => $provider,
+                'status' => 'scheduled', 'scheduled_for' => $dueAt, 'title' => $publishedProduct->name,
+                'description' => $publishedProduct->description,
+                'product_url' => data_get($publishedProduct->metadata, 'product_url'),
+                'image_url' => $publishedProduct->publicImageUrl(), 'caption' => 'Stale caption',
+            ]);
+        }
+
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('2 social posts queued.')->assertSuccessful();
+
+        $duePosts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
+        $this->assertTrue($duePosts->every(fn ($post): bool => $post->status === 'queued'));
+        $this->assertSame([$replacement->id], $duePosts->pluck('product_id')->unique()->values()->all());
+        $this->assertTrue($duePosts->every(fn ($post): bool => str_contains($post->caption, 'Unused Replacement')));
+        Queue::assertPushed(PublishSocialMediaPost::class, 2);
+    }
+
+    public function test_due_multi_channel_slot_replaces_a_product_that_sold_out_after_scheduling(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('replace-sold-out-due-slot');
+        $this->connections($agent);
+        $soldOut = $agent->products()->create($this->product('Sold Out Product', 'General', 1));
+        $replacement = $agent->products()->create($this->product('In Stock Replacement', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram']);
+        $dueAt = now('UTC')->subMinute();
+        foreach (['facebook', 'instagram'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $soldOut->id, 'provider' => $provider,
+                'status' => 'scheduled', 'scheduled_for' => $dueAt, 'title' => $soldOut->name,
+                'description' => $soldOut->description, 'product_url' => data_get($soldOut->metadata, 'product_url'),
+                'image_url' => $soldOut->publicImageUrl(), 'caption' => 'Stale caption',
+            ]);
+        }
+        $soldOut->update(['stock' => 0]);
+
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('2 social posts queued.')->assertSuccessful();
+
+        $duePosts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
+        $this->assertTrue($duePosts->every(fn ($post): bool => $post->status === 'queued'));
+        $this->assertSame([$replacement->id], $duePosts->pluck('product_id')->unique()->values()->all());
+        Queue::assertPushed(PublishSocialMediaPost::class, 2);
+    }
+
+    public function test_due_slot_is_skipped_only_when_no_unused_publishable_replacement_exists(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('exhausted-due-slot');
+        $soldOut = $agent->products()->create($this->product('Only Product', 'General', 0));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $soldOut->id, 'provider' => 'facebook',
+            'status' => 'scheduled', 'scheduled_for' => now('UTC')->subMinute(), 'title' => $soldOut->name,
+            'description' => $soldOut->description, 'product_url' => data_get($soldOut->metadata, 'product_url'),
+            'image_url' => $soldOut->publicImageUrl(), 'caption' => 'Stale caption',
+        ]);
+
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('0 social posts queued.')->assertSuccessful();
+
+        $this->assertSame('skipped', $post->fresh()->status);
+        $this->assertSame('No unused publishable product was available to replace this slot.', $post->fresh()->failure_reason);
+        Queue::assertNothingPushed();
+    }
+
     public function test_publishing_never_erases_a_prepared_description_when_localized_data_becomes_blank(): void
     {
         [, $agent] = $this->tenant('prepared-description');
@@ -1178,6 +1260,23 @@ class SocialMediaSchedulerTest extends TestCase
                 'external_account_name' => ucfirst($provider), 'access_token' => $provider.'-token', 'connected_at' => now(),
             ]);
         }
+    }
+
+    private function replacementSchedule($agent, array $providers)
+    {
+        $snapshots = collect($providers)->mapWithKeys(fn (string $provider): array => [$provider => [
+            'body_template' => '{product_title} {product_url}',
+            'delivery_enabled' => false,
+            'delivery_text' => null,
+            'image_style' => 'raw',
+        ]])->all();
+
+        return $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => ['General'], 'languages' => [], 'providers' => $providers,
+            'timezone' => 'UTC', 'status' => 'active', 'copy_mode' => 'original',
+            'template_snapshots' => $snapshots,
+        ]);
     }
 
     private function product(string $name, string $category, int $stock): array
