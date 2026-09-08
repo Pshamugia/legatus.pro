@@ -397,6 +397,27 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertNull($result['did_you_mean']);
     }
 
+    public function test_exact_search_discards_conversational_words_around_a_verified_catalog_author(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'ლიტერატურული წრეები და სალონები საქართველოში',
+            'description' => 'იაკობ ბალახაშვილი',
+            'search_text' => 'ლიტერატურული წრეები და სალონები საქართველოში იაკობ ბალახაშვილი',
+            'metadata' => ['author' => 'იაკობ ბალახაშვილი'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'გამარჯობა, მინდა ბალახაშვილის წიგნის შეძენა',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+        $this->assertNull($result['did_you_mean']);
+    }
+
     public function test_product_search_suggests_the_nearest_tenant_catalog_author_for_a_real_typo(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

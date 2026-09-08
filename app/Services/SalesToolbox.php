@@ -88,7 +88,7 @@ class SalesToolbox
         );
         $categoryIndexPending = $taxonomyProductIds === [];
         $presentationLimit = (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6;
-        $localSearch = function () use ($agent, $conversation, $a, $termGroups, $identityMatch, $presentationLimit, &$taxonomyProductIds) {
+        $localSearch = function () use ($agent, $conversation, $a, &$termGroups, $identityMatch, $presentationLimit, &$taxonomyProductIds) {
             if ($termGroups === []) {
                 return collect();
             }
@@ -146,6 +146,19 @@ class SalesToolbox
             );
         };
         $matches = $localSearch();
+        if ($identityMatch && $matches->isEmpty() && count($termGroups) > 1) {
+            // Semantic resolution can occasionally leave conversational action
+            // words around an otherwise exact tenant entity (for example an
+            // author/brand plus "I want to buy"). Project the failed query onto
+            // a strong identity actually present in this tenant's catalogue,
+            // then retry exact matching. This is catalog-derived rather than a
+            // language- or industry-specific stop-word exception.
+            $identityTermGroups = $this->strongCatalogIdentityProjection($agent, $termGroups);
+            if ($identityTermGroups !== [] && count($identityTermGroups) < count($termGroups)) {
+                $termGroups = $identityTermGroups;
+                $matches = $localSearch();
+            }
+        }
         $products = $matches->where('available', true)->values();
         $unavailableProducts = $matches->where('available', false)->values();
 
@@ -1583,6 +1596,84 @@ class SalesToolbox
         }
 
         return $score;
+    }
+
+    /**
+     * Keep only query groups that form a strong identity already verified in
+     * this tenant's catalogue. A single-token projection is accepted only for
+     * a one-token identity or the final token of a multi-token identity, which
+     * avoids treating a shared first name as an exact person/product match.
+     *
+     * @param list<list<string>> $termGroups
+     * @return list<list<string>>
+     */
+    private function strongCatalogIdentityProjection(Agent $agent, array $termGroups): array
+    {
+        $bestIndexes = [];
+        $bestStrength = 0;
+        $products = $agent->customerProducts()
+            ->where('is_active', true)
+            ->limit(5000)
+            ->get(['name', 'sku', 'metadata']);
+
+        foreach ($products as $product) {
+            $metadata = (array) $product->metadata;
+            $identities = array_filter([
+                ['kind' => 'sku', 'value' => (string) $product->sku],
+                ['kind' => 'name', 'value' => (string) $product->name],
+                ['kind' => 'entity', 'value' => (string) data_get($metadata, 'author', '')],
+                ['kind' => 'entity', 'value' => (string) data_get($metadata, 'brand', '')],
+                ['kind' => 'entity', 'value' => (string) data_get($metadata, 'creator', '')],
+                ['kind' => 'entity', 'value' => (string) data_get($metadata, 'manufacturer', '')],
+                ['kind' => 'entity', 'value' => (string) data_get($metadata, 'series', '')],
+            ], fn (array $identity): bool => trim($identity['value']) !== '');
+
+            foreach ($identities as $identity) {
+                $value = Str::lower(trim($identity['value']));
+                $tokens = preg_split('/[^\p{L}\p{N}%_+\-.]+/u', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                if ($tokens === []) {
+                    continue;
+                }
+                $lastToken = (string) end($tokens);
+
+                $matchedIndexes = collect($termGroups)
+                    ->keys()
+                    ->filter(fn (int $index): bool => collect($termGroups[$index])
+                        ->contains(fn (string $variant): bool => $this->textMatchesVariant($value, $variant)))
+                    ->values()
+                    ->all();
+                if ($matchedIndexes === []) {
+                    continue;
+                }
+
+                // This fallback repairs one inflected/embedded identity token
+                // surrounded by conversational text. When two or more query
+                // groups already match an entity, remaining words may describe
+                // a meaningful edition/bundle/format and exact lookup must keep
+                // them instead of silently broadening to the whole family.
+                $strong = count($matchedIndexes) === 1
+                    && (($identity['kind'] === 'sku' && count($tokens) === 1)
+                    || collect($termGroups[$matchedIndexes[0]])
+                        ->contains(fn (string $variant): bool => mb_strlen($variant) >= 4
+                            && ($variant === $lastToken || (mb_strlen($variant) >= 5 && str_contains($lastToken, $variant)))));
+                if (! $strong) {
+                    continue;
+                }
+
+                $strength = (count($matchedIndexes) * 100)
+                    + ($identity['kind'] === 'sku' ? 30 : 0)
+                    + ($identity['kind'] === 'entity' ? 20 : 0);
+                if ($strength > $bestStrength) {
+                    $bestStrength = $strength;
+                    $bestIndexes = $matchedIndexes;
+                }
+            }
+        }
+
+        return collect($bestIndexes)
+            ->map(fn (int $index): array => $termGroups[$index])
+            ->values()
+            ->all();
     }
 
     private function productMatchedGroupCount($product, array $termGroups): int
