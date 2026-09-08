@@ -29,7 +29,8 @@ class WebsiteWidgetAvailabilityTest extends TestCase
             ->assertOk()
             ->assertSee('Hidden from website visitors')
             ->assertSee('Turn on')
-            ->assertSee('widget/'.$agent->slug.'.js');
+            ->assertSee('/widget/install/'.$agent->getKey().'.js', false)
+            ->assertSee('signature=', false);
 
         $disabledScript = $this->get(route('widget.script', $agent))
             ->assertOk()

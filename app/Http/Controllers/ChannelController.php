@@ -8,6 +8,7 @@ use App\Services\WidgetInstallationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 
 class ChannelController extends Controller
@@ -22,7 +23,7 @@ class ChannelController extends Controller
     public function setupViewData(TenantContext $tenant): array
     {
         $agent = $tenant->agent();
-        $snippet = '<script src="'.route('widget.script', $agent).'" async></script>';
+        $snippet = '<script src="'.$this->widgetScriptUrl($agent).'" async></script>';
         $connections = method_exists($agent, 'channelConnections')
             ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram', 'linkedin', 'whatsapp'])->get()
             : collect();
@@ -189,7 +190,7 @@ class ChannelController extends Controller
         }
 
         try {
-            $result = $this->installation->verify($website, route('widget.script', $agent));
+            $result = $this->installation->verify($website, $this->widgetScriptUrl($agent));
             $this->updateWidgetInstallation($agent, [
                 'installed' => $result['installed'],
                 'checked_at' => now()->toIso8601String(),
@@ -300,5 +301,10 @@ class ChannelController extends Controller
             $settings['widget_installation'] = array_merge(is_array($current) ? $current : [], $values);
             $locked->update(['settings' => $settings]);
         });
+    }
+
+    private function widgetScriptUrl(Agent $agent): string
+    {
+        return URL::signedRoute('widget.install.script', ['agent' => $agent->getKey()]);
     }
 }

@@ -85,6 +85,9 @@ Route::withoutMiddleware([
     ShareErrorsFromSession::class,
     ValidateCsrfToken::class,
 ])->group(function (): void {
+    Route::get('/widget/install/{agent}.js', [WidgetController::class, 'script'])
+        ->middleware('signed')
+        ->name('widget.install.script');
     Route::get('/widget/{agent:slug}.js', [WidgetController::class, 'script'])->name('widget.script');
     Route::get('/widget/{agent:slug}', [WidgetController::class, 'frame'])->name('widget.frame');
 });

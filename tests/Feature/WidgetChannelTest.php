@@ -7,6 +7,7 @@ use App\Models\ChannelConnection;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class WidgetChannelTest extends TestCase
@@ -42,6 +43,26 @@ class WidgetChannelTest extends TestCase
         $this->assertMatchesRegularExpression("/script-src 'self' 'nonce-([^']+)'/", $csp);
         preg_match("/script-src 'self' 'nonce-([^']+)'/", $csp, $matches);
         $this->assertStringContainsString('<script nonce="'.$matches[1].'">', (string) $response->getContent());
+    }
+
+    public function test_installation_snippet_uses_a_signed_identifier_instead_of_the_demo_slug(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $installUrl = URL::signedRoute('widget.install.script', ['agent' => $agent->getKey()]);
+
+        $this->get($installUrl)
+            ->assertOk()
+            ->assertSee('legatus-widget-root');
+
+        $this->actingAs(User::first())->get('/onboarding')
+            ->assertOk()
+            ->assertSee('/widget/install/'.$agent->getKey().'.js', false)
+            ->assertSee('signature=', false)
+            ->assertDontSee('/widget/legatus-demo.js', false);
+
+        $this->get(preg_replace('/signature=[^&]+/', 'signature=invalid', $installUrl))
+            ->assertForbidden();
     }
 
     public function test_non_widget_pages_cannot_be_framed(): void
@@ -91,10 +112,11 @@ class WidgetChannelTest extends TestCase
     public function test_channels_page_contains_installation_snippet(): void
     {
         $this->seed();
+        $agent = Agent::firstOrFail();
         $this->actingAs(User::first());
         $this->get('/onboarding')
             ->assertOk()
-            ->assertSee('widget/legatus-demo.js')
+            ->assertSee('/widget/install/'.$agent->getKey().'.js', false)
             ->assertSee('Copy universal script')
             ->assertSee('WordPress / WooCommerce')
             ->assertSee('Drupal')
@@ -120,7 +142,7 @@ class WidgetChannelTest extends TestCase
         $this->actingAs(User::first());
         Http::fake([
             'https://example.com' => Http::response(
-                '<html><head><meta name="generator" content="WordPress"></head><body><script src="'.route('widget.script', $agent).'" async></script></body></html>',
+                '<html><head><meta name="generator" content="WordPress"></head><body><script src="'.URL::signedRoute('widget.install.script', ['agent' => $agent->getKey()]).'" async></script></body></html>',
                 200,
                 ['Content-Type' => 'text/html'],
             ),
@@ -224,6 +246,32 @@ class WidgetChannelTest extends TestCase
             ->assertSee('Instagram')
             ->assertSee('Not connected')
             ->assertDontSee('they are not part of this local demo');
+    }
+
+    public function test_meta_management_remains_visible_when_both_accounts_are_connected(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $this->actingAs(User::first());
+
+        foreach (['facebook' => 'Store Page', 'instagram' => '@store'] as $provider => $name) {
+            ChannelConnection::create([
+                'agent_id' => $agent->id,
+                'provider' => $provider,
+                'status' => 'active',
+                'external_account_id' => $provider.'-123',
+                'external_account_name' => $name,
+                'access_token' => 'encrypted-by-model-cast',
+                'connected_at' => now(),
+            ]);
+        }
+
+        $this->get('/onboarding')
+            ->assertOk()
+            ->assertSee('2/2 connected')
+            ->assertSee('Meta connection is active')
+            ->assertSee('Manage or reconnect Meta')
+            ->assertSee(route('channels.meta.connect', ['provider' => 'meta']), false);
     }
 
     public function test_meta_connection_errors_are_actionable_without_leaking_provider_details(): void
