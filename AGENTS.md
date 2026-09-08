@@ -118,6 +118,8 @@ php artisan queue:restart
 git rev-parse --short HEAD
 ```
 
+Production deploy-ის დიაგნოსტიკა ყოველთვის დაიწყე იმის დადასტურებით, რომ `git pull --ff-only origin main` რეალურად დასრულდა. თუ pull შეწყდა, რადგან სერვერზე არსებული untracked ფაილი გადაიწერებოდა (მაგალითად, `public/`-ში ხელით ატვირთული ფონტი), ჯერ არ გამოიკვლიო Blade/browser cache, OPcache ან PHP-FPM. კონფლიქტური ფაილი შეინარჩუნე repository-ს გარეთ მკაფიო backup path-ზე გადატანით, ხელახლა გაუშვი pull და გადაამოწმე, რომ `git rev-parse --short HEAD` ემთხვევა `git rev-parse --short origin/main`-ს. მხოლოდ ამის შემდეგ გაასუფთავე/cache-ში მოათავსე Laravel და შეამოწმე live response. Landing/static asset ცვლილებისას ცალ-ცალკე შეამოწმე asset URL და უნიკალური CSS/HTML marker `curl -s https://legatus.pro/`-ში; asset-ის HTTP 200 არ ადასტურებს, რომ ახალი Blade commit deployed არის.
+
 მიგრაცია გაუშვი მხოლოდ მაშინ, როცა კონკრეტულ ცვლილებას ახალი migration ნამდვილად ახლავს.
 
 ## დოკუმენტაციის განახლება
