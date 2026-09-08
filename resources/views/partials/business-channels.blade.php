@@ -54,8 +54,8 @@
 
     <article class="channel-block" id="website-channel">
         <div class="channel-block__head">
-            <div><span class="channel-number">2</span><div><h3>Website chat</h3><p>Install the widget once and control whether customers can use it.</p></div></div>
-            <span @class(['channel-status', 'is-connected' => $widgetEnabled, 'is-off' => ! $widgetEnabled])>{{ $widgetEnabled ? 'On' : 'Off' }}</span>
+            <div><span class="channel-number">2</span><div><h3>Website chat</h3><p>Legatus detects your platform, shows the right steps, and checks the installation.</p></div></div>
+            <span @class(['channel-status', 'is-connected' => ($widgetInstallation['installed'] ?? false), 'is-off' => ! ($widgetInstallation['installed'] ?? false)])>{{ ($widgetInstallation['installed'] ?? false) ? '✓ Installed' : 'Not verified' }}</span>
         </div>
         <div class="widget-control">
             <div><b>{{ $widgetEnabled ? 'Visible to website visitors' : 'Hidden from website visitors' }}</b><small>The installed script can stay in place when chat is off.</small></div>
@@ -67,9 +67,56 @@
                 </form>
             @endif
         </div>
-        <div class="channel-snippet"><code id="widget-snippet">{{ $snippet }}</code><button class="btn lime" id="copy-snippet" type="button">Copy script</button></div>
-        <p class="copy-feedback" id="copy-feedback" aria-live="polite"></p>
+
+        <div class="widget-installer">
+            <div class="widget-installer__head">
+                <div>
+                    <b>{{ $widgetWebsite !== '' ? parse_url($widgetWebsite, PHP_URL_HOST) : 'Website address required' }}</b>
+                    <small>Detection is read-only. Legatus never changes a website automatically.</small>
+                </div>
+                @if($canManageChannels)
+                    <form method="POST" action="{{ route('channels.widget.detect-platform') }}">@csrf
+                        <button class="btn ghost" type="submit" @disabled($widgetWebsite === '')>Detect platform</button>
+                    </form>
+                @endif
+            </div>
+
+            @if($canManageChannels)
+                <form class="platform-picker" method="POST" action="{{ route('channels.widget.platform') }}">
+                    @csrf @method('PATCH')
+                    <label for="widget-platform">Website platform</label>
+                    <select id="widget-platform" name="platform">
+                        @foreach($widgetPlatforms as $key => $platform)
+                            <option value="{{ $key }}" @selected($widgetPlatform === $key)>{{ $platform['label'] }}</option>
+                        @endforeach
+                    </select>
+                    <button class="btn ghost" type="submit">Show instructions</button>
+                </form>
+            @endif
+
+            <div class="platform-guide">
+                <span class="eyebrow">{{ $widgetPlatforms[$widgetPlatform]['label'] }}</span>
+                <h4>Install the universal Legatus widget</h4>
+                <p>{{ $widgetPlatforms[$widgetPlatform]['description'] }}</p>
+                <ol>
+                    @foreach($widgetPlatforms[$widgetPlatform]['steps'] as $step)
+                        <li><span>{{ $loop->iteration }}</span>{{ $step }}</li>
+                    @endforeach
+                </ol>
+                <div class="channel-snippet"><code id="widget-snippet">{{ $snippet }}</code><button class="btn lime" id="copy-snippet" type="button">Copy universal script</button></div>
+                <div class="installer-actions">
+                    <button class="btn ghost" id="copy-developer-instructions" type="button">Copy instructions for developer</button>
+                    @if($canManageChannels)
+                        <form method="POST" action="{{ route('channels.widget.verify') }}">@csrf
+                            <button class="btn dark" type="submit" @disabled($widgetWebsite === '')>Check installation</button>
+                        </form>
+                    @endif
+                </div>
+                <p class="copy-feedback" id="copy-feedback" aria-live="polite"></p>
+            </div>
+        </div>
         @if($widgetDomains->isNotEmpty())<p class="allowed-domains">Allowed on: {{ $widgetDomains->join(', ') }}</p>@endif
+        <p class="widget-security-note">🔒 The widget frame is allowed only on the saved business domain. Detecting a platform does not install or activate anything on that website.</p>
     </article>
 
     <article class="channel-block" id="meta-channels">
@@ -144,7 +191,8 @@
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">
 .business-channels{margin-top:34px}.business-channels__heading{margin-bottom:18px}.business-channels__heading h2{font-size:30px;margin:7px 0}.business-channels__heading p,.channel-block__head p{color:var(--muted);margin:0}.channel-block{margin-top:16px;padding:24px;border:1px solid var(--line);border-radius:20px;background:#fff}.channel-block__head,.channel-block__head>div,.widget-control,.channel-snippet,.meta-channel-card__title,.channel-actions{display:flex;align-items:center}.channel-block__head{justify-content:space-between;gap:18px}.channel-block__head>div{align-items:flex-start;gap:12px}.channel-block__head h3{margin:1px 0 5px;font-size:20px}.channel-block__head p{font-size:12px}.channel-number{display:grid;place-items:center;flex:0 0 32px;height:32px;border-radius:10px;background:var(--green);color:var(--lime);font-weight:800}.channel-status{padding:7px 10px;border:1px solid var(--line);border-radius:99px;color:var(--muted);font-size:11px;font-weight:800}.channel-status.is-connected{background:#eaf7df;color:#356342}.channel-status.is-off{background:#fff3ed;color:#904d39}.widget-control{justify-content:space-between;gap:18px;margin-top:20px;padding:16px;border-radius:14px;background:#f4f8f4}.widget-control b,.widget-control small{display:block}.widget-control small,.allowed-domains{color:var(--muted);font-size:10px;margin-top:4px}.channel-snippet{gap:12px;margin-top:14px;padding:12px;border-radius:13px;background:#122c24}.channel-snippet code{min-width:0;flex:1;overflow:auto;color:#d9ff72;white-space:nowrap}.copy-feedback{min-height:16px;margin:6px 0 0;color:#377157;font-size:11px}.meta-connect{display:block;margin-top:18px;padding:13px;border-radius:12px;background:var(--green);color:#fff;text-align:center;font-weight:800}.meta-channel-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}.meta-channel-card{display:flex;flex-direction:column;padding:18px;border:1px solid var(--line);border-radius:16px}.meta-channel-card__title{gap:10px}.meta-channel-card__title>span{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#eef3ef;font-weight:900}.meta-channel-card__title b,.meta-channel-card__title small{display:block}.meta-channel-card__title small{color:var(--muted);font-size:10px;margin-top:3px}.meta-channel-card>p{color:var(--muted);font-size:11px;line-height:1.55}.meta-channel-card>.btn{margin-top:auto;text-align:center}.connected-account{margin-top:auto;padding:12px;border-radius:11px;background:#f4f8f4}.connected-account small,.connected-account b{display:block}.connected-account small{color:var(--muted)}.channel-actions{justify-content:space-between;gap:10px;margin-top:10px}.link-button{border:0;background:transparent;color:#914c38;cursor:pointer}.channel-error{padding:10px;border-radius:10px;background:#fff1eb;color:#904b38!important}.meta-security{margin:14px 0 0;color:var(--muted);font-size:11px}.channel-message{margin:12px 0;padding:12px 14px;border-radius:12px;background:#eaf7df;color:#356342}.channel-message--error{background:#fff1eb;color:#904b38}@media(max-width:720px){.channel-block__head,.widget-control,.channel-snippet{align-items:stretch;flex-direction:column}.meta-channel-grid{grid-template-columns:1fr}.channel-snippet .btn{width:100%}}
 .catalog-summary{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:18px;padding:16px;border-radius:14px;background:#f4f8f4}.catalog-summary b,.catalog-summary small,.commerce-status span,.commerce-status b,.commerce-status small{display:block}.catalog-summary small,.commerce-status span,.commerce-status small,.developer-connector>p{margin-top:4px;color:var(--muted);font-size:10px}.commerce-status{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.commerce-status>div{padding:13px;border-radius:13px;background:#f4f8f4}.commerce-actions{margin-top:14px}.developer-connector,.commerce-disconnect{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)}.developer-connector summary,.commerce-disconnect summary{cursor:pointer;font-weight:700}.commerce-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;padding:16px;border-radius:14px;background:#f7f9f7}.commerce-form label{margin:0}.commerce-form input{margin-top:6px}.commerce-form .btn{grid-column:1/-1}.commerce-readonly{margin-top:16px;padding:12px;border-radius:11px;background:#f4f6f4;color:var(--muted);font-size:11px}@media(max-width:720px){.catalog-summary{align-items:stretch;flex-direction:column}.commerce-status,.commerce-form{grid-template-columns:1fr}.commerce-form .btn{grid-column:1}}
+.widget-installer{margin-top:16px;padding:18px;border:1px solid #dce7df;border-radius:16px;background:#fbfdf9}.widget-installer__head,.platform-picker,.installer-actions{display:flex;align-items:center;gap:12px}.widget-installer__head{justify-content:space-between}.widget-installer__head b,.widget-installer__head small{display:block}.widget-installer__head small{margin-top:4px;color:var(--muted);font-size:10px}.platform-picker{margin-top:16px;padding:12px;border-radius:12px;background:#f1f6f1}.platform-picker label{font-size:11px;font-weight:800}.platform-picker select{min-width:240px;flex:1;margin:0;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:#fff}.platform-guide{margin-top:14px;padding:17px;border-radius:14px;background:#fff;border:1px solid #e7ece8}.platform-guide h4{margin:5px 0 4px;font-size:17px}.platform-guide>p{margin:0;color:var(--muted);font-size:11px}.platform-guide ol{list-style:none;padding:0;margin:15px 0}.platform-guide li{display:flex;align-items:flex-start;gap:9px;margin-top:8px;color:#40534b;font-size:12px;line-height:1.5}.platform-guide li span{display:grid;place-items:center;flex:0 0 23px;height:23px;border-radius:50%;background:#e9f5dd;color:#3e6b36;font-size:10px;font-weight:800}.installer-actions{justify-content:flex-end;flex-wrap:wrap;margin-top:11px}.installer-actions form{margin:0}.widget-security-note{margin:12px 0 0;color:#587064;font-size:10px;line-height:1.5}@media(max-width:720px){.widget-installer__head,.platform-picker,.installer-actions{align-items:stretch;flex-direction:column}.platform-picker select,.platform-picker .btn,.installer-actions .btn,.installer-actions form{width:100%}.installer-actions form .btn{width:100%}}
 </style>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
-(()=>{const button=document.querySelector('#copy-snippet');if(!button)return;button.addEventListener('click',async()=>{const feedback=document.querySelector('#copy-feedback');try{await navigator.clipboard.writeText(document.querySelector('#widget-snippet').textContent.trim());button.textContent='Copied';feedback.textContent='Script copied. Paste it before </body> on your website.'}catch(error){feedback.textContent='Select and copy the script manually.'}})})();
+(()=>{const snippet=document.querySelector('#widget-snippet');const feedback=document.querySelector('#copy-feedback');if(!snippet||!feedback)return;const developerWebsite=@json($widgetWebsite ?: 'the business website', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);const copy=async(text,success)=>{try{await navigator.clipboard.writeText(text);feedback.textContent=success}catch(error){feedback.textContent='Copying was blocked by the browser. Select the script and copy it manually.'}};const button=document.querySelector('#copy-snippet');if(button)button.addEventListener('click',()=>copy(snippet.textContent.trim(),'Universal script copied. Add it site-wide before </body>.'));const developer=document.querySelector('#copy-developer-instructions');if(developer)developer.addEventListener('click',()=>copy(`Please install the Legatus website chat on every page of ${developerWebsite}. Add this script immediately before the closing </body> tag:\n\n${snippet.textContent.trim()}\n\nAfter publishing, let the business owner run “Check installation” in Legatus.`, 'Developer instructions copied. You can paste them into an email or message.'))})();
 </script>

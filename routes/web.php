@@ -134,6 +134,15 @@ Route::middleware('auth')->group(function () {
         Route::patch('/app/channels/widget', [ChannelController::class, 'updateWidget'])
             ->middleware('throttle:30,1')
             ->name('channels.widget.update');
+        Route::post('/app/channels/widget/detect-platform', [ChannelController::class, 'detectWidgetPlatform'])
+            ->middleware('throttle:10,1')
+            ->name('channels.widget.detect-platform');
+        Route::patch('/app/channels/widget/platform', [ChannelController::class, 'updateWidgetPlatform'])
+            ->middleware('throttle:30,1')
+            ->name('channels.widget.platform');
+        Route::post('/app/channels/widget/verify', [ChannelController::class, 'verifyWidgetInstallation'])
+            ->middleware('throttle:10,1')
+            ->name('channels.widget.verify');
         Route::post('/app/channels/commerce', [CommerceConnectionController::class, 'connect'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.connect');

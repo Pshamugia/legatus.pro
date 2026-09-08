@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\ChannelConnection;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class WidgetChannelTest extends TestCase
@@ -94,13 +95,86 @@ class WidgetChannelTest extends TestCase
         $this->get('/onboarding')
             ->assertOk()
             ->assertSee('widget/legatus-demo.js')
-            ->assertSee('Copy script')
+            ->assertSee('Copy universal script')
+            ->assertSee('WordPress / WooCommerce')
+            ->assertSee('Drupal')
+            ->assertSee('Shopify')
+            ->assertSee('Other / Custom website')
+            ->assertSee('Check installation')
             ->assertSee('data-channel="facebook"', false)
             ->assertSee('data-channel="instagram"', false)
             ->assertSee('data-status="disconnected"', false)
             ->assertDontSee('data-status="connected"', false)
             ->assertDontSee('access token', false)
             ->assertDontSee('webhook URL', false);
+    }
+
+    public function test_owner_can_detect_platform_and_verify_the_universal_widget(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'website' => 'https://example.com',
+            'widget_allowed_origins' => ['https://example.com'],
+        ])]);
+        $this->actingAs(User::first());
+        Http::fake([
+            'https://example.com' => Http::response(
+                '<html><head><meta name="generator" content="WordPress"></head><body><script src="'.route('widget.script', $agent).'" async></script></body></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+        ]);
+
+        $this->post(route('channels.widget.detect-platform'))->assertRedirect('/onboarding#website-channel');
+        $agent->refresh();
+        $this->assertSame('wordpress', data_get($agent->settings, 'widget_installation.platform'));
+
+        $this->post(route('channels.widget.verify'))->assertRedirect('/onboarding#website-channel');
+        $agent->refresh();
+        $this->assertTrue(data_get($agent->settings, 'widget_installation.installed'));
+    }
+
+    public function test_non_demo_widget_without_a_saved_domain_fails_closed(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update([
+            'slug' => 'private-store',
+            'settings' => array_merge($agent->settings ?? [], ['widget_allowed_origins' => []]),
+        ]);
+        config(['legatus.widget_frame_ancestors' => '*']);
+
+        $csp = (string) $this->get('/widget/private-store')
+            ->assertOk()
+            ->headers->get('Content-Security-Policy');
+
+        $this->assertStringContainsString("frame-ancestors 'none'", $csp);
+        $this->assertStringNotContainsString('frame-ancestors *', $csp);
+    }
+
+    public function test_legacy_saved_website_restricts_widget_without_the_origins_field(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update([
+            'slug' => 'legacy-store',
+            'settings' => array_merge($agent->settings ?? [], [
+                'website' => 'https://legacy.example/shop',
+                'widget_allowed_origins' => [],
+            ]),
+        ]);
+        config(['legatus.widget_frame_ancestors' => '*']);
+
+        $csp = (string) $this->get('/widget/legacy-store')
+            ->assertOk()
+            ->headers->get('Content-Security-Policy');
+
+        $this->assertStringContainsString(
+            'frame-ancestors https://legacy.example https://www.legacy.example',
+            $csp,
+        );
+        $this->assertStringNotContainsString('frame-ancestors *', $csp);
     }
 
     public function test_business_setup_contains_clear_channel_blocks_and_no_manual_credentials(): void

@@ -42,9 +42,15 @@ class SecurityHeaders
     {
         $agent = $request->route('agent');
         $tenantSources = is_object($agent) ? data_get($agent, 'settings.widget_allowed_origins') : null;
-        $raw = is_array($tenantSources) && $tenantSources !== []
-            ? implode(' ', $tenantSources)
-            : (string) config('legatus.widget_frame_ancestors', '*');
+        $legacyWebsiteSources = is_object($agent)
+            ? $this->websiteOrigins(data_get($agent, 'settings.website'))
+            : [];
+        $raw = match (true) {
+            is_array($tenantSources) && $tenantSources !== [] => implode(' ', $tenantSources),
+            $legacyWebsiteSources !== [] => implode(' ', $legacyWebsiteSources),
+            is_object($agent) && data_get($agent, 'slug') !== 'legatus-demo' => '',
+            default => (string) config('legatus.widget_frame_ancestors', '*'),
+        };
         $configured = preg_split('/[\s,]+/', trim($raw)) ?: [];
         $sources = collect($configured)
             ->filter()
@@ -69,5 +75,30 @@ class SecurityHeaders
         }
 
         return $sources->isEmpty() ? "'none'" : $sources->implode(' ');
+    }
+
+    /** @return list<string> */
+    private function websiteOrigins(mixed $website): array
+    {
+        if (! is_string($website) || $website === '') {
+            return [];
+        }
+
+        $parts = parse_url($website);
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        if (! in_array($scheme, ['http', 'https'], true)
+            || $host === ''
+            || preg_match('/^[a-z0-9.-]+$/i', $host) !== 1) {
+            return [];
+        }
+
+        $port = isset($parts['port']) ? ':'.(int) $parts['port'] : '';
+        $alternateHost = str_starts_with($host, 'www.') ? substr($host, 4) : 'www.'.$host;
+
+        return array_values(array_unique([
+            "{$scheme}://{$host}{$port}",
+            "{$scheme}://{$alternateHost}{$port}",
+        ]));
     }
 }

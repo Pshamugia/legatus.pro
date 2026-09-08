@@ -4,12 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Models\Agent;
 use App\Services\TenantContext;
+use App\Services\WidgetInstallationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\Rule;
 
 class ChannelController extends Controller
 {
+    public function __construct(private WidgetInstallationService $installation) {}
+
     public function index(TenantContext $tenant)
     {
         return redirect(route('onboarding').'#channels');
@@ -92,6 +96,14 @@ class ChannelController extends Controller
         };
         $canManageChannels = in_array($tenant->role(), ['owner', 'admin'], true);
         $widgetEnabled = $agent->websiteWidgetEnabled();
+        $widgetWebsite = trim((string) data_get($agent->settings, 'website', ''));
+        $widgetPlatforms = $this->installation->platforms();
+        $widgetPlatform = (string) data_get($agent->settings, 'widget_installation.platform', 'other');
+        if (! array_key_exists($widgetPlatform, $widgetPlatforms)) {
+            $widgetPlatform = 'other';
+        }
+        $widgetInstallation = data_get($agent->settings, 'widget_installation', []);
+        $widgetInstallation = is_array($widgetInstallation) ? $widgetInstallation : [];
         $widgetDomains = collect(data_get($agent->settings, 'widget_allowed_origins', []))
             ->filter(fn (mixed $origin): bool => is_string($origin))
             ->map(fn (string $origin): string => (string) (parse_url($origin, PHP_URL_HOST) ?: $origin))
@@ -115,6 +127,85 @@ class ChannelController extends Controller
             'catalogConnectionState',
             'canManageChannels',
             'widgetEnabled',
+            'widgetWebsite',
+            'widgetPlatforms',
+            'widgetPlatform',
+            'widgetInstallation',
+        );
+    }
+
+    public function detectWidgetPlatform(TenantContext $tenant)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $agent = $tenant->agent();
+        $website = trim((string) data_get($agent->settings, 'website', ''));
+        if ($website === '') {
+            return redirect(route('onboarding').'#website-channel')
+                ->with('channel_error', 'Save your public website address before detecting its platform.');
+        }
+
+        try {
+            $platform = $this->installation->detect($website);
+            $this->updateWidgetInstallation($agent, [
+                'platform' => $platform,
+                'detected_at' => now()->toIso8601String(),
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return redirect(route('onboarding').'#website-channel')
+                ->with('channel_error', 'Legatus could not inspect the website safely. Choose the platform manually below.');
+        }
+
+        $label = $this->installation->platforms()[$platform]['label'];
+
+        return redirect(route('onboarding').'#website-channel')
+            ->with('channel_success', "Platform detected: {$label}. Follow the instructions below.");
+    }
+
+    public function updateWidgetPlatform(Request $request, TenantContext $tenant)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $data = $request->validate([
+            'platform' => ['required', 'string', Rule::in(array_keys($this->installation->platforms()))],
+        ]);
+        $this->updateWidgetInstallation($tenant->agent(), [
+            'platform' => $data['platform'],
+            'selected_at' => now()->toIso8601String(),
+        ]);
+
+        return redirect(route('onboarding').'#website-channel')
+            ->with('channel_success', 'Installation instructions updated for '.$this->installation->platforms()[$data['platform']]['label'].'.');
+    }
+
+    public function verifyWidgetInstallation(TenantContext $tenant)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $agent = $tenant->agent();
+        $website = trim((string) data_get($agent->settings, 'website', ''));
+        if ($website === '') {
+            return redirect(route('onboarding').'#website-channel')
+                ->with('channel_error', 'Save your public website address before checking the installation.');
+        }
+
+        try {
+            $result = $this->installation->verify($website, route('widget.script', $agent));
+            $this->updateWidgetInstallation($agent, [
+                'installed' => $result['installed'],
+                'checked_at' => now()->toIso8601String(),
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return redirect(route('onboarding').'#website-channel')
+                ->with('channel_error', 'The website could not be checked safely right now. Nothing was changed on the website.');
+        }
+
+        return redirect(route('onboarding').'#website-channel')->with(
+            $result['installed'] ? 'channel_success' : 'channel_error',
+            $result['installed']
+                ? 'Legatus is installed and visible in the website source.'
+                : 'Legatus was not found on the public homepage yet. Publish the website changes, clear its cache, and check again.',
         );
     }
 
@@ -197,5 +288,17 @@ class ChannelController extends Controller
             'last_webhook_at' => $connection?->last_webhook_at,
             'error' => $error,
         ];
+    }
+
+    /** @param array<string, mixed> $values */
+    private function updateWidgetInstallation(Agent $agent, array $values): void
+    {
+        DB::transaction(function () use ($agent, $values): void {
+            $locked = Agent::query()->lockForUpdate()->findOrFail($agent->getKey());
+            $settings = $locked->settings ?? [];
+            $current = data_get($settings, 'widget_installation', []);
+            $settings['widget_installation'] = array_merge(is_array($current) ? $current : [], $values);
+            $locked->update(['settings' => $settings]);
+        });
     }
 }
