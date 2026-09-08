@@ -2,6 +2,7 @@
 
 @section('title', 'Legatus — AI Shopping Assistant, Social Media Manager & Copywriter')
 @section('description', 'Legatus combines an AI shopping assistant, customer conversations across web and social channels, automated publishing, and an AI copywriter in one platform.')
+@section('body_class', 'landing-page')
 
 @section('body')
 @php
@@ -192,6 +193,9 @@
     </footer>
 </div>
 <style>
+@font-face{font-family:'Legatus Boxo';src:url('{{ asset('fonts/bpg_boxo-boxo.ttf') }}') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+body.landing-page,body.landing-page *{font-family:'Legatus Boxo','DM Sans',sans-serif}
+body.landing-page h1,body.landing-page h2,body.landing-page h3,body.landing-page .brand{font-family:Manrope,sans-serif}
 @font-face{font-family:'Legatus Archy';src:url('{{ asset('fonts/archyedt-bold-webfont.ttf') }}') format('truetype');font-style:normal;font-weight:700;font-display:swap}
 html[lang="ka"] .hero h1,
 html[lang="ka"] .channel-section-copy h2,
