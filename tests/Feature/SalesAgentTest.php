@@ -21,9 +21,9 @@ class SalesAgentTest extends TestCase
     {
         $this->get('/')
             ->assertOk()
-            ->assertSee("fonts/bpg_boxo-boxo.ttf", false)
+            ->assertSee('fonts/bpg_boxo-boxo.ttf', false)
             ->assertSee("html[lang=\"ka\"] body,html[lang=\"ka\"] body *{font-family:'Legatus Boxo'", false)
-            ->assertSee("html[lang=\"ka\"] body h1,html[lang=\"ka\"] body h1 *", false)
+            ->assertSee('html[lang="ka"] body h1,html[lang="ka"] body h1 *', false)
             ->assertSee('Legatus — your AI')
             ->assertSee('steward')
             ->assertSee('Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter')
@@ -74,6 +74,26 @@ class SalesAgentTest extends TestCase
             ->assertDontSee('$99')
             ->assertSee('@media(max-width:600px)', false)
             ->assertDontSee('პროდუქტი');
+    }
+
+    public function test_landing_css_and_local_fonts_are_ready_before_body_rendering(): void
+    {
+        $html = $this->get('/')->assertOk()->getContent();
+        $bodyPosition = strpos($html, '<body>');
+        $landingCssPosition = strpos($html, '.hero>section:first-child>h1');
+        $boxoPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/bpg_boxo-boxo.ttf').'"');
+        $archyPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/archyedt-bold-webfont.ttf').'"');
+
+        $this->assertIsInt($bodyPosition);
+        $this->assertIsInt($landingCssPosition);
+        $this->assertIsInt($boxoPreloadPosition);
+        $this->assertIsInt($archyPreloadPosition);
+        $this->assertLessThan($bodyPosition, $landingCssPosition);
+        $this->assertLessThan($bodyPosition, $boxoPreloadPosition);
+        $this->assertLessThan($bodyPosition, $archyPreloadPosition);
+        $this->assertStringContainsString('font-display:block', $html);
+        $this->assertStringContainsString('display=block', $html);
+        $this->assertStringNotContainsString('display=swap', $html);
     }
 
     public function test_demo_agent_answers_and_persists_a_conversation(): void

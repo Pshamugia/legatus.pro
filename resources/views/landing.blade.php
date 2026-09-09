@@ -191,11 +191,14 @@
         <div style="display:flex;gap:18px;flex-wrap:wrap"><a href="{{ route('terms') }}">Terms of Service</a><a href="{{ route('privacy') }}">Privacy Policy</a><a href="{{ route('refund-policy') }}">Refund Policy</a></div>
     </footer>
 </div>
+@push('head')
+<link rel="preload" href="{{ asset('fonts/bpg_boxo-boxo.ttf') }}" as="font" type="font/ttf" crossorigin>
+<link rel="preload" href="{{ asset('fonts/archyedt-bold-webfont.ttf') }}" as="font" type="font/ttf" crossorigin>
 <style>
-@font-face{font-family:'Legatus Boxo';src:url('{{ asset('fonts/bpg_boxo-boxo.ttf') }}') format('truetype');font-style:normal;font-weight:400;font-display:swap}
+@font-face{font-family:'Legatus Boxo';src:url('{{ asset('fonts/bpg_boxo-boxo.ttf') }}') format('truetype');font-style:normal;font-weight:400;font-display:block}
 html[lang="ka"] body,html[lang="ka"] body *{font-family:'Legatus Boxo','Noto Sans Georgian',sans-serif!important}
 html[lang="ka"] body h1,html[lang="ka"] body h1 *,html[lang="ka"] body h2,html[lang="ka"] body h2 *,html[lang="ka"] body h3,html[lang="ka"] body h3 *,html[lang="ka"] body .brand,html[lang="ka"] body .brand *{font-family:'Legatus Archy','Noto Sans Georgian',sans-serif!important}
-@font-face{font-family:'Legatus Archy';src:url('{{ asset('fonts/archyedt-bold-webfont.ttf') }}') format('truetype');font-style:normal;font-weight:700;font-display:swap}
+@font-face{font-family:'Legatus Archy';src:url('{{ asset('fonts/archyedt-bold-webfont.ttf') }}') format('truetype');font-style:normal;font-weight:700;font-display:block}
 html[lang="ka"] .hero h1,
 html[lang="ka"] .channel-section-copy h2,
 html[lang="ka"] .trust-copy h2,
@@ -254,6 +257,7 @@ html[lang="ka"] body .hero h1{font-size:clamp(18px,3.15vw,42px);line-height:1.08
     html[lang="ka"] body .hero h1{font-size:clamp(17px,5.35vw,22px);letter-spacing:-.25px}
 }
 </style>
+@endpush
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 document.addEventListener('DOMContentLoaded', () => {
     const demoTabs = document.querySelectorAll('[data-demo-tab]');
