@@ -51,7 +51,8 @@ class SocialMediaSchedulerTest extends TestCase
             'categories' => ['Novel'],
             'providers' => ['facebook', 'instagram'],
             'timezone' => 'Asia/Tbilisi',
-        ])->assertRedirect(route('social-media.index'));
+        ])->assertRedirect(route('social-media.index'))
+            ->assertSessionHas('social_success', 'Schedule created successfully. Every slot will automatically skip unavailable or already-used products and select the next eligible product.');
 
         $schedule = $agent->socialMediaSchedules()->firstOrFail();
         $this->assertSame(['Novel'], $schedule->categories);
@@ -73,6 +74,9 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('AI Copywriter')
             ->assertSee('Original content')
             ->assertSee('Save schedule')
+            ->assertSee('Creating schedule…')
+            ->assertSee('Creating your schedule. Please wait…')
+            ->assertSee('data-schedule-submit-spinner', false)
             ->assertSee('Informative')
             ->assertSee('Luna writes up to 7 product posts per business each day')
             ->assertSee('Catalog design')
@@ -1161,6 +1165,89 @@ class SocialMediaSchedulerTest extends TestCase
             fn ($scheduledPost): bool => $scheduledPost->product_id === $product->id
                 && $scheduledPost->language === 'Primary language'
                 && $scheduledPost->title === 'Recovered Base Product',
+        ));
+    }
+
+    public function test_primary_language_does_not_include_a_product_owned_by_a_secondary_language_source(): void
+    {
+        [$user, $agent] = $this->tenant('primary-language-excludes-secondary-source');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Primary language',
+            'name' => 'Website language: Primary language', 'url' => 'https://shop.example',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $secondarySource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Secondary language',
+            'name' => 'Website language: Secondary language', 'url' => 'https://shop.example/secondary',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $attributes = $this->product('Secondary Language Product', 'Books', 3);
+        $attributes['metadata']['source_id'] = $secondarySource->id;
+        $attributes['metadata']['source_url'] = $secondarySource->url;
+        $attributes['metadata']['languages'] = ['Secondary language'];
+        $attributes['metadata']['localized'] = [
+            'Secondary language' => [
+                'name' => 'Secondary Language Product',
+                'description' => 'Secondary language description.',
+                'product_url' => 'https://shop.example/secondary/product',
+                'image' => 'https://shop.example/images/secondary-product.jpg',
+            ],
+        ];
+        $secondaryProduct = $agent->products()->create($attributes);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['Primary language'],
+        ])->assertSessionHasNoErrors();
+
+        $posts = $agent->socialMediaPosts()->get();
+        $this->assertTrue($posts->every(fn ($post): bool => $post->product_id === null));
+        $this->assertNotContains($secondaryProduct->id, $posts->pluck('product_id')->all());
+    }
+
+    public function test_due_slot_replaces_a_secondary_language_product_assigned_to_the_primary_language(): void
+    {
+        [, $agent] = $this->tenant('due-language-correction');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Primary language',
+            'name' => 'Website language: Primary language', 'url' => 'https://shop.example',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $secondarySource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Secondary language',
+            'name' => 'Website language: Secondary language', 'url' => 'https://shop.example/secondary',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $secondaryAttributes = $this->product('Wrong Language Product', 'General', 3);
+        $secondaryAttributes['metadata']['source_id'] = $secondarySource->id;
+        $secondaryAttributes['metadata']['localized'] = [
+            'Secondary language' => ['name' => 'Wrong Language Product'],
+        ];
+        $secondary = $agent->products()->create($secondaryAttributes);
+        $primary = $agent->products()->create($this->product('Correct Primary Product', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram']);
+        $schedule->update(['languages' => ['Primary language']]);
+        $dueAt = now('UTC')->subMinute();
+        foreach (['facebook', 'instagram'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $secondary->id, 'provider' => $provider,
+                'language' => 'Primary language', 'status' => 'scheduled', 'scheduled_for' => $dueAt,
+                'title' => $secondary->name, 'description' => $secondary->description,
+                'product_url' => data_get($secondary->metadata, 'product_url'),
+                'image_url' => $secondary->publicImageUrl(), 'caption' => 'Wrong language caption',
+            ]);
+        }
+
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $dueAt);
+
+        $this->assertEqualsCanonicalizing($schedule->posts()->pluck('id')->all(), $safeIds);
+        $this->assertTrue($schedule->posts()->get()->every(
+            fn ($post): bool => $post->product_id === $primary->id
+                && $post->language === 'Primary language'
+                && $post->title === 'Correct Primary Product',
         ));
     }
 

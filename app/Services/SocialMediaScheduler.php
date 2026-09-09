@@ -225,6 +225,24 @@ class SocialMediaScheduler
         $product = $productIds->count() === 1
             ? $schedule->agent->customerProducts()->find($productIds->first())
             : null;
+        $eligibleVariants = $this->eligibleProductVariants(
+            $schedule->agent,
+            $schedule->categories ?? [],
+            $schedule->languages ?? [],
+            $schedule->providers ?? $pending->pluck('provider')->all(),
+        );
+        $productMatchesSchedule = $product && $eligibleVariants->contains(function (array $variant) use ($product, $pending): bool {
+            if ((int) $variant['product']->id !== (int) $product->id) {
+                return false;
+            }
+
+            return $pending->every(function ($post) use ($variant): bool {
+                $postLanguage = filled($post->language) ? Str::lower(trim((string) $post->language)) : null;
+                $variantLanguage = filled($variant['language']) ? Str::lower(trim((string) $variant['language'])) : null;
+
+                return $postLanguage === $variantLanguage;
+            });
+        });
         $alreadyPublished = $product && (
             $schedule->agent->socialMediaPosts()
                 ->where('product_id', $product->id)
@@ -238,7 +256,7 @@ class SocialMediaScheduler
             )
         );
 
-        if ($product && ! $alreadyPublished && $pending->every(
+        if ($product && $productMatchesSchedule && ! $alreadyPublished && $pending->every(
             fn ($post): bool => $this->productIsPublishableForPost($product, $post),
         ) && $this->liveAvailabilityAllows($schedule->agent, $product)) {
             return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
@@ -263,12 +281,7 @@ class SocialMediaScheduler
         $wantedLanguage = $pending->pluck('language')->unique()->count() === 1
             ? $pending->first()->language
             : null;
-        $allReplacements = $this->eligibleProductVariants(
-            $schedule->agent,
-            $schedule->categories ?? [],
-            $schedule->languages ?? [],
-            $schedule->providers ?? $pending->pluck('provider')->all(),
-        )
+        $allReplacements = $eligibleVariants
             ->when($wantedLanguage !== null, fn (Collection $variants): Collection => $variants->where('language', $wantedLanguage))
             ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
             ->unique(fn (array $variant): int => (int) $variant['product']->id)
@@ -389,23 +402,31 @@ class SocialMediaScheduler
         // second metadata.localized entry produced by an optional language
         // crawl. Secondary languages still require their verified localized
         // record and therefore cannot silently fall back to the wrong copy.
-        $primaryLanguage = trim((string) $agent->knowledgeSources()
+        $languageSources = $agent->knowledgeSources()
             ->where('source_scope', 'language')
-            ->where('status', 'ready')
             ->oldest('id')
-            ->value('taxonomy_label'));
+            ->get(['id', 'taxonomy_label', 'status']);
+        $primaryLanguage = trim((string) optional(
+            $languageSources->first(fn ($source): bool => $source->status === 'ready' && filled($source->taxonomy_label)),
+        )->taxonomy_label);
         $primaryLanguageKey = Str::lower($primaryLanguage);
+        $sourceLanguageKeys = $languageSources
+            ->filter(fn ($source): bool => filled($source->taxonomy_label))
+            ->mapWithKeys(fn ($source): array => [(int) $source->id => Str::lower(trim((string) $source->taxonomy_label))]);
 
-        return $products->flatMap(function ($product) use ($wanted, $primaryLanguageKey): array {
+        return $products->flatMap(function ($product) use ($wanted, $primaryLanguageKey, $sourceLanguageKeys): array {
             $localized = (array) data_get($product->metadata, 'localized', []);
             $localizedKeys = collect(array_keys($localized))
                 ->mapWithKeys(fn ($language): array => [Str::lower(trim((string) $language)) => (string) $language]);
+            $sourceLanguageKey = $sourceLanguageKeys->get((int) data_get($product->metadata, 'source_id'));
 
-            return $wanted->filter(function (string $language) use ($localizedKeys, $primaryLanguageKey): bool {
+            return $wanted->filter(function (string $language) use ($localizedKeys, $primaryLanguageKey, $sourceLanguageKey): bool {
                 $languageKey = Str::lower($language);
 
                 return $localizedKeys->has($languageKey)
-                    || ($primaryLanguageKey !== '' && $languageKey === $primaryLanguageKey);
+                    || ($primaryLanguageKey !== ''
+                        && $languageKey === $primaryLanguageKey
+                        && ($sourceLanguageKey === null || $sourceLanguageKey === $primaryLanguageKey));
             })
                 ->map(function (string $language) use ($product, $localizedKeys): array {
                     $verifiedLanguage = $localizedKeys->get(Str::lower($language), $language);
