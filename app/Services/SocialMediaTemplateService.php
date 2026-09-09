@@ -12,7 +12,7 @@ class SocialMediaTemplateService
 {
     public const PROVIDERS = ['facebook', 'instagram', 'linkedin'];
 
-    public const IMAGE_STYLES = ['original', 'storefront', 'raw', 'framed', 'editorial', 'dark', 'brand'];
+    public const IMAGE_STYLES = ['three_d', 'original', 'storefront', 'raw', 'framed', 'editorial', 'dark', 'brand'];
 
     public function __construct(private readonly SocialMediaTemplateRenderer $renderer) {}
 

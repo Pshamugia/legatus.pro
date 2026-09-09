@@ -80,6 +80,7 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('data-schedule-submit-spinner', false)
             ->assertSee('Informative')
             ->assertSee('Luna writes up to 7 product posts per business each day')
+            ->assertSee('3D catalog design')
             ->assertSee('Catalog design')
             ->assertSee('Catalog design preview')
             ->assertSee('Plain photo')
@@ -512,6 +513,7 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->actingAs($user)->get(route('social-media.index'))
             ->assertOk()
+            ->assertSee('3D catalog design')
             ->assertSee('Catalog design')
             ->assertSee('Storefront image')
             ->assertSee('https://shop.example/storage/books/exact-thumb-image.jpg');
@@ -602,6 +604,28 @@ class SocialMediaSchedulerTest extends TestCase
         $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/prepared.png', 'original');
 
         $this->assertSame('https://shop.example/prepared.png', $url);
+    }
+
+    public function test_three_d_catalog_design_remains_available_for_prepared_square_artwork(): void
+    {
+        if (! extension_loaded('gd')) {
+            $this->markTestSkipped('GD is required for social image rendering.');
+        }
+
+        Storage::fake('public');
+        $source = imagecreatetruecolor(400, 400);
+        imagefilledrectangle($source, 0, 0, 399, 399, imagecolorallocate($source, 248, 248, 246));
+        imagefilledrectangle($source, 120, 35, 360, 365, imagecolorallocate($source, 80, 60, 45));
+        ob_start();
+        imagepng($source);
+        $png = (string) ob_get_clean();
+        imagedestroy($source);
+        Http::fake(['https://shop.example/prepared-3d.png' => Http::response($png, 200, ['Content-Type' => 'image/png'])]);
+
+        $url = app(SocialMediaImageDesigner::class)->render('https://shop.example/prepared-3d.png', 'three_d');
+
+        $this->assertStringContainsString('/media/social/', $url);
+        $this->assertCount(1, Storage::disk('public')->files('social-media'));
     }
 
     public function test_storefront_image_style_uses_the_exact_primary_image_when_the_product_page_exposes_it(): void

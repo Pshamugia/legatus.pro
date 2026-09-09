@@ -14,7 +14,8 @@ class SocialMediaImageDesigner
         }
 
         $style = in_array($style, SocialMediaTemplateService::IMAGE_STYLES, true) ? $style : 'original';
-        $hash = hash('sha256', $sourceUrl.'|'.$style.'|v2');
+        $cacheVersion = $style === 'three_d' ? 'v3' : 'v2';
+        $hash = hash('sha256', $sourceUrl.'|'.$style.'|'.$cacheVersion);
         $path = 'social-media/'.$hash.'.jpg';
         if (Storage::disk('public')->exists($path)) {
             return route('social-media.image', ['filename' => $hash.'.jpg']);
@@ -40,7 +41,7 @@ class SocialMediaImageDesigner
 
             $canvas = imagecreatetruecolor(1080, 1080);
             imageantialias($canvas, true);
-            if ($style === 'original') {
+            if (in_array($style, ['three_d', 'original'], true)) {
                 $backgroundPath = public_path('images/social/catalog-background.png');
                 $background = is_file($backgroundPath) ? @imagecreatefrompng($backgroundPath) : false;
                 if (! $background) {
