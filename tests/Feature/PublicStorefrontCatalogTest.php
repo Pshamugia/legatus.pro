@@ -572,6 +572,117 @@ class PublicStorefrontCatalogTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/suggest'));
     }
 
+    public function test_first_exact_lookup_returns_every_same_name_sold_out_listing_discovered_live(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $card = function (int $id): string {
+            return <<<HTML
+            <div class="card book-card">
+              <a class="card-link" href="https://bukinistebi.ge/books/shared-title/{$id}"><img src="https://bukinistebi.ge/storage/{$id}.webp"></a>
+              <h2 class="book-title-strong" title="Shared Night">Shared Night</h2>
+              <a class="book-author-link">Verified Creator</a>
+              <p>₾ <span>9.00</span></p>
+              <span class="sold-product">Sold out</span>
+            </div>
+            HTML;
+        };
+        $searchRequests = 0;
+        Http::fake(function ($request) use ($card, &$searchRequests) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
+            if ($path === '/search') {
+                $searchRequests++;
+                $cards = $searchRequests === 1 ? $card(101) : $card(101).$card(102);
+
+                return Http::response('<div id="search-results">'.$cards.'</div>', 200, ['Content-Type' => 'text/html']);
+            }
+            if (in_array($path, ['/books/shared-title/101', '/books/shared-title/102'], true)) {
+                return Http::response('<div class="product-price"><strong>9 ₾</strong></div>');
+            }
+
+            return Http::response(['items' => [], 'didYouMean' => null]);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Shared Night',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+            '_return_all_matches' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame(
+            [101, 102],
+            collect($result['unavailable_products'])->pluck('sku')->map(fn ($sku): int => (int) $sku)->sort()->values()->all(),
+            json_encode([
+                'result' => $result,
+                'products' => $agent->products()->get()->toArray(),
+                'requests' => collect(Http::recorded())->map(fn (array $record): string => rawurldecode($record[0]->url()))->all(),
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
+        );
+        $this->assertSame('complete', $result['result_scope']);
+        Http::assertSent(function ($request): bool {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+
+            return ($parameters['title'] ?? null) === 'Shared Night';
+        });
+    }
+
+    public function test_exact_lookup_uses_live_product_attributes_to_select_the_requested_edition(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $card = fn (int $id): string => <<<HTML
+        <div class="card book-card">
+          <a class="card-link" href="https://bukinistebi.ge/books/shared-night/{$id}"><img src="https://bukinistebi.ge/storage/{$id}.webp"></a>
+          <h2 class="book-title-strong" title="Shared Night">Shared Night</h2>
+          <a class="book-author-link">Verified Creator</a>
+          <button class="toggle-cart-btn">Buy</button>
+          <span>&#8382; 15.00</span>
+        </div>
+        HTML;
+
+        $searchRequests = 0;
+        Http::fake(function ($request) use ($card, &$searchRequests) {
+            $path = (string) parse_url($request->url(), PHP_URL_PATH);
+            if ($path === '/search') {
+                $searchRequests++;
+                $cards = $searchRequests === 4
+                    ? $card(1981).$card(1984)
+                    : '';
+
+                return Http::response('<div id="search-results">'.$cards.'</div>');
+            }
+            if ($path === '/books/shared-night/1981') {
+                return Http::response('<table><tr><th>Publication edition</th><td>1981</td></tr></table>');
+            }
+            if ($path === '/books/shared-night/1984') {
+                return Http::response('<table><tr><th>Publication edition</th><td>1984</td></tr></table>');
+            }
+
+            return Http::response(['items' => [], 'didYouMean' => null]);
+        });
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Shared Night 1981 edition',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame(
+            [1981],
+            collect($result['products'])->pluck('sku')->map(fn ($sku): int => (int) $sku)->all(),
+            json_encode([
+                'result' => $result,
+                'products' => $agent->products()->get()->toArray(),
+                'requests' => collect(Http::recorded())->map(fn (array $record): string => rawurldecode($record[0]->url()))->all(),
+            ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT),
+        );
+        $this->assertStringContainsString('Publication edition: 1981', (string) $agent->products()->where('sku', '1981')->value('search_text'));
+        $this->assertSame(['Publication edition: 1981'], data_get($agent->products()->where('sku', '1981')->firstOrFail()->metadata, 'attributes'));
+    }
+
     /** @return array{Agent, Conversation} */
     private function context(): array
     {

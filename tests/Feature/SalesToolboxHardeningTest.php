@@ -744,6 +744,35 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([$musketeers->id], collect($found['products'])->pluck('id')->all());
     }
 
+    public function test_exact_identity_keeps_its_text_constraints_when_a_category_is_also_resolved(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'Shared Night',
+            'category' => 'Books',
+            'search_text' => 'Shared Night',
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'Unrelated Archive',
+            'category' => 'Books',
+            'description' => 'A 1981 edition',
+            'search_text' => 'Unrelated Archive 1981 edition',
+            'price' => 18,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Shared Night 1981 edition',
+            'category' => 'Books',
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertNotContains($unrelated->id, collect($result['products'])->pluck('id')->all());
+    }
+
     public function test_entity_family_follow_up_drops_failed_bundle_format_and_returns_all_matching_items(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

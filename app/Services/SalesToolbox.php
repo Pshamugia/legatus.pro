@@ -103,7 +103,8 @@ class SalesToolbox
             // repeat that label (and can leave only a sold-out title match).
             // Multi-subject queries keep their text constraints so a named
             // product inside a category does not expand to the whole category.
-            $authoritativeCategoryBrowse = $taxonomyProductIds !== null
+            $authoritativeCategoryBrowse = ! $identityMatch
+                && $taxonomyProductIds !== null
                 && (filled($a['category'] ?? null) || count($termGroups) === 1);
             if (! $authoritativeCategoryBrowse) {
                 $q->where(function ($termQuery) use ($termGroups): void {
@@ -175,6 +176,32 @@ class SalesToolbox
             $publicSearch = $this->storefront->discover($agent, $storefrontQuery, array_slice($storefrontQueries, 1));
         }
         if (($publicSearch['imported'] ?? 0) > 0) {
+            if ($identityMatch) {
+                // A constrained storefront query can surface only one edition
+                // whose description happens to contain the extra wording.
+                // Complete that live lookup with the exact verified product
+                // name so sibling listings with the same identity are not
+                // hidden merely because they are sold out or differ by edition.
+                $canonicalNames = $agent->customerProducts()
+                    ->whereIn('products.id', collect($publicSearch['product_ids'] ?? [])->map(fn ($id): int => (int) $id)->filter()->all())
+                    ->pluck('name')
+                    ->filter(fn ($name): bool => is_string($name) && trim($name) !== '')
+                    ->unique(fn (string $name): string => Str::lower(trim($name)))
+                    ->take(3);
+                foreach ($canonicalNames as $canonicalName) {
+                    $canonicalSearch = $this->storefront->discover($agent, trim($canonicalName));
+                    if (($canonicalSearch['imported'] ?? 0) > 0) {
+                        $publicSearch['imported'] += (int) $canonicalSearch['imported'];
+                        $publicSearch['product_ids'] = collect($publicSearch['product_ids'] ?? [])
+                            ->merge($canonicalSearch['product_ids'] ?? [])
+                            ->map(fn ($id): int => (int) $id)
+                            ->filter()
+                            ->unique()
+                            ->values()
+                            ->all();
+                    }
+                }
+            }
             if ($taxonomyProductIds === []) {
                 $taxonomyProductIds = collect($publicSearch['product_ids'] ?? [])
                     ->map(fn ($id): int => (int) $id)
@@ -189,6 +216,17 @@ class SalesToolbox
             // local query after importing so category/genre membership remains
             // authoritative for candidate selection.
             $matches = $localSearch();
+            if ($identityMatch && $matches->isEmpty() && count($termGroups) > 1) {
+                // The first live lookup may have introduced the very catalog
+                // identity needed to discard conversational/format words.
+                // Retry projection in this same customer turn instead of
+                // making the customer ask a second time.
+                $identityTermGroups = $this->strongCatalogIdentityProjection($agent, $termGroups);
+                if ($identityTermGroups !== [] && count($identityTermGroups) < count($termGroups)) {
+                    $termGroups = $identityTermGroups;
+                    $matches = $localSearch();
+                }
+            }
             $products = $matches->where('available', true)->values();
             $unavailableProducts = $matches->where('available', false)->values();
         }
@@ -1346,7 +1384,11 @@ class SalesToolbox
 
         try {
             return $this->commerce->search($connection, $connectorQuery, [
-                'available_only' => 1,
+                // Exact catalog lookup must also find products which exist but
+                // are currently sold out. Broad discovery remains limited to
+                // purchasable options, while exact-match availability is
+                // reported separately and verified before it reaches the customer.
+                'available_only' => (bool) ($arguments['_identity_match'] ?? false) ? 0 : 1,
                 'max_price' => $arguments['max_price'] ?? null,
                 'limit' => 30,
             ]);

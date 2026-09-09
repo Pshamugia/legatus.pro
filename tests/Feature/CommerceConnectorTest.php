@@ -138,6 +138,64 @@ class CommerceConnectorTest extends TestCase
         $this->assertStringNotContainsString('Do not expose me', json_encode($result, JSON_UNESCAPED_UNICODE));
     }
 
+    public function test_live_connector_exact_search_includes_verified_sold_out_matches(): void
+    {
+        $agent = Agent::create(['name' => 'Assistant', 'slug' => 'sold-out-live-search', 'business_name' => 'Store']);
+        $connection = $agent->commerceConnection()->create([
+            'provider' => 'universal_api',
+            'name' => 'Live catalog',
+            'base_url' => 'https://8.8.8.8',
+            'key_id' => 'sold-out-search-test',
+            'secret' => str_repeat('s', 32),
+            'status' => 'active',
+        ]);
+        $first = $agent->products()->create([
+            'commerce_connection_id' => $connection->id,
+            'external_product_id' => 'sold-1',
+            'name' => 'Remote Catalog Identity — First archived edition',
+            'search_text' => 'Remote Catalog Identity First archived edition',
+            'price' => 9,
+            'stock' => 0,
+            'is_active' => true,
+        ]);
+        $second = $agent->products()->create([
+            'commerce_connection_id' => $connection->id,
+            'external_product_id' => 'sold-2',
+            'name' => 'Remote Catalog Identity — Second archived edition',
+            'search_text' => 'Remote Catalog Identity Second archived edition',
+            'price' => 7,
+            'stock' => 0,
+            'is_active' => true,
+        ]);
+        Http::fake(function (Request $request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $parameters);
+            $this->assertSame('0', (string) ($parameters['available_only'] ?? ''));
+
+            return Http::response([
+                'data' => [
+                    ['id' => 'sold-1', 'name' => 'Untrusted first title'],
+                    ['id' => 'sold-2', 'name' => 'Untrusted second title'],
+                ],
+                'meta' => ['total' => 2, 'did_you_mean' => null],
+            ]);
+        });
+
+        $conversation = $agent->conversations()->create(['visitor_id' => 'sold-out-searcher', 'status' => 'ai']);
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'remote catalog identity',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertEqualsCanonicalizing(
+            [$first->id, $second->id],
+            collect($result['unavailable_products'])->pluck('id')->all(),
+        );
+        $this->assertStringNotContainsString('Untrusted', json_encode($result, JSON_UNESCAPED_UNICODE));
+    }
+
     public function test_signed_connector_syncs_catalog_and_tools_verify_live_data(): void
     {
         $secret = 'test-shared-secret-that-is-not-logged';

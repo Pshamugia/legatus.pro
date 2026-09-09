@@ -694,6 +694,53 @@ class KnowledgeIngestionService
         return $this->priceFromText((string) $node?->textContent);
     }
 
+    /** @return list<string> */
+    public function storefrontAttributeFactsFromHtml(string $html): array
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        $facts = [];
+
+        // Product pages commonly expose edition, size, material, year and
+        // similar variant-defining facts as table or definition-list pairs.
+        // Keep the extraction markup-based and language/industry neutral.
+        foreach ($xpath->query('//tr') as $row) {
+            $cells = $xpath->query('./th|./td', $row);
+            if ($cells->length < 2) {
+                continue;
+            }
+
+            $label = $this->catalogText($cells->item(0)?->textContent, 120);
+            $values = [];
+            for ($index = 1; $index < $cells->length; $index++) {
+                $value = $this->catalogText($cells->item($index)?->textContent, 240);
+                if ($value !== '') {
+                    $values[] = $value;
+                }
+            }
+            $value = $this->catalogText(implode(' ', $values), 300);
+            if ($label !== '' && $value !== '' && Str::lower($label) !== Str::lower($value)) {
+                $facts[] = "{$label}: {$value}";
+            }
+        }
+
+        foreach ($xpath->query('//dt') as $term) {
+            $definition = $xpath->query('following-sibling::dd[1]', $term)->item(0);
+            $label = $this->catalogText($term->textContent, 120);
+            $value = $this->catalogText($definition?->textContent, 300);
+            if ($label !== '' && $value !== '' && Str::lower($label) !== Str::lower($value)) {
+                $facts[] = "{$label}: {$value}";
+            }
+        }
+
+        return collect($facts)
+            ->unique(fn (string $fact): string => Str::lower($fact))
+            ->take(40)
+            ->values()
+            ->all();
+    }
+
     private function priceFromText(string $text): ?float
     {
         if (! preg_match('/([0-9]+(?:[.,][0-9]{1,2})?)/u', $text, $match)) {
@@ -778,6 +825,7 @@ class KnowledgeIngestionService
             $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [],
             120,
         );
+        $attributes = $this->searchableValues($product['attributes'] ?? [], 300);
         $taxonomy = collect($genres)
             ->merge($this->sourceTaxonomy($source))
             ->unique(fn (string $value): string => Str::lower($value))
@@ -794,7 +842,7 @@ class KnowledgeIngestionService
             'description' => $description,
             'search_text' => $this->searchableProductText([
                 $name, $sku, $category, $author, $taxonomy, $isbn,
-                $product['publisher'] ?? null, $description,
+                $product['publisher'] ?? null, $attributes, $description,
             ]),
             'price' => $price,
             'stock' => $stock,
@@ -809,6 +857,7 @@ class KnowledgeIngestionService
                 'genres' => $genres,
                 'taxonomy' => $taxonomy,
                 'isbn' => $isbn,
+                'attributes' => $attributes,
                 'currency' => $currency,
                 'original_price' => $originalPrice,
                 'discount_percent' => $originalPrice

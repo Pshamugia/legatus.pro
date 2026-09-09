@@ -154,6 +154,7 @@ class PublicStorefrontCatalog
 
             try {
                 $detail = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html'], 5, 1);
+                $attributeFacts = $this->ingestion->storefrontAttributeFactsFromHtml($detail->body());
                 foreach ($this->ingestion->structuredProductsFromHtml($detail->body()) as $product) {
                     $product['url'] ??= $url;
                     if (empty($product['sku']) && preg_match('#/(\d+)(?:\?.*)?$#', $url, $idMatch)) {
@@ -169,6 +170,7 @@ class PublicStorefrontCatalog
                         $product['availability'] ??= 'InStock';
                     }
                     $product['stock_precision'] = 'availability_only';
+                    $product['attributes'] = $attributeFacts;
                     $products[] = $product;
                 }
             } catch (\Throwable $exception) {
@@ -398,6 +400,7 @@ class PublicStorefrontCatalog
 
             try {
                 $detail = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html']);
+                $products[$index]['attributes'] = $this->ingestion->storefrontAttributeFactsFromHtml($detail->body());
                 $originalPrice = $this->ingestion->storefrontOriginalPriceFromHtml($detail->body());
                 if ($originalPrice !== null && $originalPrice > (float) ($products[$index]['price'] ?? 0)) {
                     $products[$index]['original_price'] = $originalPrice;

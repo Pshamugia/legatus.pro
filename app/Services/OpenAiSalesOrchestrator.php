@@ -138,7 +138,7 @@ class OpenAiSalesOrchestrator
                         ? (float) data_get($conversation->context, 'active_catalog_scope.max_price')
                         : null,
                     'exclude_product_ids' => $excludedIds->all(),
-                    '_identity_match' => $resolvedCategory === null && $matchScope === 'exact_identity',
+                    '_identity_match' => $matchScope === 'exact_identity',
                     '_return_all_matches' => $expectsCompleteSet,
                 ];
                 $individualSearches = $resolvedQueries->map(function (string $query) use ($arguments, $agent, $conversation): array {
@@ -203,7 +203,7 @@ class OpenAiSalesOrchestrator
                             'category' => $resolvedCategory,
                             'max_price' => null,
                             'exclude_product_ids' => $excludedIds->all(),
-                            '_identity_match' => $resolvedCategory === null && $matchScope === 'exact_identity',
+                            '_identity_match' => $matchScope === 'exact_identity',
                             '_return_all_matches' => $expectsCompleteSet,
                         ];
                         $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
@@ -430,8 +430,7 @@ class OpenAiSalesOrchestrator
                     $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
                     if ($call['name'] === 'search_products') {
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
-                        $args['_identity_match'] = blank($args['category'])
-                            && data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
+                        $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
                         $args['_return_all_matches'] = (bool) data_get($semanticResolution, 'result.expects_complete_set', false);
                     }
                 }
