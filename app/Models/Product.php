@@ -31,6 +31,23 @@ class Product extends Model
         return $this->validatedPublicImageUrl($url);
     }
 
+    public function matchesPublicProductUrl(string $expectedUrl): bool
+    {
+        $expected = $this->canonicalProductUrl($expectedUrl);
+        if ($expected === null) {
+            return false;
+        }
+
+        $urls = [data_get($this->metadata, 'product_url')];
+        foreach ((array) data_get($this->metadata, 'localized', []) as $localized) {
+            $urls[] = data_get($localized, 'product_url');
+        }
+
+        return collect($urls)->contains(
+            fn ($url): bool => is_string($url) && $this->canonicalProductUrl($url) === $expected,
+        );
+    }
+
     public function socialDescription(?string $language = null, ?string $preparedFallback = null): ?string
     {
         $localized = (array) data_get($this->metadata, 'localized', []);
@@ -62,5 +79,25 @@ class Product extends Model
             && in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)
                 ? $url
                 : null;
+    }
+
+    private function canonicalProductUrl(string $url): ?string
+    {
+        if (! filter_var($url, FILTER_VALIDATE_URL)) {
+            return null;
+        }
+        $parts = parse_url($url);
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        if (! in_array($scheme, ['http', 'https'], true) || $host === '') {
+            return null;
+        }
+        parse_str((string) ($parts['query'] ?? ''), $query);
+        unset($query['lang']);
+        ksort($query);
+        $port = isset($parts['port']) ? ':'.$parts['port'] : '';
+        $path = '/'.ltrim(rtrim((string) ($parts['path'] ?? '/'), '/'), '/');
+
+        return $scheme.'://'.$host.$port.$path.($query === [] ? '' : '?'.http_build_query($query));
     }
 }

@@ -519,6 +519,58 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('https://shop.example/storage/books/exact-thumb-image.jpg');
     }
 
+    public function test_business_can_pin_one_synchronized_product_as_the_permanent_live_preview(): void
+    {
+        [$user, $agent] = $this->tenant('pinned-live-preview');
+        $agent->products()->create($this->product('Automatic Preview Product', 'General', 2));
+        $attributes = $this->product('Pinned Flat Cover', 'Books', 2);
+        $attributes['metadata']['product_url'] = 'https://shop.example/books/pinned-flat-cover/2492?lang=ka';
+        $pinned = $agent->products()->create($attributes);
+        $previewUrl = 'https://shop.example/books/pinned-flat-cover/2492';
+
+        $this->actingAs($user)->put(route('social-media.templates.update'), [
+            'preview_product_url' => $previewUrl,
+            'templates' => [
+                'facebook' => ['body_template' => '{product_title} {product_url}', 'image_style' => 'three_d'],
+                'instagram' => ['body_template' => '{product_title} {product_url}', 'image_style' => 'three_d'],
+            ],
+        ])->assertRedirect(route('social-media.index'));
+
+        $this->assertSame($previewUrl, data_get($agent->fresh()->settings, 'social_preview_product_url'));
+        $this->mock(ProductPagePrimaryImageResolver::class)
+            ->shouldReceive('resolve')
+            ->once()
+            ->withArgs(fn ($product): bool => $product->is($pinned))
+            ->andReturn('https://shop.example/storage/books/pinned-flat-cover.webp');
+        Http::fake(['https://shop.example/images/*' => Http::response('not-an-image')]);
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('Live preview product URL')
+            ->assertSee('Pinned Flat Cover')
+            ->assertSee('value="'.$previewUrl.'"', false);
+    }
+
+    public function test_live_preview_product_url_cannot_reference_another_business_catalog(): void
+    {
+        [$user, $agent] = $this->tenant('preview-url-owner');
+        [, $otherAgent] = $this->tenant('preview-url-other');
+        $otherUrl = 'https://other-shop.example/products/private-preview';
+        $attributes = $this->product('Other Product', 'General', 2);
+        $attributes['metadata']['product_url'] = $otherUrl;
+        $otherAgent->products()->create($attributes);
+
+        $this->actingAs($user)->from(route('social-media.index'))->put(route('social-media.templates.update'), [
+            'preview_product_url' => $otherUrl,
+            'templates' => [
+                'facebook' => ['body_template' => '{product_title} {product_url}', 'image_style' => 'three_d'],
+                'instagram' => ['body_template' => '{product_title} {product_url}', 'image_style' => 'three_d'],
+            ],
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('preview_product_url');
+
+        $this->assertNull(data_get($agent->fresh()->settings, 'social_preview_product_url'));
+    }
+
     public function test_selected_image_design_is_rendered_as_a_public_cached_jpeg(): void
     {
         if (! extension_loaded('gd')) {

@@ -45,6 +45,10 @@ class SocialMediaController extends Controller
             ->orderBy('scheduled_for')->limit(12)->get();
         $canManage = in_array($tenant->role(), ['owner', 'admin'], true);
         $templates = $templateService->configurations($agent);
+        $configuredPreviewUrl = trim((string) data_get($agent->settings, 'social_preview_product_url'));
+        $configuredPreviewProduct = $configuredPreviewUrl !== ''
+            ? $products->first(fn ($product): bool => $product->matchesPublicProductUrl($configuredPreviewUrl))
+            : null;
         $sampleCandidates = $products->sortByDesc(function ($product) use ($primaryLanguage): int {
             $localizedMap = (array) data_get($product->metadata, 'localized', []);
             $localized = filled($primaryLanguage) ? (array) ($localizedMap[$primaryLanguage] ?? []) : [];
@@ -52,7 +56,7 @@ class SocialMediaController extends Controller
             return (filled(data_get($localized, 'name')) && filled(data_get($localized, 'product_url')) ? 2 : 0)
                 + ($product->socialDescription($primaryLanguage) !== null ? 1 : 0);
         });
-        $sample = $sampleCandidates->first(function ($product): bool {
+        $sample = $configuredPreviewProduct ?: $sampleCandidates->first(function ($product): bool {
             $url = data_get($product->metadata, 'product_url');
 
             return $product->stock > 0 && $this->publicHttpUrl($url)
