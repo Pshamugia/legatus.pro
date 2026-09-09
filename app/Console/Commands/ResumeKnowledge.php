@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Jobs\EmbedKnowledgeSource;
 use App\Models\KnowledgeSource;
 use Illuminate\Console\Command;
@@ -10,14 +11,15 @@ class ResumeKnowledge extends Command
 {
     protected $signature = 'legatus:resume-knowledge {--host=}';
 
-    protected $description = 'Resume semantic indexing for an interrupted public website crawl';
+    protected $description = 'Resume interrupted public website crawling or semantic indexing';
 
     public function handle(): int
     {
         $query = KnowledgeSource::query()
             ->where('type', 'url')
-            ->where('status', 'processing')
+            ->whereIn('status', ['processing', 'ready', 'failed'])
             ->where('progress', '>', 1);
+        $query->where('progress', '<', 100);
 
         if ($host = trim((string) $this->option('host'))) {
             $query->where('url', 'like', '%://'.$host.'/%');
@@ -25,6 +27,15 @@ class ResumeKnowledge extends Command
 
         $count = 0;
         $query->each(function (KnowledgeSource $source) use (&$count): void {
+            if ($source->isListingIndex()) {
+                $source->update(['status' => 'processing', 'error' => null]);
+                CrawlPublicWebsite::dispatch($source->id);
+                $this->info("Resumed crawl #{$source->id} {$source->name} from {$source->progress}%");
+                $count++;
+
+                return;
+            }
+
             $products = $source->agent->products()
                 ->where('metadata->source_id', $source->id)
                 ->where('is_active', true)
@@ -35,7 +46,7 @@ class ResumeKnowledge extends Command
                 'error' => null,
             ]);
             EmbedKnowledgeSource::dispatch($source->id);
-            $this->info("Resumed #{$source->id} {$source->name}: {$products} products, {$source->chunks()->count()} passages");
+            $this->info("Resumed indexing #{$source->id} {$source->name}: {$products} products, {$source->chunks()->count()} passages");
             $count++;
         });
 

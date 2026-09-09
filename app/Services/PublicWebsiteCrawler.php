@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Jobs\EmbedKnowledgeSource;
 use App\Jobs\EnrichPublicCatalogProducts;
 use App\Models\KnowledgeSource;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class PublicWebsiteCrawler
@@ -41,15 +43,27 @@ class PublicWebsiteCrawler
             $maximumPages = min($maximumPages, 15);
         }
         $maximumProducts = max(1, min(10_000, (int) config('legatus.commerce_max_catalog_products', 10000)));
-        $crawlStartedAt = now();
-        $queue = [$startUrl];
-        $queued = [$startUrl => true];
-        $visited = [];
-        $created = $updated = 0;
-        $productCount = 0;
-        $hash = hash_init('sha256');
+        $savedState = is_array($source->crawl_state) && ($source->crawl_state['start_url'] ?? null) === $startUrl
+            ? $source->crawl_state
+            : [];
+        $crawlStartedAt = isset($savedState['started_at'])
+            ? Carbon::parse($savedState['started_at'])
+            : now();
+        $queue = array_values($savedState['queue'] ?? [$startUrl]);
+        $queued = array_fill_keys($savedState['queued'] ?? [$startUrl], true);
+        $visited = array_fill_keys($savedState['visited'] ?? [], true);
+        $created = (int) ($savedState['created'] ?? 0);
+        $updated = (int) ($savedState['updated'] ?? 0);
+        $productCount = (int) ($savedState['product_count'] ?? 0);
+        $contentHash = (string) ($savedState['content_hash'] ?? '');
+        $batchPages = max(1, min(100, (int) config('legatus.public_crawl_batch_pages', 15)));
+        $processedThisBatch = 0;
 
-        $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+        $source->update(array_filter([
+            'status' => 'processing',
+            'progress' => $savedState === [] ? 1 : null,
+            'error' => null,
+        ], fn ($value): bool => $value !== null));
 
         if (! $listingOnly) {
             foreach ([
@@ -61,23 +75,26 @@ class PublicWebsiteCrawler
         }
 
         try {
-            while ($queue !== [] && count($visited) < $maximumPages && $productCount < $maximumProducts) {
+            while ($queue !== [] && count($visited) < $maximumPages && $productCount < $maximumProducts && $processedThisBatch < $batchPages) {
                 $url = array_shift($queue);
                 if (isset($visited[$url])) {
                     continue;
                 }
                 $visited[$url] = true;
+                $processedThisBatch++;
 
                 try {
                     $response = $this->ingestion->fetchPublicUrl($url, [
                         'Accept' => 'text/html,application/xhtml+xml,application/xml,application/json',
                     ]);
                 } catch (\Throwable) {
+                    $this->checkpoint($source, $startUrl, $crawlStartedAt, $queue, $queued, $visited, $created, $updated, $productCount, $contentHash);
+
                     continue;
                 }
 
                 $body = $response->body();
-                hash_update($hash, $url."\n".hash('sha256', $body));
+                $contentHash = hash('sha256', $contentHash."\n".$url."\n".hash('sha256', $body));
                 $contentType = mb_strtolower((string) $response->header('Content-Type'));
 
                 if (str_contains($contentType, 'xml') || str_ends_with(parse_url($url, PHP_URL_PATH) ?: '', '.xml')) {
@@ -85,6 +102,7 @@ class PublicWebsiteCrawler
                         $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                     }
                     $this->progress($source, count($visited), count($queue), $maximumPages);
+                    $this->checkpoint($source, $startUrl, $crawlStartedAt, $queue, $queued, $visited, $created, $updated, $productCount, $contentHash);
 
                     continue;
                 }
@@ -116,9 +134,17 @@ class PublicWebsiteCrawler
                 }
 
                 $this->progress($source, count($visited), count($queue), $maximumPages);
+                $this->checkpoint($source, $startUrl, $crawlStartedAt, $queue, $queued, $visited, $created, $updated, $productCount, $contentHash);
                 if (count($visited) % 25 === 0) {
                     gc_collect_cycles();
                 }
+            }
+
+            if ($queue !== [] && count($visited) < $maximumPages && $productCount < $maximumProducts) {
+                $this->checkpoint($source, $startUrl, $crawlStartedAt, $queue, $queued, $visited, $created, $updated, $productCount, $contentHash);
+                CrawlPublicWebsite::dispatch($source->id);
+
+                return;
             }
 
             if ($source->chunks()->count() === 0) {
@@ -156,7 +182,8 @@ class PublicWebsiteCrawler
                 'items_found' => $productCount,
                 'items_created' => $created,
                 'items_updated' => $updated,
-                'content_hash' => hash_final($hash),
+                'content_hash' => $contentHash,
+                'crawl_state' => null,
                 'last_synced_at' => now(),
                 'index_version' => $classificationOnly ? 2 : (int) $source->index_version,
                 'error' => $queue === []
@@ -446,5 +473,41 @@ class PublicWebsiteCrawler
         if ($progress > (int) $source->progress) {
             $source->update(['progress' => $progress]);
         }
+    }
+
+    /**
+     * Persist a restartable crawl cursor after each page so a worker timeout
+     * never forces a large public catalog to begin again from page one.
+     *
+     * @param  list<string>  $queue
+     * @param  array<string, bool>  $queued
+     * @param  array<string, bool>  $visited
+     */
+    private function checkpoint(
+        KnowledgeSource $source,
+        string $startUrl,
+        Carbon $startedAt,
+        array $queue,
+        array $queued,
+        array $visited,
+        int $created,
+        int $updated,
+        int $productCount,
+        string $contentHash,
+    ): void {
+        $source->update([
+            'status' => 'processing',
+            'crawl_state' => [
+                'start_url' => $startUrl,
+                'started_at' => $startedAt->toIso8601String(),
+                'queue' => array_values($queue),
+                'queued' => array_keys($queued),
+                'visited' => array_keys($visited),
+                'created' => $created,
+                'updated' => $updated,
+                'product_count' => $productCount,
+                'content_hash' => $contentHash,
+            ],
+        ]);
     }
 }

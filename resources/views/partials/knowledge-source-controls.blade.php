@@ -8,7 +8,7 @@
                 <span><strong data-source-items>{{ number_format($displayProductCount) }}</strong> products</span>
             </span>
         @endif
-        <span class="pill" data-source-status>{{ $source->status }}</span>
+        <span class="pill" data-source-status>{{ $source->status === 'ready' && (int) $source->progress < 100 ? 'incomplete' : $source->status }}</span>
         @if($source->isRefreshable())
             <button class="btn ghost" type="submit" form="sync-source-{{ $source->id }}">↻ Sync</button>
         @endif

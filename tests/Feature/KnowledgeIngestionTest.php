@@ -975,6 +975,36 @@ HTML;
         Queue::assertPushed(EmbedKnowledgeSource::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
+    public function test_incomplete_ready_catalog_is_automatically_returned_to_the_crawl_queue(): void
+    {
+        Queue::fake();
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'catalog',
+            'name' => 'Incomplete catalog',
+            'url' => 'https://bukinistebi.ge/books',
+            'status' => 'ready',
+            'progress' => 89,
+            'items_found' => 2169,
+            'error' => 'Website synchronization paused safely.',
+        ]);
+
+        $this->actingAs(User::firstOrFail())
+            ->get(route('knowledge.index'))
+            ->assertOk()
+            ->assertSee('data-source-status>incomplete</span>', false);
+
+        $this->artisan('legatus:resume-knowledge')
+            ->expectsOutputToContain('Resumed crawl')
+            ->assertSuccessful();
+
+        $this->assertSame('processing', $source->fresh()->status);
+        $this->assertSame(89, $source->fresh()->progress);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
+    }
+
     public function test_deleting_uploaded_source_removes_only_its_managed_file(): void
     {
         Storage::fake('local');

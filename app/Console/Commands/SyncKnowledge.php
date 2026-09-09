@@ -34,7 +34,7 @@ class SyncKnowledge extends Command
 
             try {
                 if ($source->type === 'url') {
-                    $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+                    $source->update(['status' => 'processing', 'progress' => 1, 'error' => null, 'crawl_state' => null]);
                     CrawlPublicWebsite::dispatch($source->id);
                     $this->info("Queued #{$source->id} {$source->name}");
 

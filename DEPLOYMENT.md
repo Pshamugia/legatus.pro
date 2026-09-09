@@ -152,7 +152,7 @@ Confirm these baseline scheduled commands run under the same release and environ
 
 - `legatus:expire-reservations` — every minute;
 - `legatus:dispatch-social-posts` — every minute;
-- `legatus:sync-knowledge` — daily at 03:15 application time;
+- `legatus:resume-knowledge` — every five minutes, continuing incomplete catalog crawls from their saved cursor;
 - `legatus:purge-expired-data` — daily at 03:45 application time.
 
 The current release also schedules commerce reconciliation and recovery of eligible channel outbox records. Confirm the complete schedule with `php artisan schedule:list` after deployment rather than relying on this prose list.

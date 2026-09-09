@@ -24,6 +24,7 @@ Schedule::command('legatus:reconcile-meta-inbox')->everyMinute()->withoutOverlap
 // Rebuild legacy category mappings one at a time. This keeps tenant taxonomy
 // indexes moving without creating a burst of crawlers on shared hosting.
 Schedule::command('legatus:rebuild-category-indexes')->everyFiveMinutes()->withoutOverlapping(10);
+Schedule::command('legatus:resume-knowledge')->everyFiveMinutes()->withoutOverlapping(10);
 
 // Shared-hosting production does not necessarily provide Supervisor. Run a
 // short-lived worker from the platform scheduler so every tenant's one-click

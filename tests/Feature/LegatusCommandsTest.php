@@ -40,6 +40,7 @@ class LegatusCommandsTest extends TestCase
     {
         $this->artisan('schedule:list')
             ->expectsOutputToContain('queue:work database')
+            ->expectsOutputToContain('legatus:resume-knowledge')
             ->assertSuccessful();
     }
 

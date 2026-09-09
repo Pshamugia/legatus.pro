@@ -16,6 +16,7 @@ return [
     'commerce_max_response_bytes' => (int) env('LEGATUS_COMMERCE_MAX_RESPONSE_BYTES', 5242880),
     'commerce_sync_lock_seconds' => (int) env('LEGATUS_COMMERCE_SYNC_LOCK_SECONDS', 600),
     'public_crawl_max_pages' => (int) env('LEGATUS_PUBLIC_CRAWL_MAX_PAGES', 5000),
+    'public_crawl_batch_pages' => (int) env('LEGATUS_PUBLIC_CRAWL_BATCH_PAGES', 15),
     'widget_frame_ancestors' => env('LEGATUS_WIDGET_FRAME_ANCESTORS', '*'),
     'widget_country_server_key' => env('LEGATUS_WIDGET_COUNTRY_SERVER_KEY', 'GEOIP_COUNTRY_CODE'),
     'widget_country_header' => env('LEGATUS_WIDGET_COUNTRY_HEADER'),

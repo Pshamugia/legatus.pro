@@ -54,7 +54,7 @@ class CrawlPublicWebsite implements ShouldBeUniqueUntilProcessing, ShouldQueue
         $source->update([
             'status' => $source->chunks()->exists() ? 'ready' : 'failed',
             'progress' => $source->chunks()->exists() ? max(1, (int) $source->progress) : 0,
-            'error' => 'Website synchronization stopped safely. Existing searchable knowledge remains available; retry the source shortly.',
+            'error' => 'Website synchronization paused safely. Legatus will continue it automatically; existing searchable knowledge remains available.',
         ]);
     }
 }

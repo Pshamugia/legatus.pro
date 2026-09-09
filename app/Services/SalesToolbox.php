@@ -344,7 +344,7 @@ class SalesToolbox
 
             $stale = ! $source->last_synced_at || $source->last_synced_at->isBefore(now()->subMinutes(15));
             if ($stale && $source->status !== 'processing') {
-                $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+                $source->update(['status' => 'processing', 'progress' => 1, 'error' => null, 'crawl_state' => null]);
                 CrawlPublicWebsite::dispatch($source->id);
             }
         }

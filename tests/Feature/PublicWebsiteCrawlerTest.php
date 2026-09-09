@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Jobs\EmbedKnowledgeSource;
 use App\Jobs\EnrichPublicCatalogProducts;
 use App\Models\Agent;
@@ -86,6 +87,7 @@ class PublicWebsiteCrawlerTest extends TestCase
         config([
             'services.openai.key' => null,
             'legatus.public_crawl_max_pages' => 300,
+            'legatus.public_crawl_batch_pages' => 300,
             'legatus.taxonomy_crawl_max_pages' => 250,
             'legatus.commerce_max_catalog_products' => 1000,
         ]);
@@ -126,12 +128,64 @@ class PublicWebsiteCrawlerTest extends TestCase
             );
         });
 
-        app(PublicWebsiteCrawler::class)->crawl($source);
+        $crawler = app(PublicWebsiteCrawler::class);
+        $crawler->crawl($source);
+        $crawler->crawl($source);
+        $crawler->crawl($source);
 
         $this->assertSame(260, $source->fresh()->items_found);
         $this->assertNull($source->fresh()->error);
         $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'CAT-260']);
         Queue::assertPushed(EnrichPublicCatalogProducts::class, fn ($job): bool => $job->sourceId === $source->id);
+    }
+
+    public function test_large_catalog_crawl_continues_in_restartable_batches_until_it_reaches_one_hundred_percent(): void
+    {
+        Queue::fake();
+        $this->seed();
+        config([
+            'services.openai.key' => null,
+            'legatus.public_crawl_max_pages' => 20,
+            'legatus.public_crawl_batch_pages' => 1,
+        ]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'catalog',
+            'name' => 'Restartable catalog',
+            'url' => 'https://bukinistebi.ge/products',
+        ]);
+
+        Http::fake(function ($request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            $page = max(1, (int) ($query['page'] ?? 1));
+
+            return Http::response(
+                $this->catalogPage("Book {$page}", "BATCH-{$page}", 10 + $page, "/books/{$page}", null, $page < 3 ? $page + 1 : null),
+                200,
+                ['Content-Type' => 'text/html'],
+            );
+        });
+
+        $crawler = app(PublicWebsiteCrawler::class);
+        $crawler->crawl($source);
+        $this->assertSame('processing', $source->fresh()->status);
+        $this->assertNotNull($source->fresh()->crawl_state);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
+
+        $crawler->crawl($source);
+        $this->assertSame('processing', $source->fresh()->status);
+        $crawler->crawl($source);
+
+        $source->refresh();
+        $this->assertSame('ready', $source->status);
+        $this->assertSame(100, $source->progress);
+        $this->assertSame(3, $source->items_found);
+        $this->assertNull($source->crawl_state);
+        foreach (range(1, 3) as $page) {
+            $url = $page === 1 ? 'https://bukinistebi.ge/products' : "https://bukinistebi.ge/products?page={$page}";
+            $this->assertCount(1, Http::recorded(fn ($request): bool => $request->url() === $url));
+        }
     }
 
     public function test_taxonomy_url_stays_inside_its_collection_and_never_crawls_the_whole_domain(): void

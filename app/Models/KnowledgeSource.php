@@ -10,7 +10,10 @@ class KnowledgeSource extends Model
 {
     protected $guarded = [];
 
-    protected $casts = ['last_synced_at' => 'datetime'];
+    protected $casts = [
+        'last_synced_at' => 'datetime',
+        'crawl_state' => 'array',
+    ];
 
     public function agent(): BelongsTo
     {

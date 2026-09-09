@@ -40,7 +40,7 @@ class KnowledgeController extends Controller
                     'text' => $source->type === 'text'
                         ? $source->chunks()->where('kind', 'policy')->value('content')
                         : null,
-                    'status' => $source->status,
+                    'status' => $source->status === 'ready' && (int) $source->progress < 100 ? 'incomplete' : $source->status,
                     'refreshable' => $source->isRefreshable(),
                 ];
             })
@@ -56,7 +56,7 @@ class KnowledgeController extends Controller
                     'id' => $source->id,
                     'name' => $source->taxonomy_label ?: implode(', ', $taxonomy),
                     'url' => $source->url,
-                    'status' => $source->status,
+                    'status' => $source->status === 'ready' && (int) $source->progress < 100 ? 'incomplete' : $source->status,
                     'progress' => (int) $source->progress,
                     'items_found' => (int) $source->items_found,
                     'products_synced' => (int) $source->items_found,
@@ -91,18 +91,18 @@ class KnowledgeController extends Controller
                 ->count()
             : 0;
         $sources = $sources->map(fn (KnowledgeSource $source): array => [
-                'id' => $source->id,
-                'name' => $source->name,
-                'scope' => $source->source_scope,
-                'status' => $source->status,
-                'progress' => (int) $source->progress,
-                'items_found' => (int) $source->items_found,
-                'products_synced' => $source->source_scope === 'catalog'
-                    ? $catalogProductCount
-                    : (int) $source->items_found,
-                'error' => $source->error,
-                'last_synced_at' => $source->last_synced_at?->toIso8601String(),
-            ]);
+            'id' => $source->id,
+            'name' => $source->name,
+            'scope' => $source->source_scope,
+            'status' => $source->status === 'ready' && (int) $source->progress < 100 ? 'incomplete' : $source->status,
+            'progress' => (int) $source->progress,
+            'items_found' => (int) $source->items_found,
+            'products_synced' => $source->source_scope === 'catalog'
+                ? $catalogProductCount
+                : (int) $source->items_found,
+            'error' => $source->error,
+            'last_synced_at' => $source->last_synced_at?->toIso8601String(),
+        ]);
 
         return response()->json([
             'sources' => $sources,
@@ -141,7 +141,7 @@ class KnowledgeController extends Controller
         $name = $data['name'] ?? ($data['type'] === 'url' ? parse_url($data['url'], PHP_URL_HOST) : $file->getClientOriginalName());
         $source = $agent->knowledgeSources()->create(['type' => $data['type'], 'name' => $name, 'url' => $data['url'] ?? null, 'file_path' => $file ? $ingestion->storeFile($file, $data['type']) : null]);
         if ($source->type === 'url') {
-            $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+            $source->update(['status' => 'processing', 'progress' => 1, 'error' => null, 'crawl_state' => null]);
             CrawlPublicWebsite::dispatch($source->id);
 
             return back()->with('success', "{$source->name} is connected. Legatus is now learning the scoped website source in the background.");
@@ -198,6 +198,7 @@ class KnowledgeController extends Controller
                     if (config('services.openai.key')) {
                         $embedIds[] = $source->id;
                     }
+
                     continue;
                 }
 
@@ -389,7 +390,7 @@ class KnowledgeController extends Controller
                         'id' => $source->id,
                         'name' => $source->taxonomy_label,
                         'url' => $source->url,
-                        'status' => $source->status,
+                        'status' => $source->status === 'ready' && (int) $source->progress < 100 ? 'incomplete' : $source->status,
                         'progress' => (int) $source->progress,
                         'items_found' => (int) $source->items_found,
                         'products_synced' => (int) $source->items_found,
@@ -410,7 +411,7 @@ class KnowledgeController extends Controller
             if ($source->status === 'processing' && $source->updated_at?->isAfter(now()->subHours(2))) {
                 return back()->with('success', 'This source is already queued or synchronizing. A duplicate crawl was not started.');
             }
-            $source->update(['status' => 'processing', 'progress' => 1, 'error' => null]);
+            $source->update(['status' => 'processing', 'progress' => 1, 'error' => null, 'crawl_state' => null]);
             CrawlPublicWebsite::dispatch($source->id);
 
             $message = $ingestion->taxonomyForSource($source) !== []
