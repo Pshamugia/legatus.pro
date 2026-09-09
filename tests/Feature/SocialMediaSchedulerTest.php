@@ -571,6 +571,28 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertNull(data_get($agent->fresh()->settings, 'social_preview_product_url'));
     }
 
+    public function test_bukinistebi_preview_product_is_pinned_automatically_during_deployment(): void
+    {
+        [, $agent] = $this->tenant('bukinistebi-preview-deployment');
+        $agent->update(['settings' => ['existing_setting' => 'preserved']]);
+        $attributes = $this->product('არ დამიწეროთ ფრიადი', 'Books', 1);
+        $attributes['metadata']['product_url'] = 'https://bukinistebi.ge/books/ar-damitserot-friadi/2492?lang=ka';
+        $agent->products()->create($attributes);
+        $migration = require database_path('migrations/2026_09_09_000033_pin_bukinistebi_social_preview_product.php');
+
+        $migration->up();
+
+        $this->assertSame(
+            'https://bukinistebi.ge/books/ar-damitserot-friadi/2492',
+            data_get($agent->fresh()->settings, 'social_preview_product_url'),
+        );
+        $this->assertSame('preserved', data_get($agent->fresh()->settings, 'existing_setting'));
+
+        $migration->down();
+        $this->assertNull(data_get($agent->fresh()->settings, 'social_preview_product_url'));
+        $this->assertSame('preserved', data_get($agent->fresh()->settings, 'existing_setting'));
+    }
+
     public function test_selected_image_design_is_rendered_as_a_public_cached_jpeg(): void
     {
         if (! extension_loaded('gd')) {
