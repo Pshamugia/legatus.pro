@@ -383,11 +383,35 @@ class SocialMediaScheduler
             ])->values();
         }
 
-        return $products->flatMap(function ($product) use ($wanted): array {
-            $localized = (array) data_get($product->metadata, 'localized', []);
+        // The first configured website language is the storefront's primary
+        // language (the controller uses the same rule for the live preview).
+        // Its copy lives on the base catalog record, so it must not require a
+        // second metadata.localized entry produced by an optional language
+        // crawl. Secondary languages still require their verified localized
+        // record and therefore cannot silently fall back to the wrong copy.
+        $primaryLanguage = trim((string) $agent->knowledgeSources()
+            ->where('source_scope', 'language')
+            ->where('status', 'ready')
+            ->oldest('id')
+            ->value('taxonomy_label'));
+        $primaryLanguageKey = Str::lower($primaryLanguage);
 
-            return $wanted->filter(fn (string $language): bool => isset($localized[$language]))
-                ->map(fn (string $language): array => ['product' => $product, 'language' => $language])
+        return $products->flatMap(function ($product) use ($wanted, $primaryLanguageKey): array {
+            $localized = (array) data_get($product->metadata, 'localized', []);
+            $localizedKeys = collect(array_keys($localized))
+                ->mapWithKeys(fn ($language): array => [Str::lower(trim((string) $language)) => (string) $language]);
+
+            return $wanted->filter(function (string $language) use ($localizedKeys, $primaryLanguageKey): bool {
+                $languageKey = Str::lower($language);
+
+                return $localizedKeys->has($languageKey)
+                    || ($primaryLanguageKey !== '' && $languageKey === $primaryLanguageKey);
+            })
+                ->map(function (string $language) use ($product, $localizedKeys): array {
+                    $verifiedLanguage = $localizedKeys->get(Str::lower($language), $language);
+
+                    return ['product' => $product, 'language' => $verifiedLanguage];
+                })
                 ->values()->all();
         })->shuffle()->values();
     }
