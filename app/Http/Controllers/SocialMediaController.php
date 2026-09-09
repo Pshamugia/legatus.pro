@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\SocialMediaSchedule;
 use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaImageDesigner;
+use App\Services\SocialMediaPublicationHistory;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateService;
 use App\Services\TenantContext;
@@ -212,10 +213,14 @@ class SocialMediaController extends Controller
         return back()->with('social_success', $active ? 'Schedule resumed.' : 'Schedule paused.');
     }
 
-    public function destroy(SocialMediaSchedule $schedule, TenantContext $tenant)
-    {
+    public function destroy(
+        SocialMediaSchedule $schedule,
+        TenantContext $tenant,
+        SocialMediaPublicationHistory $publicationHistory,
+    ) {
         $tenant->authorize(['owner', 'admin']);
         abort_unless($schedule->agent_id === $tenant->agent()->id, 404);
+        $publicationHistory->backfill($schedule->agent()->firstOrFail());
         DB::transaction(function () use ($schedule): void {
             // Delete explicitly as well as relying on the foreign-key cascade.
             // Some shared-hosting databases may have legacy tables whose
@@ -224,7 +229,7 @@ class SocialMediaController extends Controller
             $schedule->delete();
         });
 
-        return back()->with('social_success', 'Schedule and its post history were removed.');
+        return back()->with('social_success', 'Schedule removed. Published-product history was retained to prevent duplicate posts.');
     }
 
     private function publicHttpUrl(mixed $url): bool

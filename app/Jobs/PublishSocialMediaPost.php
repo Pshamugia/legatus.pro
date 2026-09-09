@@ -3,9 +3,10 @@
 namespace App\Jobs;
 
 use App\Models\SocialMediaPost;
-use App\Services\MetaGraphClient;
 use App\Services\LinkedInClient;
+use App\Services\MetaGraphClient;
 use App\Services\SocialMediaAiCopywriter;
+use App\Services\SocialMediaPublicationHistory;
 use App\Services\SocialMediaTemplateRenderer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,10 +20,15 @@ class PublishSocialMediaPost implements ShouldQueue
 
     public function __construct(public int $postId) {}
 
-    public function handle(MetaGraphClient $meta, SocialMediaTemplateRenderer $renderer, ?SocialMediaAiCopywriter $copywriter = null): void
-    {
+    public function handle(
+        MetaGraphClient $meta,
+        SocialMediaTemplateRenderer $renderer,
+        ?SocialMediaAiCopywriter $copywriter = null,
+        ?SocialMediaPublicationHistory $publicationHistory = null,
+    ): void {
         $linkedin = app(LinkedInClient::class);
         $copywriter ??= app(SocialMediaAiCopywriter::class);
+        $publicationHistory ??= app(SocialMediaPublicationHistory::class);
         $post = SocialMediaPost::query()->with(['schedule', 'agent.organization', 'product'])->find($this->postId);
         if (! $post || $post->status !== 'queued' || $post->schedule?->status !== 'active') {
             return;
@@ -49,13 +55,14 @@ class PublishSocialMediaPost implements ShouldQueue
             return;
         }
 
+        $publicationHistory->backfill($post->agent);
         $alreadyPublished = SocialMediaPost::query()
             ->where('agent_id', $post->agent_id)
             ->where('provider', $post->provider)
             ->where('product_id', $post->product_id)
             ->where('status', 'published')
             ->whereKeyNot($post->id)
-            ->exists();
+            ->exists() || $publicationHistory->wasUsedOnAny($post->agent, $product, [$post->provider]);
         if ($alreadyPublished) {
             $post->update([
                 'status' => 'skipped',
@@ -136,6 +143,15 @@ class PublishSocialMediaPost implements ShouldQueue
             throw new \RuntimeException("The {$post->provider} publishing connection is not active.");
         }
 
+        if (! $publicationHistory->claim($post)) {
+            $post->update([
+                'status' => 'skipped',
+                'failure_reason' => 'This product was already claimed or published on this channel.',
+            ]);
+
+            return;
+        }
+
         $post->increment('attempts');
         try {
             $result = match ($post->provider) {
@@ -149,6 +165,10 @@ class PublishSocialMediaPost implements ShouldQueue
                 'published_at' => now(),
                 'failure_reason' => null,
             ]);
+            $publishedPost = $post->fresh(['product']);
+            if ($publishedPost) {
+                $publicationHistory->rememberPublished($publishedPost);
+            }
         } catch (\Throwable $exception) {
             $post->update([
                 // Keep the row claimed while Laravel retries this same job;

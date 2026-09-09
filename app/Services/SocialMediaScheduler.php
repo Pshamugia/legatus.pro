@@ -20,10 +20,12 @@ class SocialMediaScheduler
         private readonly SocialMediaTemplateRenderer $renderer,
         private readonly SocialMediaImageDesigner $images,
         private readonly ProductPagePrimaryImageResolver $primaryImages,
+        private readonly SocialMediaPublicationHistory $publicationHistory,
     ) {}
 
     public function create(Agent $agent, array $data): SocialMediaSchedule
     {
+        $this->publicationHistory->backfill($agent);
         $products = $this->eligibleProductVariants(
             $agent,
             $data['categories'] ?? [],
@@ -38,6 +40,11 @@ class SocialMediaScheduler
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
         $products = $products
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
+            ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
+                $agent,
+                $variant['product'],
+                $data['providers'],
+            ))
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
@@ -108,6 +115,7 @@ class SocialMediaScheduler
     public function updateTiming(SocialMediaSchedule $schedule, array $data): SocialMediaSchedule
     {
         $agent = $schedule->agent()->firstOrFail();
+        $this->publicationHistory->backfill($agent);
         $products = $this->eligibleProductVariants(
             $agent,
             $schedule->categories ?? [],
@@ -126,6 +134,11 @@ class SocialMediaScheduler
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
         $products = $products
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
+            ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
+                $agent,
+                $variant['product'],
+                $schedule->providers,
+            ))
             ->values();
         if ($products->isEmpty()) {
             throw ValidationException::withMessages([
@@ -205,6 +218,7 @@ class SocialMediaScheduler
      */
     public function prepareDueSlot(SocialMediaSchedule $schedule, CarbonInterface $scheduledFor): array
     {
+        $this->publicationHistory->backfill($schedule->agent);
         $slotPosts = $schedule->posts()
             ->where('scheduled_for', $scheduledFor)
             ->lockForUpdate()
@@ -219,11 +233,18 @@ class SocialMediaScheduler
         $product = $productIds->count() === 1
             ? $schedule->agent->customerProducts()->find($productIds->first())
             : null;
-        $alreadyPublished = $product && $schedule->agent->socialMediaPosts()
-            ->where('product_id', $product->id)
-            ->where('status', 'published')
-            ->whereNotIn('id', $slotPostIds)
-            ->exists();
+        $alreadyPublished = $product && (
+            $schedule->agent->socialMediaPosts()
+                ->where('product_id', $product->id)
+                ->where('status', 'published')
+                ->whereNotIn('id', $slotPostIds)
+                ->exists()
+            || $this->publicationHistory->wasUsedOnAny(
+                $schedule->agent,
+                $product,
+                $pending->pluck('provider')->all(),
+            )
+        );
 
         if ($product && ! $alreadyPublished && $pending->every(
             fn ($post): bool => $this->productIsPublishableForPost($product, $post),
@@ -259,6 +280,11 @@ class SocialMediaScheduler
             ->when($wantedLanguage !== null, fn (Collection $variants): Collection => $variants->where('language', $wantedLanguage))
             ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => (int) $variant['product']->id === (int) $product?->id)
+            ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
+                $schedule->agent,
+                $variant['product'],
+                $pending->pluck('provider')->all(),
+            ))
             ->unique(fn (array $variant): int => (int) $variant['product']->id)
             ->first();
 

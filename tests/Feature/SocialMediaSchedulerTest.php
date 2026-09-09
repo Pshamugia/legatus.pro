@@ -323,6 +323,49 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame(3, $agent->socialMediaSchedules()->count());
     }
 
+    public function test_deleting_a_schedule_keeps_durable_history_and_blocks_a_reimported_product(): void
+    {
+        [$user, $agent] = $this->tenant('durable-publication-history');
+        $this->connections($agent);
+        $original = $agent->products()->create($this->product('Durable Product', 'General', 2));
+        $payload = [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ];
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $post = $schedule->posts()->firstOrFail();
+        $post->update([
+            'status' => 'published',
+            'published_at' => now(),
+            'provider_post_id' => 'historical-instagram-post',
+        ]);
+
+        $this->actingAs($user)->delete(route('social-media.destroy', $schedule))->assertSessionHasNoErrors();
+        $this->assertDatabaseMissing('social_media_posts', ['id' => $post->id]);
+        $this->assertDatabaseHas('social_publication_identities', [
+            'agent_id' => $agent->id,
+            'provider' => 'instagram',
+            'status' => 'published',
+            'provider_post_id' => 'historical-instagram-post',
+        ]);
+
+        $url = data_get($original->metadata, 'product_url');
+        $original->delete();
+        $reimported = $agent->products()->create($this->product('Reimported Product Record', 'General', 2));
+        $metadata = $reimported->metadata;
+        $metadata['product_url'] = $url;
+        $reimported->update(['metadata' => $metadata]);
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)
+            ->assertSessionHasErrors('categories');
+        $this->assertSame(0, $agent->socialMediaSchedules()->count());
+    }
+
     public function test_storefront_image_choice_is_visible_only_when_the_primary_image_contract_is_available(): void
     {
         [$user, $agent] = $this->tenant('storefront-image-choice');
@@ -934,6 +977,18 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'status' => 'published', 'provider_post_id' => 'fb-post-1']);
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'instagram', 'status' => 'published', 'provider_post_id' => 'ig-post-1']);
+        $this->assertDatabaseHas('social_publication_identities', [
+            'agent_id' => $agent->id,
+            'provider' => 'facebook',
+            'status' => 'published',
+            'provider_post_id' => 'fb-post-1',
+        ]);
+        $this->assertDatabaseHas('social_publication_identities', [
+            'agent_id' => $agent->id,
+            'provider' => 'instagram',
+            'status' => 'published',
+            'provider_post_id' => 'ig-post-1',
+        ]);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/page-1/photos')
             && $request['url'] === 'https://shop.example/images/product.jpg'
             && str_contains((string) $request['caption'], 'https://shop.example/products/scheduled-product'));
