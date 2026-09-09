@@ -22,6 +22,12 @@ class KnowledgeController extends Controller
             ->latest()
             ->get();
         $catalogSource = $sources->firstWhere('source_scope', 'catalog');
+        $catalogProductCount = $catalogSource
+            ? $agent->products()
+                ->where('metadata->source_id', $catalogSource->id)
+                ->where('is_active', true)
+                ->count()
+            : 0;
         $sitemapSource = $sources->firstWhere('source_scope', 'sitemap');
         $businessSources = $sources
             ->whereIn('source_scope', ['business', 'delivery', 'terms'])
@@ -51,6 +57,9 @@ class KnowledgeController extends Controller
                     'name' => $source->taxonomy_label ?: implode(', ', $taxonomy),
                     'url' => $source->url,
                     'status' => $source->status,
+                    'progress' => (int) $source->progress,
+                    'items_found' => (int) $source->items_found,
+                    'products_synced' => (int) $source->items_found,
                     'refreshable' => $source->isRefreshable(),
                 ];
             })
@@ -64,22 +73,33 @@ class KnowledgeController extends Controller
             'refreshable' => $source->isRefreshable(),
         ])->values();
 
-        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'sitemapSource', 'categorySources', 'languageSources', 'businessSources'));
+        return view('knowledge', compact('agent', 'sources', 'catalogSource', 'catalogProductCount', 'sitemapSource', 'categorySources', 'languageSources', 'businessSources'));
     }
 
     public function status(TenantContext $tenant)
     {
-        $sources = $tenant->agent()->knowledgeSources()
+        $agent = $tenant->agent();
+        $sources = $agent->knowledgeSources()
             ->select(['id', 'name', 'source_scope', 'status', 'progress', 'items_found', 'error', 'last_synced_at'])
             ->latest()
-            ->get()
-            ->map(fn (KnowledgeSource $source): array => [
+            ->get();
+        $catalogSource = $sources->firstWhere('source_scope', 'catalog');
+        $catalogProductCount = $catalogSource
+            ? $agent->products()
+                ->where('metadata->source_id', $catalogSource->id)
+                ->where('is_active', true)
+                ->count()
+            : 0;
+        $sources = $sources->map(fn (KnowledgeSource $source): array => [
                 'id' => $source->id,
                 'name' => $source->name,
                 'scope' => $source->source_scope,
                 'status' => $source->status,
                 'progress' => (int) $source->progress,
                 'items_found' => (int) $source->items_found,
+                'products_synced' => $source->source_scope === 'catalog'
+                    ? $catalogProductCount
+                    : (int) $source->items_found,
                 'error' => $source->error,
                 'last_synced_at' => $source->last_synced_at?->toIso8601String(),
             ]);
@@ -370,6 +390,9 @@ class KnowledgeController extends Controller
                         'name' => $source->taxonomy_label,
                         'url' => $source->url,
                         'status' => $source->status,
+                        'progress' => (int) $source->progress,
+                        'items_found' => (int) $source->items_found,
+                        'products_synced' => (int) $source->items_found,
                     ])
                     ->values(),
             ])

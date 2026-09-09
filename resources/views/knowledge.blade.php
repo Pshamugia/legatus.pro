@@ -1,6 +1,7 @@
 @extends('layouts.app') @section('title','Knowledge · Legatus') @section('body')
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">
 .knowledge-main{max-width:1180px;width:100%;margin:0 auto}.knowledge-section{margin-top:22px!important;padding:0!important;overflow:hidden}.knowledge-section__head{padding:22px 24px;border-bottom:1px solid var(--line)}.knowledge-section--catalog>.knowledge-section__head{background:linear-gradient(110deg,#eef7f1 0%,#f8fbf8 72%)}.knowledge-section--business>.knowledge-section__head{background:linear-gradient(110deg,#f3f0fa 0%,#faf9fd 72%)}.knowledge-section__head h3{margin:4px 0 6px;font-size:21px}.knowledge-section__head p{margin:0;color:var(--muted);font-size:12px}.knowledge-section__body{padding:24px}.knowledge-group{--block-accent:#7a968b;--block-bg:#f8faf7;margin-top:22px;padding:18px;border:1px solid color-mix(in srgb,var(--block-accent) 34%,#d9e0dc);border-left:4px solid var(--block-accent);border-radius:15px;background:var(--block-bg)}.knowledge-group--catalog{--block-accent:#2f7d62;--block-bg:#f0f8f4}.knowledge-group--search{--block-accent:#4e79a7;--block-bg:#f1f6fb}.knowledge-group--languages{--block-accent:#b47a24;--block-bg:#fbf6eb}.knowledge-group--categories{--block-accent:#7b62a3;--block-bg:#f6f2fb}.knowledge-group--sitemap{--block-accent:#a65f68;--block-bg:#fbf2f3}.knowledge-group:first-child{margin-top:0}.knowledge-group__title{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:12px}.knowledge-group__title label{margin:0;color:var(--block-accent,#173d31);font-size:14px}.knowledge-group__title p{margin:4px 0 0;color:var(--muted);font-size:11px}.source-controls{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.source-controls .pill{font-size:9px}.source-controls button{padding:7px 9px!important;font-size:10px}.source-controls .remove-source{color:#a43b32}.structured-row{padding:12px;border:1px solid color-mix(in srgb,var(--block-accent,#7a968b) 22%,var(--line));border-radius:12px;background:rgba(255,255,255,.82)}.structured-row+.structured-row{margin-top:9px}.structured-row__fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:9px}.structured-row__fields label{margin-top:0}.structured-field-with-controls{position:relative}.structured-field-with-controls.has-source-controls>input{padding-right:180px}.structured-field-with-controls.has-remove-control>input{padding-right:52px}.structured-field-with-controls>.source-controls,.structured-field-with-controls>.remove-category,.structured-field-with-controls>.remove-language{position:absolute;right:9px;top:50%;transform:translateY(-50%)}.structured-field-with-controls>.source-controls{flex-wrap:nowrap}.structured-field-with-controls>.remove-category,.structured-field-with-controls>.remove-language{width:34px;height:34px;padding:0!important}.category-row--hidden{display:none}.category-row--new{border-color:#6aa890;box-shadow:0 0 0 3px rgba(66,130,105,.12);animation:category-arrival .45s ease}.category-feedback{display:none;margin:-2px 0 12px;padding:9px 11px;border:1px solid #b8d9c7;border-radius:10px;background:#eef8f1;color:#267244;font-size:12px}.category-feedback.is-visible{display:block}.category-list-toggle{display:none;margin:11px auto 0;padding:7px 12px!important;font-size:11px}.category-list-toggle.is-visible{display:block}.field-error{border-color:#c94b43!important;box-shadow:0 0 0 2px rgba(201,75,67,.1)}@keyframes category-arrival{from{opacity:.25;transform:translateY(-7px)}to{opacity:1;transform:translateY(0)}}.policy-grid>div{padding:18px;border:1px solid var(--line);border-radius:15px;background:#f8faf7}.knowledge-action-forms{display:none}@media(max-width:700px){.knowledge-group__title{align-items:flex-start;flex-direction:column}.structured-row__fields{grid-template-columns:1fr}.source-controls{justify-content:flex-start}.knowledge-section__body{padding:16px}.policy-grid>div{padding:14px}}@media(max-width:480px){.structured-field-with-controls.has-source-controls>input{padding-right:154px}.structured-field-with-controls>.source-controls{gap:3px}.structured-field-with-controls>.source-controls button{padding:6px!important}.structured-field-with-controls>.source-controls .pill{font-size:8px}}
+.source-sync-metrics{display:inline-flex;align-items:center;gap:7px;padding:5px 8px;border:1px solid color-mix(in srgb,var(--block-accent,#2f7d62) 24%,var(--line));border-radius:9px;background:rgba(255,255,255,.78);color:var(--muted);font-size:9px;white-space:nowrap}.source-sync-metrics strong{color:var(--ink);font-size:10px}.source-sync-progress{display:block;width:42px;height:5px;overflow:hidden;border-radius:99px;background:#dce6e0}.source-sync-progress i{display:block;height:100%;border-radius:inherit;background:var(--block-accent,#2f7d62);transition:width .25s ease}.structured-field-with-controls.has-source-controls>input{padding-right:340px}@media(max-width:700px){.structured-field-with-controls.has-source-controls>input{padding-right:12px}.structured-field-with-controls>.source-controls{position:static;margin-top:7px;transform:none;flex-wrap:wrap}}@media(max-width:480px){.source-sync-metrics{flex-wrap:wrap;white-space:normal}}
 </style>
 <div class="dash-shell">@include('partials.workspace-navigation', ['active' => 'knowledge'])
 <main class="main knowledge-main"><div class="topline"><div><span class="eyebrow">Business brain</span><h1>Knowledge sources</h1><p style="color:var(--muted);margin:4px 0">Teach Legatus about your products, policies, and brand.</p></div><a class="btn ghost" href="{{ $agent ? route('chat.show',$agent) : route('onboarding') }}">Test knowledge ↗</a></div>
@@ -12,7 +13,7 @@
         @csrf
         <input type="hidden" name="mode" value="website_structure">
         <div class="knowledge-group knowledge-group--catalog" @if($catalogSource) data-source-row="{{ $catalogSource->id }}" @endif>
-            <div class="knowledge-group__title"><div><label>1. Site catalog URL</label><p>All products</p></div>@include('partials.knowledge-source-controls', ['source' => $catalogSource])</div>
+            <div class="knowledge-group__title"><div><label>1. Site catalog URL</label><p>All products</p></div>@include('partials.knowledge-source-controls', ['source' => $catalogSource, 'showProductSync' => true, 'productCount' => $catalogProductCount])</div>
             <input type="url" name="catalog_url" required value="{{ $catalogSource?->url }}" placeholder="https://store.example/products">
         </div>
         <div class="knowledge-group knowledge-group--search">
@@ -79,11 +80,17 @@ function showCategoryFeedback(message,isError=false){
     categoryFeedback.style.color=isError?'#a43b32':'#267244';
     categoryFeedbackTimer=setTimeout(()=>categoryFeedback.classList.remove('is-visible'),5000);
 }
+function sourceSyncMetrics(source){
+    const progress=Math.max(0,Math.min(100,Number(source.progress)||0));
+    const items=Math.max(0,Number(source.products_synced??source.items_found)||0);
+    const formattedItems=new Intl.NumberFormat().format(items);
+    return `<span class="source-sync-metrics" aria-label="${progress}% synchronized, ${formattedItems} products synchronized"><span class="source-sync-progress"><i data-source-progress style="width:${progress}%"></i></span><span><strong data-source-progress-text>${progress}%</strong> synchronized</span><span><strong data-source-items>${formattedItems}</strong> products</span></span>`;
+}
 function appendCategory(category={},options={}){
     const row=document.createElement('div');
     row.className='structured-row';
     if(category.id)row.dataset.sourceRow=category.id;
-    const savedActions=category.id?`<div class="source-controls"><span class="pill" data-source-status>${category.status||'ready'}</span>${category.refreshable?`<button type="submit" class="btn ghost" form="sync-source-${category.id}">↻ Sync</button>`:''}<button type="submit" class="btn ghost remove-source" form="remove-source-${category.id}">Remove</button></div>`:`<button type="button" class="btn ghost remove-category" aria-label="Remove category">×</button>`;
+    const savedActions=category.id?`<div class="source-controls">${sourceSyncMetrics(category)}<span class="pill" data-source-status>${category.status||'ready'}</span>${category.refreshable?`<button type="submit" class="btn ghost" form="sync-source-${category.id}">↻ Sync</button>`:''}<button type="submit" class="btn ghost remove-source" form="remove-source-${category.id}">Remove</button></div>`:`<button type="button" class="btn ghost remove-category" aria-label="Remove category">×</button>`;
     row.innerHTML=`<div class="structured-row__fields"><div><label>Category name</label><input name="categories[${categoryIndex}][name]" placeholder="e.g. Thriller"></div><div><label>Category URL</label><div class="structured-field-with-controls ${category.id?'has-source-controls':'has-remove-control'}"><input type="url" name="categories[${categoryIndex}][url]" placeholder="https://store.example/category/thriller">${savedActions}</div></div></div>`;
     row.querySelector('.remove-category')?.addEventListener('click',()=>{row.remove();refreshCategoryVisibility();showCategoryFeedback('The unsaved category was removed.');});
     row.querySelector('input[name$="[name]"]').value=category.name||'';
@@ -171,7 +178,7 @@ structureForm.addEventListener('submit',async event=>{
             if(!row)return;
             row.dataset.sourceRow=source.id;
             const remove=row.querySelector('.remove-category');
-            if(remove){remove.outerHTML=`<span class="pill" data-source-status>${source.status||'pending'}</span>`;}
+            if(remove){remove.outerHTML=`<div class="source-controls">${sourceSyncMetrics(source)}<span class="pill" data-source-status>${source.status||'pending'}</span></div>`;}
             row.querySelector('.structured-field-with-controls')?.classList.replace('has-remove-control','has-source-controls');
         });
         showCategoryFeedback('Categories were saved successfully. New entries are now part of the business knowledge.');
@@ -211,10 +218,11 @@ async function refreshKnowledgeStatus(){
         payload.sources.forEach(source=>{
             const row=document.querySelector(`[data-source-row="${source.id}"]`);
             if(!row)return;
-            const status=row.querySelector('[data-source-status]'),progress=row.querySelector('[data-source-progress]'),items=row.querySelector('[data-source-items]'),error=row.querySelector('[data-source-error]');
+            const status=row.querySelector('[data-source-status]'),progress=row.querySelector('[data-source-progress]'),progressText=row.querySelector('[data-source-progress-text]'),items=row.querySelector('[data-source-items]'),error=row.querySelector('[data-source-error]');
             if(status)status.textContent=source.status;
             if(progress)progress.style.width=`${source.progress}%`;
-            if(items)items.textContent=new Intl.NumberFormat().format(source.items_found);
+            if(progressText)progressText.textContent=`${source.progress}%`;
+            if(items)items.textContent=new Intl.NumberFormat().format(source.products_synced??source.items_found);
             if(error)error.textContent=source.error||'';
         });
         if(trackedSourceIds.length){

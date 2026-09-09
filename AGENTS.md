@@ -96,6 +96,8 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 
 - Verified taxonomy/category browsing uses ready tenant Knowledge-source membership rather than requiring the category label to appear in every product title. A broad recommendation whose occasion or recipient semantically matches a verified tenant category is promoted to that authoritative category rather than treated as a weak text preference. Before ranking, its public category URL refreshes current availability and newly listed members; sold-out products are excluded from purchasable recommendations. Product exclusions are applied before shortlist pagination, so follow-ups such as "more" retain the active category and return the next unseen products instead of a single unrelated or sold-out sixth result.
 
+- Knowledge source controls show live synchronization progress and product totals. The main catalog total is counted from actual active Product rows owned by that catalog source, never from a stale `items_found` value; each category shows its completed indexed membership count. Status polling updates both metrics without refreshing the page.
+
 - WhatsApp Business Cloud API customer messaging is implemented through tenant-scoped Embedded Signup, signed and deduplicated webhooks, the shared ConversationEngine/Inbox/human-handoff flow, durable channel queues, encrypted credentials, delivery receipts, and the 24-hour free-form response window. WhatsApp Status publishing is intentionally unavailable because Meta does not expose a supported public Cloud API for it. Production activation still requires a configured Meta WhatsApp product, Embedded Signup configuration, webhook subscription, approved permissions, private environment credentials, and a real-number end-to-end test.
 
 ## deployment

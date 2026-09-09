@@ -653,6 +653,51 @@ HTML;
             ->assertJsonMissingPath('sources.0.chunks');
     }
 
+    public function test_catalog_and_category_blocks_show_live_sync_percentage_and_product_count(): void
+    {
+        $this->seed();
+        $user = User::firstOrFail();
+        $agent = Agent::firstOrFail();
+        $catalog = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Site catalog',
+            'url' => 'https://shop.example/products', 'status' => 'processing',
+            'progress' => 64, 'items_found' => 2262,
+        ]);
+        foreach (range(1, 3) as $number) {
+            $agent->products()->create([
+                'name' => "Actually synchronized product {$number}",
+                'price' => 10,
+                'stock' => 1,
+                'is_active' => true,
+                'metadata' => ['source_id' => $catalog->id],
+            ]);
+        }
+        $category = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Thriller',
+            'name' => 'Category: Thriller', 'url' => 'https://shop.example/thriller',
+            'status' => 'ready', 'progress' => 100, 'items_found' => 317,
+        ]);
+
+        $response = $this->actingAs($user)->get(route('knowledge.index'));
+
+        $response->assertOk()
+            ->assertSee('data-source-progress-text>64%</strong>', false)
+            ->assertSee('data-source-items>3</strong> products', false)
+            ->assertDontSee('data-source-items>2,262</strong> products', false)
+            ->assertSee('sourceSyncMetrics(category)', false)
+            ->assertSee('data-source-progress', false)
+            ->assertSee('data-source-items', false);
+        $categoryData = collect($response->viewData('categorySources'))->firstWhere('id', $category->id);
+        $this->assertSame(100, $categoryData['progress']);
+        $this->assertSame(317, $categoryData['items_found']);
+        $this->assertSame($catalog->id, $response->viewData('catalogSource')->id);
+
+        $this->actingAs($user)->getJson(route('knowledge.status'))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $catalog->id, 'progress' => 64, 'items_found' => 2262, 'products_synced' => 3])
+            ->assertJsonFragment(['id' => $category->id, 'progress' => 100, 'items_found' => 317, 'products_synced' => 317]);
+    }
+
     public function test_business_can_save_catalog_unlimited_categories_and_optional_sitemap_without_page_reload(): void
     {
         Queue::fake();
