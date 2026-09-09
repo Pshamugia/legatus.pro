@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\KnowledgeIngestionService;
 use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
+use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateRenderer;
@@ -1003,12 +1004,23 @@ class SocialMediaSchedulerTest extends TestCase
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'caption' => 'Prepared fallback caption',
         ]);
-        $generated = 'Thoughtful Luna caption 📚 '.data_get($product->metadata, 'product_url');
+        $layout = json_encode([
+            'creative_copy' => 'A thoughtful new way to discover this catalog selection.',
+            'selected_facts' => ['category', 'price'],
+            'cta' => 'details',
+        ]);
         Http::fake([
-            'https://api.openai.com/v1/responses' => Http::response([
-                'output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $generated])]]]],
-                'usage' => ['input_tokens' => 100, 'output_tokens' => 30],
-            ]),
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push([
+                    'output' => [['content' => [['type' => 'output_text', 'text' => $layout]]]],
+                    'usage' => ['input_tokens' => 100, 'output_tokens' => 30],
+                ])
+                ->push([
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                        'supported' => true, 'unsupported_fragments' => [],
+                    ])]]]],
+                    'usage' => ['input_tokens' => 50, 'output_tokens' => 8],
+                ]),
             'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'ai-facebook-post']),
         ]);
 
@@ -1016,16 +1028,20 @@ class SocialMediaSchedulerTest extends TestCase
 
         $fresh = $post->fresh();
         $this->assertSame('published', $fresh->status);
-        $this->assertSame($generated, $fresh->caption);
+        $this->assertStringContainsString('A thoughtful new way', $fresh->caption);
+        $this->assertStringContainsString('Luna Product', $fresh->caption);
+        $this->assertStringNotContainsString('Verified public description.', $fresh->caption);
+        $this->assertStringContainsString('20.00 GEL', $fresh->caption);
+        $this->assertStringContainsString((string) data_get($product->metadata, 'product_url'), $fresh->caption);
         $this->assertSame('gpt-5.6-luna', $fresh->ai_model);
         $this->assertNotNull($fresh->ai_generation_attempted_at);
         $this->assertNotNull($fresh->ai_generated_at);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/responses'
             && $request['model'] === 'gpt-5.6-luna'
             && data_get($request->data(), 'input.0.content.1.type') === 'input_image'
-            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Do not invent benefits'));
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Write original, channel-specific creative_copy'));
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photos')
-            && str_contains((string) $request['caption'], $generated));
+            && str_contains((string) $request['caption'], 'Luna Product'));
     }
 
     public function test_failed_ai_generation_falls_back_to_original_content_without_repeating_ai(): void
@@ -1059,6 +1075,89 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertNotNull($post->fresh()->ai_generation_attempted_at);
         $this->assertNull($post->fresh()->ai_generated_at);
         Http::assertSentCount(2);
+    }
+
+    public function test_ai_copywriter_can_only_render_exact_catalog_values_for_any_product_type(): void
+    {
+        [, $agent] = $this->tenant('verified-ai-facts');
+        config()->set('services.openai.key', 'test-openai-key');
+        $attributes = $this->product('Artisan Cheese', 'Dairy', 4);
+        $attributes['metadata']['manufacturer'] = 'Verified Farm';
+        $attributes['metadata']['attributes'] = ['Milk: Goat', 'Weight: 500 g'];
+        $product = $agent->products()->create($attributes);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
+        ]);
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push([
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                        'creative_copy' => 'Bring something memorable to the table. Invented Dairy Ltd made this from cow milk.',
+                        'selected_facts' => ['attribute_0', 'attribute_1'],
+                        'cta' => 'visit',
+                    ])]]]],
+                    'usage' => ['input_tokens' => 80, 'output_tokens' => 10],
+                ])
+                ->push([
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                        'supported' => false,
+                        'unsupported_fragments' => ['Invented Dairy Ltd made this from cow milk.'],
+                    ])]]]],
+                    'usage' => ['input_tokens' => 40, 'output_tokens' => 8],
+                ])
+                ->push([
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                        'creative_copy' => 'აღმოააჩინეთ კატალოგის გამორჩეული წიგნი. პიტერ ჰანდკეს ამ ნაწარმოებისთვის ნობელის პრემია აქვს.',
+                        'selected_facts' => ['author'],
+                        'cta' => 'details',
+                    ])]]]],
+                    'usage' => ['input_tokens' => 80, 'output_tokens' => 10],
+                ])
+                ->push([
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                        'supported' => false,
+                        'unsupported_fragments' => ['პიტერ ჰანდკეს ამ ნაწარმოებისთვის ნობელის პრემია აქვს.'],
+                    ])]]]],
+                    'usage' => ['input_tokens' => 40, 'output_tokens' => 8],
+                ]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringContainsString('Artisan Cheese', $caption);
+        $this->assertStringContainsString('Manufacturer: Verified Farm', $caption);
+        $this->assertStringContainsString('Milk: Goat', $caption);
+        $this->assertStringContainsString('Weight: 500 g', $caption);
+        $this->assertStringContainsString('Bring something memorable to the table.', $caption);
+        $this->assertStringNotContainsString('Invented Dairy Ltd', $caption);
+        $this->assertStringNotContainsString('cow milk', $caption);
+
+        $bookAttributes = $this->product('პანსიონატი', 'რომანი', 1);
+        $bookAttributes['metadata']['author'] = 'პიოტრ პაჟინსკი';
+        $book = $agent->products()->create($bookAttributes);
+        $bookPost = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $book->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now()->addMinute(), 'title' => $book->name,
+            'description' => $book->description, 'product_url' => data_get($book->metadata, 'product_url'),
+            'image_url' => $book->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+        $bookCaption = app(SocialMediaAiCopywriter::class)->generate($bookPost);
+        $this->assertStringContainsString('პანსიონატი', $bookCaption);
+        $this->assertStringContainsString('ავტორი: პიოტრ პაჟინსკი', $bookCaption);
+        $this->assertStringContainsString('აღმოააჩინეთ კატალოგის გამორჩეული წიგნი.', $bookCaption);
+        $this->assertStringNotContainsString('პიტერ ჰანდკე', $bookCaption);
+
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'text.format.schema.properties.creative_copy.type') === 'string'
+            && in_array('manufacturer', data_get($request->data(), 'text.format.schema.properties.selected_facts.items.enum', []), true)
+            && in_array('attribute_0', data_get($request->data(), 'text.format.schema.properties.selected_facts.items.enum', []), true));
     }
 
     public function test_social_schedule_filters_and_snapshots_the_selected_website_language(): void

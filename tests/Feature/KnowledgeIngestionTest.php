@@ -344,6 +344,8 @@ HTML;
                     'title' => 'Universal Catalog Book',
                     'category' => ['name' => 'Books'],
                     'description' => '<script>bad()</script><b>A verified description</b>',
+                    'brand' => ['name' => 'Verified Publisher'],
+                    'manufacturer' => ['name' => 'Verified Printer'],
                     'price' => ['amount' => '27.50', 'currency' => 'GEL'],
                     'quantity' => '7',
                     'image' => ['url' => 'https://example.com/book.jpg'],
@@ -390,6 +392,10 @@ HTML;
         $product = $agent->products()->where('sku', '77')->firstOrFail();
         $this->assertSame('A verified description', $product->description);
         $this->assertSame('https://example.com/books/77', $product->metadata['product_url']);
+        $this->assertNull($product->metadata['author']);
+        $this->assertSame('Verified Publisher', $product->metadata['brand']);
+        $this->assertSame('Verified Printer', $product->metadata['manufacturer']);
+        $this->assertStringContainsString('Verified Publisher', $product->search_text);
         $this->assertSame('untrusted_catalog_data', $product->metadata['text_trust']);
         $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'SKU-78', 'stock' => 1]);
     }

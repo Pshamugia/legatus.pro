@@ -820,7 +820,17 @@ class KnowledgeIngestionService
             $originalPrice = null;
         }
 
-        $author = $this->catalogText($product['author'] ?? $product['brand']['name'] ?? null, 255) ?: null;
+        $authorValue = is_array($product['author'] ?? null)
+            ? data_get($product, 'author.name')
+            : ($product['author'] ?? null);
+        $brandValue = is_array($product['brand'] ?? null)
+            ? data_get($product, 'brand.name')
+            : ($product['brand'] ?? null);
+        $author = $this->catalogText($authorValue, 255) ?: null;
+        $brand = $this->catalogText($brandValue, 255) ?: null;
+        $creator = $this->catalogText(data_get($product, 'creator.name', $product['creator'] ?? null), 255) ?: null;
+        $manufacturer = $this->catalogText(data_get($product, 'manufacturer.name', $product['manufacturer'] ?? null), 255) ?: null;
+        $model = $this->catalogText($product['model'] ?? null, 255) ?: null;
         $genres = $this->searchableValues(
             $product['genres'] ?? $product['genre'] ?? $product['tags'] ?? [],
             120,
@@ -841,7 +851,7 @@ class KnowledgeIngestionService
             'category' => $category,
             'description' => $description,
             'search_text' => $this->searchableProductText([
-                $name, $sku, $category, $author, $taxonomy, $isbn,
+                $name, $sku, $category, $author, $brand, $creator, $manufacturer, $model, $taxonomy, $isbn,
                 $product['publisher'] ?? null, $attributes, $description,
             ]),
             'price' => $price,
@@ -854,6 +864,10 @@ class KnowledgeIngestionService
                 'product_url' => $productUrl,
                 'external_id' => $this->catalogText($product['id'] ?? null, 191) ?: null,
                 'author' => $author,
+                'brand' => $brand,
+                'creator' => $creator,
+                'manufacturer' => $manufacturer,
+                'model' => $model,
                 'genres' => $genres,
                 'taxonomy' => $taxonomy,
                 'isbn' => $isbn,
