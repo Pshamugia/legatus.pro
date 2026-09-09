@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaImageDesigner;
+use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateRenderer;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -166,7 +167,7 @@ class SocialMediaSchedulerTest extends TestCase
         ));
     }
 
-    public function test_one_schedule_stops_when_every_unused_product_has_been_reserved(): void
+    public function test_one_schedule_keeps_future_slots_after_every_unused_product_has_been_reserved(): void
     {
         [$user, $agent] = $this->tenant('single-schedule-no-repeat');
         $this->connections($agent);
@@ -183,8 +184,9 @@ class SocialMediaSchedulerTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $posts = $agent->socialMediaPosts()->get();
-        $this->assertCount(3, $posts);
-        $this->assertCount(3, $posts->pluck('product_id')->unique());
+        $this->assertCount(5, $posts);
+        $this->assertCount(3, $posts->whereNotNull('product_id')->pluck('product_id')->unique());
+        $this->assertCount(2, $posts->whereNull('product_id'));
     }
 
     public function test_linkedin_uses_the_same_product_slot_and_publishes_an_image_post(): void
@@ -294,7 +296,7 @@ class SocialMediaSchedulerTest extends TestCase
         );
     }
 
-    public function test_new_schedules_never_reuse_products_after_catalog_exhaustion(): void
+    public function test_new_schedules_do_not_reuse_products_that_are_reserved_by_another_schedule(): void
     {
         [$user, $agent] = $this->tenant('cross-schedule-product-rotation');
         $this->connections($agent);
@@ -318,12 +320,13 @@ class SocialMediaSchedulerTest extends TestCase
         }
 
         $this->assertCount(3, $chosenProducts->unique());
-        $this->actingAs($user)->post(route('social-media.store'), $payload)
-            ->assertSessionHasErrors('categories');
-        $this->assertSame(3, $agent->socialMediaSchedules()->count());
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $waiting = $agent->socialMediaSchedules()->latest('id')->firstOrFail();
+        $this->assertTrue($waiting->posts()->whereNotNull('product_id')->doesntExist());
+        $this->assertSame(4, $agent->socialMediaSchedules()->count());
     }
 
-    public function test_deleting_a_schedule_keeps_durable_history_and_blocks_a_reimported_product(): void
+    public function test_deleting_a_schedule_keeps_history_and_reuses_only_after_full_catalog_exhaustion(): void
     {
         [$user, $agent] = $this->tenant('durable-publication-history');
         $this->connections($agent);
@@ -361,9 +364,14 @@ class SocialMediaSchedulerTest extends TestCase
         $metadata['product_url'] = $url;
         $reimported->update(['metadata' => $metadata]);
 
-        $this->actingAs($user)->post(route('social-media.store'), $payload)
-            ->assertSessionHasErrors('categories');
-        $this->assertSame(0, $agent->socialMediaSchedules()->count());
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $newSchedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->assertSame($reimported->id, $newSchedule->posts()->value('product_id'));
+        $this->assertDatabaseHas('social_publication_cycles', [
+            'agent_id' => $agent->id,
+            'provider' => 'instagram',
+            'current_cycle' => 2,
+        ]);
     }
 
     public function test_storefront_image_choice_is_visible_only_when_the_primary_image_contract_is_available(): void
@@ -674,7 +682,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame(2, $agent->socialMediaTemplates()->where('provider', 'facebook')->value('version'));
     }
 
-    public function test_instagram_schedule_rejects_products_without_a_public_image(): void
+    public function test_instagram_schedule_waits_for_a_publishable_product_instead_of_stopping(): void
     {
         [$user, $agent] = $this->tenant('missing-image');
         $this->connections($agent);
@@ -685,8 +693,42 @@ class SocialMediaSchedulerTest extends TestCase
         $this->actingAs($user)->from(route('social-media.index'))->post(route('social-media.store'), [
             'starts_on' => now()->toDateString(), 'ends_on' => now()->toDateString(),
             'posts_per_day' => 1, 'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
-        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('categories');
-        $this->assertDatabaseCount('social_media_schedules', 0);
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasNoErrors();
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->assertDatabaseHas('social_media_posts', [
+            'social_media_schedule_id' => $schedule->id,
+            'provider' => 'instagram',
+            'status' => 'scheduled',
+            'product_id' => null,
+        ]);
+    }
+
+    public function test_a_waiting_slot_skips_an_invalid_product_and_uses_it_after_it_becomes_publishable(): void
+    {
+        [$user, $agent] = $this->tenant('waiting-slot-recovery');
+        $this->connections($agent);
+        $attributes = $this->product('Temporarily Invalid Product', 'General', 2);
+        $attributes['image'] = null;
+        $product = $agent->products()->create($attributes);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $post = $schedule->posts()->firstOrFail();
+        $this->assertNull($post->product_id);
+
+        $product->update(['image' => 'https://shop.example/images/recovered.jpg']);
+        $safeIds = app(SocialMediaScheduler::class)
+            ->prepareDueSlot($schedule->fresh('agent'), $post->scheduled_for);
+
+        $this->assertSame([$post->id], $safeIds);
+        $this->assertSame($product->id, $post->fresh()->product_id);
     }
 
     public function test_multi_channel_schedule_uses_only_products_eligible_for_every_selected_provider(): void

@@ -28,7 +28,7 @@ class PublicWebsiteCrawler
         $taxonomyOnly = $this->ingestion->taxonomyForSource($source) !== [];
         $classificationOnly = $taxonomyOnly || $source->source_scope === 'language';
         $listingOnly = $classificationOnly || $source->source_scope === 'catalog';
-        if ($listingOnly) {
+        if ($taxonomyOnly) {
             // A named category/genre URL is a scoped collection, not another
             // request to crawl the business's entire domain.
             $maximumPages = min($maximumPages, max(10, (int) config('legatus.taxonomy_crawl_max_pages', 250)));
@@ -285,8 +285,7 @@ class PublicWebsiteCrawler
         array $products,
         bool $listingOnly = false,
         bool $taxonomyOnly = false,
-    ): array
-    {
+    ): array {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
         $xpath = new \DOMXPath($dom);

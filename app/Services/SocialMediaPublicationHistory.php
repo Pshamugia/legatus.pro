@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Agent;
 use App\Models\Product;
 use App\Models\SocialMediaPost;
+use App\Models\SocialMediaPublicationCycle;
 use App\Models\SocialMediaPublicationIdentity;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +21,7 @@ class SocialMediaPublicationHistory
             ->orderBy('id')
             ->chunkById(100, function ($posts): void {
                 foreach ($posts as $post) {
-                    $this->rememberPublished($post);
+                    $this->rememberPublished($post, false);
                 }
             });
     }
@@ -35,11 +36,38 @@ class SocialMediaPublicationHistory
             $product->name,
         );
 
-        return $keys !== [] && SocialMediaPublicationIdentity::query()
+        return $keys !== [] && collect($providers)->unique()->contains(
+            fn (string $provider): bool => $this->currentIdentityQuery($agent, $provider, $keys)->exists(),
+        );
+    }
+
+    /** @param list<string> $providers */
+    public function hasClaims(Agent $agent, array $providers): bool
+    {
+        return SocialMediaPublicationIdentity::query()
             ->where('agent_id', $agent->id)
             ->whereIn('provider', array_values(array_unique($providers)))
-            ->whereIn('identity_key', $keys)
+            ->where('status', 'claimed')
+            ->whereIn('social_media_post_id', SocialMediaPost::query()->select('id')->where('status', 'queued'))
             ->exists();
+    }
+
+    /** @param list<string> $providers */
+    public function startNewCycle(Agent $agent, array $providers): void
+    {
+        foreach (array_values(array_unique($providers)) as $provider) {
+            DB::transaction(function () use ($agent, $provider): void {
+                SocialMediaPublicationCycle::query()->firstOrCreate([
+                    'agent_id' => $agent->id,
+                    'provider' => $provider,
+                ], ['current_cycle' => 1]);
+                SocialMediaPublicationCycle::query()
+                    ->where('agent_id', $agent->id)
+                    ->where('provider', $provider)
+                    ->lockForUpdate()
+                    ->increment('current_cycle');
+            });
+        }
     }
 
     public function claim(SocialMediaPost $post): bool
@@ -62,19 +90,23 @@ class SocialMediaPublicationHistory
                     ->lockForUpdate()
                     ->get();
 
-                if ($existing->isNotEmpty()) {
+                $cycleNumber = $this->cycleNumber($post->agent_id, $post->provider);
+                if ($existing->contains(fn (SocialMediaPublicationIdentity $identity): bool => $identity->cycle_number === $cycleNumber)) {
                     return false;
                 }
 
                 foreach ($keys as $key) {
-                    SocialMediaPublicationIdentity::query()->firstOrCreate([
+                    SocialMediaPublicationIdentity::query()->updateOrCreate([
                         'agent_id' => $post->agent_id,
                         'provider' => $post->provider,
                         'identity_key' => $key,
                     ], [
                         'social_media_post_id' => $post->id,
                         'product_id' => $post->product_id,
+                        'cycle_number' => $cycleNumber,
                         'status' => 'claimed',
+                        'published_at' => null,
+                        'provider_post_id' => null,
                     ]);
                 }
 
@@ -86,21 +118,28 @@ class SocialMediaPublicationHistory
         }
     }
 
-    public function rememberPublished(SocialMediaPost $post): void
+    public function rememberPublished(SocialMediaPost $post, bool $currentCycle = true): void
     {
         $product = $post->product;
         foreach ($this->identityKeys($product, $post->product_url, $post->image_url, $post->title) as $key) {
-            SocialMediaPublicationIdentity::query()->updateOrCreate([
+            $identity = SocialMediaPublicationIdentity::query()->firstOrNew([
                 'agent_id' => $post->agent_id,
                 'provider' => $post->provider,
                 'identity_key' => $key,
-            ], [
+            ]);
+            if (! $identity->exists || $currentCycle) {
+                $identity->cycle_number = $currentCycle
+                    ? $this->cycleNumber($post->agent_id, $post->provider)
+                    : 1;
+            }
+            $identity->fill([
                 'social_media_post_id' => $post->id,
                 'product_id' => $post->product_id,
                 'status' => 'published',
                 'published_at' => $post->published_at ?: now(),
                 'provider_post_id' => $post->provider_post_id,
             ]);
+            $identity->save();
         }
     }
 
@@ -147,5 +186,23 @@ class SocialMediaPublicationHistory
         }
 
         return $host.(isset($parts['port']) ? ':'.(int) $parts['port'] : '').$path;
+    }
+
+    /** @param list<string> $keys */
+    private function currentIdentityQuery(Agent $agent, string $provider, array $keys)
+    {
+        return SocialMediaPublicationIdentity::query()
+            ->where('agent_id', $agent->id)
+            ->where('provider', $provider)
+            ->whereIn('identity_key', $keys)
+            ->where('cycle_number', $this->cycleNumber($agent->id, $provider));
+    }
+
+    private function cycleNumber(int $agentId, string $provider): int
+    {
+        return (int) (SocialMediaPublicationCycle::query()
+            ->where('agent_id', $agentId)
+            ->where('provider', $provider)
+            ->value('current_cycle') ?: 1);
     }
 }

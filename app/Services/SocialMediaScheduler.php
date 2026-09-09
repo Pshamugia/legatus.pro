@@ -9,7 +9,6 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 
 class SocialMediaScheduler
 {
@@ -26,7 +25,7 @@ class SocialMediaScheduler
     public function create(Agent $agent, array $data): SocialMediaSchedule
     {
         $this->publicationHistory->backfill($agent);
-        $products = $this->eligibleProductVariants(
+        $allProducts = $this->eligibleProductVariants(
             $agent,
             $data['categories'] ?? [],
             $data['languages'] ?? [],
@@ -34,11 +33,12 @@ class SocialMediaScheduler
         )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
         $previouslyPosted = $agent->socialMediaPosts()
             ->whereIn('provider', $data['providers'])
-            ->whereIn('status', ['scheduled', 'queued', 'published'])
+            ->whereIn('status', ['scheduled', 'queued'])
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
-        $products = $products
+        $this->startNewCycleWhenExhausted($agent, $allProducts, $data['providers']);
+        $products = $allProducts
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
                 $agent,
@@ -48,12 +48,6 @@ class SocialMediaScheduler
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
-        if ($products->isEmpty()) {
-            throw ValidationException::withMessages([
-                'categories' => 'No publishable products are available for every selected channel in this selection.',
-            ]);
-        }
-
         $templateSnapshots = $this->templates->snapshots($agent, $data['providers']);
 
         return DB::transaction(function () use ($agent, $data, $products, $templateSnapshots, $starts, $ends): SocialMediaSchedule {
@@ -85,25 +79,26 @@ class SocialMediaScheduler
                     ? $this->customDailyTimes($day, $data['posting_times'])
                     : $this->dailyTimes($day, (int) $data['posts_per_day']);
                 foreach ($slots as $slot) {
-                    if (! $products->has($productIndex)) {
-                        break 2;
+                    $variant = $products->get($productIndex);
+                    if ($variant) {
+                        $productIndex++;
                     }
-                    $variant = $products[$productIndex];
-                    $productIndex++;
                     $postCopyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
                     if ($postCopyMode === 'ai') {
                         $remainingAiProducts--;
                     }
                     foreach ($data['providers'] as $provider) {
-                        $schedule->posts()->create($this->postAttributes(
-                            $agent,
-                            $variant['product'],
-                            $provider,
-                            $slot,
-                            $templateSnapshots[$provider],
-                            $variant['language'],
-                            $postCopyMode,
-                        ));
+                        $schedule->posts()->create($variant
+                            ? $this->postAttributes(
+                                $agent,
+                                $variant['product'],
+                                $provider,
+                                $slot,
+                                $templateSnapshots[$provider],
+                                $variant['language'],
+                                $postCopyMode,
+                            )
+                            : $this->pendingProductAttributes($agent, $provider, $slot, $postCopyMode));
                     }
                 }
             }
@@ -116,7 +111,7 @@ class SocialMediaScheduler
     {
         $agent = $schedule->agent()->firstOrFail();
         $this->publicationHistory->backfill($agent);
-        $products = $this->eligibleProductVariants(
+        $allProducts = $this->eligibleProductVariants(
             $agent,
             $schedule->categories ?? [],
             $schedule->languages ?? [],
@@ -124,7 +119,7 @@ class SocialMediaScheduler
         )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
         $previouslyPosted = $agent->socialMediaPosts()
             ->whereIn('provider', $schedule->providers)
-            ->whereIn('status', ['scheduled', 'queued', 'published'])
+            ->whereIn('status', ['scheduled', 'queued'])
             ->where(function ($query) use ($schedule): void {
                 $query->where('social_media_schedule_id', '!=', $schedule->id)
                     ->orWhereIn('status', ['queued', 'published']);
@@ -132,7 +127,8 @@ class SocialMediaScheduler
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
-        $products = $products
+        $this->startNewCycleWhenExhausted($agent, $allProducts, $schedule->providers);
+        $products = $allProducts
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
                 $agent,
@@ -140,12 +136,6 @@ class SocialMediaScheduler
                 $schedule->providers,
             ))
             ->values();
-        if ($products->isEmpty()) {
-            throw ValidationException::withMessages([
-                'starts_on' => 'No publishable products remain available for this schedule.',
-            ]);
-        }
-
         $starts = CarbonImmutable::parse($data['starts_on'], $schedule->timezone)->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $schedule->timezone)->startOfDay();
 
@@ -181,25 +171,26 @@ class SocialMediaScheduler
                     if ($slot->lte($nowUtc) || isset($immutableSlots[$slot->format('Y-m-d H:i:s')])) {
                         continue;
                     }
-                    if (! $products->has($productIndex)) {
-                        break 2;
+                    $variant = $products->get($productIndex);
+                    if ($variant) {
+                        $productIndex++;
                     }
-                    $variant = $products[$productIndex];
-                    $productIndex++;
                     $copyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
                     if ($copyMode === 'ai') {
                         $remainingAiProducts--;
                     }
                     foreach ($lockedSchedule->providers as $provider) {
-                        $lockedSchedule->posts()->create($this->postAttributes(
-                            $agent,
-                            $variant['product'],
-                            $provider,
-                            $slot,
-                            $lockedSchedule->template_snapshots[$provider],
-                            $variant['language'],
-                            $copyMode,
-                        ));
+                        $lockedSchedule->posts()->create($variant
+                            ? $this->postAttributes(
+                                $agent,
+                                $variant['product'],
+                                $provider,
+                                $slot,
+                                $lockedSchedule->template_snapshots[$provider],
+                                $variant['language'],
+                                $copyMode,
+                            )
+                            : $this->pendingProductAttributes($agent, $provider, $slot, $copyMode));
                     }
                 }
             }
@@ -271,7 +262,7 @@ class SocialMediaScheduler
         $wantedLanguage = $pending->pluck('language')->unique()->count() === 1
             ? $pending->first()->language
             : null;
-        $replacement = $this->eligibleProductVariants(
+        $allReplacements = $this->eligibleProductVariants(
             $schedule->agent,
             $schedule->categories ?? [],
             $schedule->languages ?? [],
@@ -279,14 +270,20 @@ class SocialMediaScheduler
         )
             ->when($wantedLanguage !== null, fn (Collection $variants): Collection => $variants->where('language', $wantedLanguage))
             ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
-            ->reject(fn (array $variant): bool => (int) $variant['product']->id === (int) $product?->id)
+            ->unique(fn (array $variant): int => (int) $variant['product']->id)
+            ->values();
+        $providers = $pending->pluck('provider')->all();
+        $replacement = $allReplacements
             ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
                 $schedule->agent,
                 $variant['product'],
-                $pending->pluck('provider')->all(),
+                $providers,
             ))
-            ->unique(fn (array $variant): int => (int) $variant['product']->id)
             ->first();
+
+        if (! $replacement && $this->startNewCycleWhenExhausted($schedule->agent, $allReplacements, $providers)) {
+            $replacement = $allReplacements->first();
+        }
 
         if (! $replacement) {
             $pending->each->update([
@@ -480,6 +477,49 @@ class SocialMediaScheduler
             'caption' => $this->renderer->render($provider, $template, $agent, $renderProduct),
             'copy_mode' => $copyMode,
         ];
+    }
+
+    private function pendingProductAttributes(Agent $agent, string $provider, CarbonImmutable $slot, string $copyMode): array
+    {
+        return [
+            'agent_id' => $agent->id,
+            'product_id' => null,
+            'provider' => $provider,
+            'language' => null,
+            'status' => 'scheduled',
+            'scheduled_for' => $slot,
+            'title' => 'Next eligible product',
+            'description' => null,
+            'product_url' => '',
+            'image_url' => null,
+            'caption' => '',
+            'copy_mode' => $copyMode,
+        ];
+    }
+
+    /**
+     * Start another rotation only after every currently publishable product
+     * has been used during the active cycle. In-flight claims never trigger a
+     * reset, so concurrent workers cannot publish the same product twice.
+     */
+    private function startNewCycleWhenExhausted(Agent $agent, Collection $products, array $providers): bool
+    {
+        if ($products->isEmpty() || $this->publicationHistory->hasClaims($agent, $providers)) {
+            return false;
+        }
+
+        $exhausted = $products->every(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
+            $agent,
+            $variant['product'],
+            $providers,
+        ));
+        if (! $exhausted) {
+            return false;
+        }
+
+        $this->publicationHistory->startNewCycle($agent, $providers);
+
+        return true;
     }
 
     private function publicHttpUrl(mixed $url): bool

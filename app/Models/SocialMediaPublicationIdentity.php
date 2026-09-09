@@ -12,5 +12,6 @@ class SocialMediaPublicationIdentity extends Model
 
     protected $casts = [
         'published_at' => 'datetime',
+        'cycle_number' => 'integer',
     ];
 }

@@ -247,7 +247,7 @@
                 @php($localScheduledFor = \Carbon\CarbonImmutable::createFromFormat('Y-m-d H:i:s', (string) $post->getRawOriginal('scheduled_for'), 'UTC')->setTimezone($post->schedule?->timezone ?: 'UTC'))
                 <article class="upcoming-row">
                     @if($post->image_url)<img src="{{ $post->image_url }}" alt="">@endif
-                    <div><strong>{{ $post->title }}</strong><p>{{ ucfirst($post->provider) }}@if($post->language) · {{ $post->language }}@endif · {{ $localScheduledFor->format('d M Y, H:i') }} {{ $post->schedule?->timezone ?: 'UTC' }}</p><a href="{{ $post->product_url }}" target="_blank" rel="noopener">Open public product ↗</a><details><summary>View prepared post text</summary><p class="prepared-caption">{{ $post->caption }}</p></details></div>
+                    <div><strong>{{ $post->title }}</strong><p>{{ ucfirst($post->provider) }}@if($post->language) · {{ $post->language }}@endif · {{ $localScheduledFor->format('d M Y, H:i') }} {{ $post->schedule?->timezone ?: 'UTC' }}</p>@if($post->product_id)<a href="{{ $post->product_url }}" target="_blank" rel="noopener">Open public product ↗</a><details><summary>View prepared post text</summary><p class="prepared-caption">{{ $post->caption }}</p></details>@else<small>The next unused publishable product will be selected automatically at posting time.</small>@endif</div>
                     <span class="status-pill">{{ ucfirst($post->status) }}</span>
                 </article>
             @empty<p class="empty-state">Scheduled posts will appear here.</p>@endforelse

@@ -77,6 +77,59 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertTrue($source->chunks()->where('content', 'like', '%memory, identity, and freedom%')->exists());
     }
 
+    public function test_main_catalog_is_not_truncated_by_the_smaller_taxonomy_page_limit(): void
+    {
+        $this->seed();
+        config([
+            'services.openai.key' => null,
+            'legatus.public_crawl_max_pages' => 300,
+            'legatus.taxonomy_crawl_max_pages' => 250,
+            'legatus.commerce_max_catalog_products' => 1000,
+        ]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'catalog',
+            'name' => 'Large main catalog',
+            'url' => 'https://bukinistebi.ge/books',
+        ]);
+
+        Http::fake(function ($request) {
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+            $page = max(1, (int) ($query['page'] ?? 1));
+            if ($page > 260) {
+                return Http::response('', 404, ['Content-Type' => 'text/html']);
+            }
+            $json = json_encode([
+                '@context' => 'https://schema.org',
+                '@type' => 'Product',
+                'name' => "Catalog Book {$page}",
+                'sku' => "CAT-{$page}",
+                'url' => $request->url(),
+                'description' => "Public catalog description {$page}",
+                'offers' => [
+                    '@type' => 'Offer',
+                    'price' => 10 + $page,
+                    'priceCurrency' => 'GEL',
+                    'availability' => 'https://schema.org/InStock',
+                ],
+            ], JSON_UNESCAPED_SLASHES);
+            $next = $page < 260 ? '<button data-next-page="'.($page + 1).'">Load more</button>' : '';
+
+            return Http::response(
+                '<html><script type="application/ld+json">'.$json.'</script><body>'.$next.'</body></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            );
+        });
+
+        app(PublicWebsiteCrawler::class)->crawl($source);
+
+        $this->assertSame(260, $source->fresh()->items_found);
+        $this->assertNull($source->fresh()->error);
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'CAT-260']);
+    }
+
     public function test_taxonomy_url_stays_inside_its_collection_and_never_crawls_the_whole_domain(): void
     {
         Queue::fake();
