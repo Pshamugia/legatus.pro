@@ -6,6 +6,7 @@ use App\Jobs\PublishSocialMediaPost;
 use App\Models\Organization;
 use App\Models\SocialMediaPost;
 use App\Models\User;
+use App\Services\KnowledgeIngestionService;
 use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaImageDesigner;
@@ -322,6 +323,63 @@ class SocialMediaSchedulerTest extends TestCase
             'The public product is no longer active, in stock, or publishable on this channel.',
             $post->fresh()->failure_reason,
         );
+    }
+
+    public function test_live_sold_out_product_is_replaced_in_the_same_due_slot(): void
+    {
+        [$user, $agent] = $this->tenant('live-stock-replacement');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'catalog',
+            'name' => 'Refreshing catalog',
+            'url' => 'https://shop.example/catalog',
+            'status' => 'ready',
+            'progress' => 64,
+            'error' => 'The previous synchronization was interrupted.',
+        ]);
+        $soldOut = $agent->products()->create($this->product('Freshly Sold Out', 'General', 2));
+        $soldOut->update(['metadata' => array_replace($soldOut->metadata, [
+            'product_url' => 'https://example.com/products/freshly-sold-out',
+        ])]);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $post = $schedule->posts()->firstOrFail();
+        $replacement = $agent->products()->create($this->product('Live Available Replacement', 'General', 2));
+        $replacement->update(['metadata' => array_replace($replacement->metadata, [
+            'product_url' => 'https://example.com/products/live-available-replacement',
+        ])]);
+        Http::fake(function ($request) use ($soldOut, $replacement) {
+            $soldOutUrl = data_get($soldOut->metadata, 'product_url');
+            $replacementUrl = data_get($replacement->metadata, 'product_url');
+            if ($request->url() === $soldOutUrl) {
+                return Http::response($this->storefrontCard($soldOut->name, $soldOutUrl, false), 200, ['Content-Type' => 'text/html']);
+            }
+            if ($request->url() === $replacementUrl) {
+                return Http::response($this->storefrontCard($replacement->name, $replacementUrl, true), 200, ['Content-Type' => 'text/html']);
+            }
+
+            return Http::response('image', 200, ['Content-Type' => 'image/jpeg']);
+        });
+
+        $availableCard = app(KnowledgeIngestionService::class)->storefrontProductsFromHtml(
+            $this->storefrontCard($replacement->name, data_get($replacement->metadata, 'product_url'), true),
+            'https://shop.example',
+        );
+        $this->assertSame(1, data_get($availableCard, '0.stock'));
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $post->scheduled_for);
+
+        $this->assertSame([$post->id], $safeIds);
+        $this->assertSame(0, $soldOut->fresh()->stock);
+        $this->assertSame($replacement->id, $post->fresh()->product_id);
     }
 
     public function test_new_schedules_do_not_reuse_products_that_are_reserved_by_another_schedule(): void
@@ -1450,6 +1508,15 @@ class SocialMediaSchedulerTest extends TestCase
                 'genres' => [$category],
             ],
         ];
+    }
+
+    private function storefrontCard(string $name, string $url, bool $available): string
+    {
+        return '<html><body><article class="book-card">'
+            .'<a class="card-link" href="'.$url.'"><strong class="book-title-strong" title="'.$name.'">'.$name.'</strong></a>'
+            .'<span>₾ 20.00</span>'
+            .($available ? '<button class="toggle-cart-btn">Add to cart</button>' : '<span>Sold out</span>')
+            .'</article></body></html>';
     }
 
     private function templatePayload(string $marker): array

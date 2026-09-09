@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Jobs\EmbedKnowledgeSource;
+use App\Jobs\EnrichPublicCatalogProducts;
 use App\Models\Agent;
+use App\Services\KnowledgeIngestionService;
 use App\Services\PublicWebsiteCrawler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -79,6 +81,7 @@ class PublicWebsiteCrawlerTest extends TestCase
 
     public function test_main_catalog_is_not_truncated_by_the_smaller_taxonomy_page_limit(): void
     {
+        Queue::fake();
         $this->seed();
         config([
             'services.openai.key' => null,
@@ -128,6 +131,7 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertSame(260, $source->fresh()->items_found);
         $this->assertNull($source->fresh()->error);
         $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'CAT-260']);
+        Queue::assertPushed(EnrichPublicCatalogProducts::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
     public function test_taxonomy_url_stays_inside_its_collection_and_never_crawls_the_whole_domain(): void
@@ -177,6 +181,7 @@ class PublicWebsiteCrawlerTest extends TestCase
 
     public function test_main_catalog_enriches_missing_descriptions_from_discovered_product_urls(): void
     {
+        Queue::fake();
         $this->seed();
         config(['services.openai.key' => null, 'legatus.public_crawl_max_pages' => 20]);
         $agent = Agent::firstOrFail();
@@ -204,6 +209,12 @@ class PublicWebsiteCrawlerTest extends TestCase
         });
 
         app(PublicWebsiteCrawler::class)->crawl($source);
+
+        Queue::assertPushed(EnrichPublicCatalogProducts::class, fn ($job): bool => $job->sourceId === $source->id);
+        (new EnrichPublicCatalogProducts($source->id))->handle(
+            app(PublicWebsiteCrawler::class),
+            app(KnowledgeIngestionService::class),
+        );
 
         $product = $agent->products()->where('sku', 'C-1')->firstOrFail();
         $this->assertStringContainsString('complete public product description', (string) $product->description);

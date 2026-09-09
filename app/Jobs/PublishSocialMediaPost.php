@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\SocialMediaPost;
 use App\Services\LinkedInClient;
 use App\Services\MetaGraphClient;
+use App\Services\PublicProductAvailabilityVerifier;
 use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaPublicationHistory;
 use App\Services\SocialMediaTemplateRenderer;
@@ -25,10 +26,12 @@ class PublishSocialMediaPost implements ShouldQueue
         SocialMediaTemplateRenderer $renderer,
         ?SocialMediaAiCopywriter $copywriter = null,
         ?SocialMediaPublicationHistory $publicationHistory = null,
+        ?PublicProductAvailabilityVerifier $availability = null,
     ): void {
         $linkedin = app(LinkedInClient::class);
         $copywriter ??= app(SocialMediaAiCopywriter::class);
         $publicationHistory ??= app(SocialMediaPublicationHistory::class);
+        $availability ??= app(PublicProductAvailabilityVerifier::class);
         $post = SocialMediaPost::query()->with(['schedule', 'agent.organization', 'product'])->find($this->postId);
         if (! $post || $post->status !== 'queued' || $post->schedule?->status !== 'active') {
             return;
@@ -50,6 +53,15 @@ class PublishSocialMediaPost implements ShouldQueue
             $post->update([
                 'status' => 'skipped',
                 'failure_reason' => 'The public product is no longer active, in stock, or publishable on this channel.',
+            ]);
+
+            return;
+        }
+
+        if ($availability->verify($product) === false) {
+            $post->update([
+                'status' => 'skipped',
+                'failure_reason' => 'The public product page confirms that this product is currently out of stock.',
             ]);
 
             return;

@@ -20,6 +20,7 @@ class SocialMediaScheduler
         private readonly SocialMediaImageDesigner $images,
         private readonly ProductPagePrimaryImageResolver $primaryImages,
         private readonly SocialMediaPublicationHistory $publicationHistory,
+        private readonly PublicProductAvailabilityVerifier $availability,
     ) {}
 
     public function create(Agent $agent, array $data): SocialMediaSchedule
@@ -239,7 +240,7 @@ class SocialMediaScheduler
 
         if ($product && ! $alreadyPublished && $pending->every(
             fn ($post): bool => $this->productIsPublishableForPost($product, $post),
-        )) {
+        ) && $this->liveAvailabilityAllows($schedule->agent, $product)) {
             return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
         }
 
@@ -279,10 +280,16 @@ class SocialMediaScheduler
                 $variant['product'],
                 $providers,
             ))
-            ->first();
+            ->first(fn (array $variant): bool => $this->liveAvailabilityAllows(
+                $schedule->agent,
+                $variant['product'],
+            ));
 
         if (! $replacement && $this->startNewCycleWhenExhausted($schedule->agent, $allReplacements, $providers)) {
-            $replacement = $allReplacements->first();
+            $replacement = $allReplacements->first(fn (array $variant): bool => $this->liveAvailabilityAllows(
+                $schedule->agent,
+                $variant['product'],
+            ));
         }
 
         if (! $replacement) {
@@ -536,6 +543,13 @@ class SocialMediaScheduler
                 && (int) $source->progress === 100
                 && blank($source->error),
         );
+    }
+
+    private function liveAvailabilityAllows(Agent $agent, $product): bool
+    {
+        $verified = $this->availability->verify($product);
+
+        return $verified === true || ($verified === null && $this->catalogCoverageIsComplete($agent));
     }
 
     private function publicHttpUrl(mixed $url): bool

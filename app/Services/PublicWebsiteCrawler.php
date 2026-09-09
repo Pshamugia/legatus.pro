@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\EmbedKnowledgeSource;
+use App\Jobs\EnrichPublicCatalogProducts;
 use App\Models\KnowledgeSource;
 use Illuminate\Support\Str;
 
@@ -28,6 +29,7 @@ class PublicWebsiteCrawler
         $taxonomyOnly = $this->ingestion->taxonomyForSource($source) !== [];
         $classificationOnly = $taxonomyOnly || $source->source_scope === 'language';
         $listingOnly = $classificationOnly || $source->source_scope === 'catalog';
+        $catalogIndexOnly = $source->source_scope === 'catalog';
         if ($taxonomyOnly) {
             // A named category/genre URL is a scoped collection, not another
             // request to crawl the business's entire domain.
@@ -104,12 +106,12 @@ class PublicWebsiteCrawler
                 // Named category/genre sources are lightweight product indexes.
                 // The listing pages already define membership, so crawling and
                 // embedding every linked detail page would duplicate the site.
-                $this->enrichMatchedProduct($source, $url, $body);
+                $this->enrichProductPage($source, $url, $body);
                 if (! $listingOnly) {
                     $this->storeReadablePage($source, $url, $body, $products !== []);
                 }
 
-                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly, $catalogIndexOnly) as $discovered) {
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 
@@ -164,6 +166,9 @@ class PublicWebsiteCrawler
             if (config('services.openai.key') && ! $listingOnly) {
                 EmbedKnowledgeSource::dispatch($source->id);
             }
+            if ($catalogIndexOnly && $productCount > 0) {
+                EnrichPublicCatalogProducts::dispatch($source->id);
+            }
         } catch (\Throwable $exception) {
             $source->update([
                 'status' => $source->chunks()->exists() ? 'ready' : 'failed',
@@ -214,7 +219,7 @@ class PublicWebsiteCrawler
     }
 
     /** @return list<string> */
-    private function enrichMatchedProduct(KnowledgeSource $source, string $url, string $html): void
+    public function enrichProductPage(KnowledgeSource $source, string $url, string $html): void
     {
         $product = $source->agent->products()
             ->where('metadata->source_id', $source->id)
@@ -285,13 +290,14 @@ class PublicWebsiteCrawler
         array $products,
         bool $listingOnly = false,
         bool $taxonomyOnly = false,
+        bool $catalogIndexOnly = false,
     ): array {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
         $xpath = new \DOMXPath($dom);
         $links = [];
 
-        if (! $taxonomyOnly) {
+        if (! $taxonomyOnly && ! $catalogIndexOnly) {
             foreach ($products as $product) {
                 $links[] = $product['url'] ?? data_get($product, 'offers.url');
             }
