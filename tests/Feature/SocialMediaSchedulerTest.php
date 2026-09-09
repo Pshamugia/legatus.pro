@@ -140,6 +140,34 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('ქართული პროდუქტის აღწერა.', $response->viewData('previewProduct')['description']);
     }
 
+    public function test_products_without_imported_descriptions_remain_eligible_for_social_posts(): void
+    {
+        [$user, $agent] = $this->tenant('description-optional');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'language',
+            'taxonomy_label' => 'Georgian',
+            'name' => 'Website language: Georgian',
+            'url' => 'https://shop.example/?lang=ka',
+            'status' => 'ready',
+            'progress' => 100,
+        ]);
+        $attributes = $this->product('Book Without Imported Description', 'General', 2);
+        $attributes['description'] = null;
+        $product = $agent->products()->create($attributes);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $this->assertSame($product->id, $agent->socialMediaPosts()->value('product_id'));
+    }
+
     public function test_multi_channel_schedule_does_not_repeat_products_while_unused_products_remain(): void
     {
         [$user, $agent] = $this->tenant('cross-channel-product-rotation');
@@ -372,6 +400,39 @@ class SocialMediaSchedulerTest extends TestCase
             'provider' => 'instagram',
             'current_cycle' => 2,
         ]);
+    }
+
+    public function test_an_incomplete_catalog_sync_cannot_trigger_a_new_rotation_cycle(): void
+    {
+        [$user, $agent] = $this->tenant('incomplete-catalog-cycle');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'catalog',
+            'name' => 'Incomplete catalog',
+            'url' => 'https://shop.example/catalog',
+            'status' => 'ready',
+            'progress' => 64,
+            'error' => 'Website synchronization stopped safely.',
+        ]);
+        $agent->products()->create($this->product('Only Indexed Product', 'General', 2));
+        $payload = [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ];
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $firstPost = $agent->socialMediaPosts()->firstOrFail();
+        $firstPost->update(['status' => 'published', 'published_at' => now()]);
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $secondSchedule = $agent->socialMediaSchedules()->latest('id')->firstOrFail();
+
+        $this->assertNull($secondSchedule->posts()->value('product_id'));
+        $this->assertDatabaseCount('social_publication_cycles', 0);
     }
 
     public function test_storefront_image_choice_is_visible_only_when_the_primary_image_contract_is_available(): void

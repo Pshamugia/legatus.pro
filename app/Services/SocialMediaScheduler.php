@@ -367,19 +367,19 @@ class SocialMediaScheduler
         $wanted = collect($languages)->map(fn ($value): string => trim((string) $value))->filter();
 
         if ($wanted->isEmpty()) {
-            $wanted = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
-                ->pluck('taxonomy_label')->filter()->values();
-        }
-        if ($wanted->isEmpty()) {
-            return $products->filter(fn ($product): bool => filled(trim((string) $product->description)))
-                ->map(fn ($product): array => ['product' => $product, 'language' => null])->values();
+            // No language filter means the primary catalog record. A product
+            // description improves the caption but is never a prerequisite
+            // for a verified title, price, image and product-link post.
+            return $products->map(fn ($product): array => [
+                'product' => $product,
+                'language' => null,
+            ])->values();
         }
 
         return $products->flatMap(function ($product) use ($wanted): array {
             $localized = (array) data_get($product->metadata, 'localized', []);
 
-            return $wanted->filter(fn (string $language): bool => isset($localized[$language])
-                    && filled(trim((string) data_get($localized[$language], 'description'))))
+            return $wanted->filter(fn (string $language): bool => isset($localized[$language]))
                 ->map(fn (string $language): array => ['product' => $product, 'language' => $language])
                 ->values()->all();
         })->shuffle()->values();
@@ -504,7 +504,9 @@ class SocialMediaScheduler
      */
     private function startNewCycleWhenExhausted(Agent $agent, Collection $products, array $providers): bool
     {
-        if ($products->isEmpty() || $this->publicationHistory->hasClaims($agent, $providers)) {
+        if ($products->isEmpty()
+            || ! $this->catalogCoverageIsComplete($agent)
+            || $this->publicationHistory->hasClaims($agent, $providers)) {
             return false;
         }
 
@@ -520,6 +522,20 @@ class SocialMediaScheduler
         $this->publicationHistory->startNewCycle($agent, $providers);
 
         return true;
+    }
+
+    private function catalogCoverageIsComplete(Agent $agent): bool
+    {
+        $catalogSources = $agent->knowledgeSources()
+            ->where('type', 'url')
+            ->where('source_scope', 'catalog')
+            ->get(['status', 'progress', 'error']);
+
+        return $catalogSources->isEmpty() || $catalogSources->every(
+            fn ($source): bool => $source->status === 'ready'
+                && (int) $source->progress === 100
+                && blank($source->error),
+        );
     }
 
     private function publicHttpUrl(mixed $url): bool
