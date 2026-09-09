@@ -191,7 +191,7 @@ class MetaGraphClient
 
         $response = $this->authorizedRequest($connection->access_token)
             ->get($this->url($connection->external_account_id.'/conversations'), [
-                'fields' => 'id,updated_time,messages.limit(10){id,message,from,to,created_time}',
+                'fields' => 'id,updated_time,messages.limit(10){id,message,from,to,created_time,attachments}',
                 'limit' => 25,
             ])
             ->throw()

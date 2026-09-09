@@ -2,9 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\Jobs\PublishSocialMediaPost;
+use App\Jobs\PrepareSocialMediaSlot;
 use App\Models\SocialMediaPost;
-use App\Services\SocialMediaScheduler;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -14,39 +13,59 @@ class DispatchSocialMediaPosts extends Command
 
     protected $description = 'Queue due social media posts exactly once';
 
-    public function handle(SocialMediaScheduler $scheduler): int
+    public function handle(): int
     {
-        $ids = DB::transaction(function () use ($scheduler): array {
-            $posts = SocialMediaPost::query()
-                ->with('schedule.agent')
-                ->where('status', 'scheduled')
-                ->where('scheduled_for', '<=', now('UTC'))
-                ->whereHas('schedule', fn ($query) => $query->where('status', 'active'))
-                ->orderBy('scheduled_for')
-                ->lockForUpdate()
-                ->limit(100)
-                ->get();
+        // If a worker was terminated after a slot was claimed but before its
+        // preparation job completed, make the slot eligible again. Active
+        // preparation jobs have a 75-second timeout, so ten minutes is safely
+        // beyond their normal lifetime.
+        SocialMediaPost::query()
+            ->where('status', 'preparing')
+            ->where('updated_at', '<=', now('UTC')->subMinutes(10))
+            ->update([
+                'status' => 'scheduled',
+                'failure_reason' => 'A stale preparation claim was recovered automatically.',
+            ]);
 
-            $ids = collect();
-            $posts->groupBy(fn (SocialMediaPost $post): string => $post->social_media_schedule_id.'|'.$post->getRawOriginal('scheduled_for'))
-                ->each(function ($slotPosts) use ($scheduler, $ids): void {
-                    $first = $slotPosts->first();
-                    $safeIds = $scheduler->prepareDueSlot($first->schedule, $first->scheduled_for);
-                    if ($safeIds === []) {
-                        return;
+        $posts = SocialMediaPost::query()
+            ->with('schedule.agent')
+            ->where('status', 'scheduled')
+            ->where('scheduled_for', '<=', now('UTC'))
+            ->whereHas('schedule', fn ($query) => $query->where('status', 'active'))
+            ->orderBy('scheduled_for')
+            ->limit(100)
+            ->get();
+
+        $queuedSlots = 0;
+        $posts->groupBy(fn (SocialMediaPost $post): string => $post->social_media_schedule_id.'|'.$post->getRawOriginal('scheduled_for'))
+            ->each(function ($slotPosts) use (&$queuedSlots): void {
+                $ids = $slotPosts->pluck('id')->map(fn ($id): int => (int) $id)->all();
+                $claimed = DB::transaction(function () use ($ids): bool {
+                    $locked = SocialMediaPost::query()->whereIn('id', $ids)->lockForUpdate()->get(['id', 'status']);
+                    if ($locked->count() !== count($ids) || $locked->contains(fn (SocialMediaPost $post): bool => $post->status !== 'scheduled')) {
+                        return false;
                     }
 
-                    SocialMediaPost::query()->whereIn('id', $safeIds)->where('status', 'scheduled')->update(['status' => 'queued']);
-                    $ids->push(...$safeIds);
+                    SocialMediaPost::query()->whereIn('id', $ids)->update([
+                        'status' => 'preparing',
+                        'failure_reason' => null,
+                    ]);
+
+                    return true;
                 });
+                if (! $claimed) {
+                    return;
+                }
 
-            return $ids->all();
-        });
+                $first = $slotPosts->first();
+                PrepareSocialMediaSlot::dispatch(
+                    (int) $first->social_media_schedule_id,
+                    (string) $first->getRawOriginal('scheduled_for'),
+                )->onQueue('channels');
+                $queuedSlots++;
+            });
 
-        foreach ($ids as $id) {
-            PublishSocialMediaPost::dispatch($id)->onQueue('channels');
-        }
-        $this->info(count($ids).' social posts queued.');
+        $this->info($queuedSlots.' social '.($queuedSlots === 1 ? 'slot' : 'slots').' queued for preparation.');
 
         return self::SUCCESS;
     }

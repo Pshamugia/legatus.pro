@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\PrepareSocialMediaSlot;
 use App\Jobs\PublishSocialMediaPost;
 use App\Models\Organization;
 use App\Models\SocialMediaPost;
@@ -1124,8 +1125,10 @@ class SocialMediaSchedulerTest extends TestCase
             ]);
         }
 
-        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('2 social posts queued.')->assertSuccessful();
-        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('0 social posts queued.')->assertSuccessful();
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('1 social slot queued for preparation.')->assertSuccessful();
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('0 social slots queued for preparation.')->assertSuccessful();
+        Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+        Queue::pushed(PrepareSocialMediaSlot::class)->first()->handle(app(SocialMediaScheduler::class));
         Queue::assertPushed(PublishSocialMediaPost::class, 2);
 
         Http::fake([
@@ -1157,6 +1160,35 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
     }
 
+    public function test_stale_slot_preparation_is_recovered_and_queued_again(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('stale-slot-preparation');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Recovered Product', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'preparing',
+            'scheduled_for' => now('UTC')->subMinutes(15),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'Prepared caption',
+        ]);
+        $post->forceFill(['updated_at' => now('UTC')->subMinutes(15)])->saveQuietly();
+
+        $this->artisan('legatus:dispatch-social-posts')
+            ->expectsOutput('1 social slot queued for preparation.')
+            ->assertSuccessful();
+
+        $this->assertSame('preparing', $post->fresh()->status);
+        Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+    }
+
     public function test_due_multi_channel_slot_replaces_an_already_published_product_before_queueing(): void
     {
         Queue::fake();
@@ -1183,7 +1215,9 @@ class SocialMediaSchedulerTest extends TestCase
             ]);
         }
 
-        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('2 social posts queued.')->assertSuccessful();
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('1 social slot queued for preparation.')->assertSuccessful();
+        Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+        Queue::pushed(PrepareSocialMediaSlot::class)->first()->handle(app(SocialMediaScheduler::class));
 
         $duePosts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
         $this->assertTrue($duePosts->every(fn ($post): bool => $post->status === 'queued'));
@@ -1211,7 +1245,9 @@ class SocialMediaSchedulerTest extends TestCase
         }
         $soldOut->update(['stock' => 0]);
 
-        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('2 social posts queued.')->assertSuccessful();
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('1 social slot queued for preparation.')->assertSuccessful();
+        Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+        Queue::pushed(PrepareSocialMediaSlot::class)->first()->handle(app(SocialMediaScheduler::class));
 
         $duePosts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
         $this->assertTrue($duePosts->every(fn ($post): bool => $post->status === 'queued'));
@@ -1232,11 +1268,13 @@ class SocialMediaSchedulerTest extends TestCase
             'image_url' => $soldOut->publicImageUrl(), 'caption' => 'Stale caption',
         ]);
 
-        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('0 social posts queued.')->assertSuccessful();
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('1 social slot queued for preparation.')->assertSuccessful();
+        Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+        Queue::pushed(PrepareSocialMediaSlot::class)->first()->handle(app(SocialMediaScheduler::class));
 
         $this->assertSame('skipped', $post->fresh()->status);
         $this->assertSame('No unused publishable product was available to replace this slot.', $post->fresh()->failure_reason);
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(PublishSocialMediaPost::class);
     }
 
     public function test_publishing_never_erases_a_prepared_description_when_localized_data_becomes_blank(): void

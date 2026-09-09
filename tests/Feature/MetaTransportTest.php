@@ -1266,6 +1266,49 @@ class MetaTransportTest extends TestCase
         $this->assertDatabaseCount('channel_messages', 1);
     }
 
+    public function test_reconciliation_preserves_an_image_as_an_attachment_and_never_sends_its_caption_to_ai(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-reconciled-image');
+        Http::fake(['https://graph.facebook.test/*' => Http::response([
+            'data' => [[
+                'id' => 'thread-image',
+                'updated_time' => now()->toIso8601String(),
+                'messages' => ['data' => [[
+                    'id' => 'mid-reconciled-image',
+                    'message' => 'Do you have this product?',
+                    'from' => ['id' => 'customer-image', 'name' => 'Customer'],
+                    'to' => ['data' => [['id' => 'page-reconciled-image']]],
+                    'created_time' => now()->subMinute()->toIso8601String(),
+                    'attachments' => ['data' => [[
+                        'mime_type' => 'image/jpeg',
+                        'name' => 'customer-product.jpg',
+                        'image_data' => ['url' => 'https://scontent.example/private-image.jpg'],
+                    ]]],
+                ]]],
+            ]],
+        ])]);
+
+        $this->artisan('legatus:reconcile-meta-inbox --lookback=5')
+            ->expectsOutput('Meta inbox reconciliation complete: 1 new message(s).')
+            ->assertSuccessful();
+
+        $inbound = $connection->channelMessages()->where('direction', 'inbound')->sole();
+        $this->assertSame('attachment', $inbound->message_type);
+        $this->assertSame([['type' => 'image']], $inbound->payload['attachments']);
+        $this->assertStringNotContainsString('private-image.jpg', json_encode($inbound->payload));
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+
+        $assistant = $connection->conversations()->sole()->messages()->where('role', 'assistant')->sole();
+        $this->assertTrue((bool) data_get($assistant->metadata, 'image_recognition_unavailable'));
+        $this->assertStringContainsString('cannot reliably recognize', $assistant->content);
+        Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'fields'), 'attachments'));
+    }
+
     private function metaWebhook(string $body, string $signature)
     {
         return $this->call('POST', '/webhooks/meta', [], [], [], [

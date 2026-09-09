@@ -41,7 +41,7 @@ class SocialMediaController extends Controller
                 'posts as published_posts_count' => fn ($query) => $query->where('status', 'published'),
                 'posts as failed_posts_count' => fn ($query) => $query->where('status', 'failed'),
             ])->latest()->get();
-        $upcoming = $agent->socialMediaPosts()->with('schedule:id,timezone')->whereIn('status', ['scheduled', 'queued'])
+        $upcoming = $agent->socialMediaPosts()->with('schedule:id,timezone')->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->orderBy('scheduled_for')->limit(12)->get();
         $canManage = in_array($tenant->role(), ['owner', 'admin'], true);
         $templates = $templateService->configurations($agent);

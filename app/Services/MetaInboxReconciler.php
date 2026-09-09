@@ -32,9 +32,27 @@ class MetaInboxReconciler
                 $messageId = trim((string) ($message['id'] ?? ''));
                 $senderId = trim((string) data_get($message, 'from.id', ''));
                 $text = trim((string) ($message['message'] ?? ''));
+                $attachments = collect((array) data_get($message, 'attachments.data', []))
+                    ->map(function ($attachment): array {
+                        $mimeType = strtolower(trim((string) data_get($attachment, 'mime_type', '')));
+                        $type = str_starts_with($mimeType, 'image/') || filled(data_get($attachment, 'image_data'))
+                            ? 'image'
+                            : (str_starts_with($mimeType, 'video/') || filled(data_get($attachment, 'video_data')) ? 'video' : 'file');
+
+                        return ['type' => $type];
+                    })
+                    ->take(5)
+                    ->values()
+                    ->all();
+                $hasAttachment = $attachments !== [];
                 if (! $createdAt || $createdAt->lte($cursor) || $messageId === '' || $senderId === ''
-                    || $senderId === $connection->external_account_id || $text === '') {
+                    || $senderId === $connection->external_account_id || ($text === '' && ! $hasAttachment)) {
                     continue;
+                }
+                if ($text === '') {
+                    $text = collect($attachments)->contains(fn (array $attachment): bool => $attachment['type'] === 'image')
+                        ? '[Customer sent an image.]'
+                        : '[Customer sent an attachment.]';
                 }
 
                 $record = ChannelMessage::query()->firstOrCreate(
@@ -46,11 +64,11 @@ class MetaInboxReconciler
                     [
                         'provider_sender_id' => $senderId,
                         'provider_recipient_id' => $connection->external_account_id,
-                        'message_type' => 'text',
+                        'message_type' => $hasAttachment ? 'attachment' : 'text',
                         'status' => 'received',
                         'payload' => [
                             'text' => mb_substr($text, 0, 4000),
-                            'attachments' => [],
+                            'attachments' => $attachments,
                             'requires_human' => false,
                             'provider_timestamp' => $createdAt->toIso8601String(),
                             'reconciled_from_graph' => true,

@@ -34,7 +34,7 @@ class SocialMediaScheduler
         )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
         $previouslyPosted = $agent->socialMediaPosts()
             ->whereIn('provider', $data['providers'])
-            ->whereIn('status', ['scheduled', 'queued'])
+            ->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
@@ -120,7 +120,7 @@ class SocialMediaScheduler
         )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
         $previouslyPosted = $agent->socialMediaPosts()
             ->whereIn('provider', $schedule->providers)
-            ->whereIn('status', ['scheduled', 'queued'])
+            ->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->where(function ($query) use ($schedule): void {
                 $query->where('social_media_schedule_id', '!=', $schedule->id)
                     ->orWhereIn('status', ['queued', 'published']);
@@ -215,7 +215,7 @@ class SocialMediaScheduler
             ->where('scheduled_for', $scheduledFor)
             ->lockForUpdate()
             ->get();
-        $pending = $slotPosts->where('status', 'scheduled')->values();
+        $pending = $slotPosts->whereIn('status', ['scheduled', 'preparing'])->values();
         if ($pending->isEmpty()) {
             return [];
         }
@@ -250,7 +250,7 @@ class SocialMediaScheduler
         $reservedProductIds = $schedule->agent->socialMediaPosts()
             ->whereNotIn('id', $slotPostIds)
             ->where(function ($query) use ($scheduledFor): void {
-                $query->whereIn('status', ['queued', 'published'])
+                $query->whereIn('status', ['preparing', 'queued', 'published'])
                     ->orWhere(function ($due) use ($scheduledFor): void {
                         $due->where('status', 'scheduled')
                             ->where('scheduled_for', '<=', $scheduledFor);
