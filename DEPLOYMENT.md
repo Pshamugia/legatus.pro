@@ -61,8 +61,8 @@ META_APP_SECRET=use_a_secret_manager
 META_WEBHOOK_VERIFY_TOKEN=use_a_long_random_secret
 META_GRAPH_VERSION=v25.0
 META_REDIRECT_URI=https://your-domain.example/auth/meta/{provider}/callback
-META_FACEBOOK_SCOPES=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement
-META_INSTAGRAM_SCOPES=pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages
+META_FACEBOOK_SCOPES=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts
+META_INSTAGRAM_SCOPES=pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_content_publish
 
 LINKEDIN_CLIENT_ID=use_a_secret_manager
 LINKEDIN_CLIENT_SECRET=use_a_secret_manager
@@ -138,6 +138,8 @@ Do not deploy the development `.env`, SQLite database, logs, sessions, caches, o
 
 Restart every queue worker after switching releases so it loads the new code and configuration.
 
+Facebook Page and Instagram Business Story publishing uses the same approved publishing permissions as feed publishing. Each successful Meta feed post queues a separate photo-only Story delivery. Instagram counts the feed item and Story as separate API-published media objects, so monitor the account's rolling content-publishing allowance. Story delivery requires the continuously running `channels` worker; run migrations before restarting it because Story state is persisted on `social_media_posts`.
+
 Point the web server to `/path/to/legatus/public`, not the repository root. Ensure the web process can write only to Laravel’s required `storage/` and `bootstrap/cache/` directories.
 
 ## 4. Scheduler
@@ -210,6 +212,7 @@ The live commands consume OpenAI API usage. Inspect the model, tools, intent, an
 - [ ] The operator can take over, reply, release the conversation, and close it.
 - [ ] Facebook OAuth connects only the explicitly selected Page, a real Page message creates exactly one conversation/reply, and a human Business Suite echo pauses AI for that thread.
 - [ ] Instagram OAuth connects only the explicitly selected Professional account and a real DM receives one UTF-8-safe reply within Meta's permitted messaging window.
+- [ ] A real Facebook Page photo post and Instagram Business photo post each create exactly one photo-only Story; Story failure remains visible without changing the successful feed post, and an unknown delivery is not retried into a duplicate.
 - [ ] Duplicate Meta webhooks and outbox recovery do not duplicate OpenAI runs or outbound replies; queued, sent, failed, and unknown delivery states are visible to operators.
 - [ ] A persistent queue worker and the once-per-minute scheduler are both monitored; `failed_jobs` is empty before the demo.
 - [ ] `/privacy`, `/terms`, and `/data-deletion` return 200 over HTTPS, `LEGATUS_PRIVACY_EMAIL` is monitored, and those exact URLs are configured in the Meta app.

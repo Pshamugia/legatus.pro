@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\PrepareSocialMediaSlot;
+use App\Jobs\PublishSocialMediaStory;
 use App\Models\SocialMediaPost;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +16,28 @@ class DispatchSocialMediaPosts extends Command
 
     public function handle(): int
     {
+        // A hard stop during this non-idempotent request must not trigger a
+        // second Story automatically and create a duplicate in Meta.
+        SocialMediaPost::query()
+            ->where('story_status', 'publishing')
+            ->where('updated_at', '<=', now('UTC')->subMinutes(10))
+            ->update([
+                'story_status' => 'delivery_unknown',
+                'story_failure_reason' => 'The Story worker stopped before delivery could be confirmed. Verify it in the native app before retrying.',
+            ]);
+
+        // Recover a Story job that was not persisted after its feed post was
+        // confirmed. The job's unique lock and database claim keep this safe
+        // when the original queued job still exists.
+        SocialMediaPost::query()
+            ->where('status', 'published')
+            ->where('story_status', 'queued')
+            ->whereIn('provider', ['facebook', 'instagram'])
+            ->orderBy('id')
+            ->limit(100)
+            ->pluck('id')
+            ->each(fn ($id) => PublishSocialMediaStory::dispatch((int) $id)->onQueue('channels'));
+
         // If a worker was terminated after a slot was claimed but before its
         // preparation job completed, make the slot eligible again. Active
         // preparation jobs have a 75-second timeout, so ten minutes is safely

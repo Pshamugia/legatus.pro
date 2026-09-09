@@ -184,6 +184,44 @@ class MetaGraphClient
             ])->throw()->json();
     }
 
+    public function publishFacebookStory(ChannelConnection $connection, string $imageUrl): array
+    {
+        throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
+        throw_if($imageUrl === '', new \RuntimeException('Facebook Story publishing requires a public product image.'));
+
+        $photo = $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/photos'), [
+                'url' => $imageUrl,
+                'published' => false,
+            ])->throw()->json();
+        $photoId = (string) ($photo['id'] ?? '');
+        throw_if($photoId === '', new \RuntimeException('Meta did not create an unpublished Facebook Story photo.'));
+
+        return $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/photo_stories'), [
+                'photo_id' => $photoId,
+            ])->throw()->json();
+    }
+
+    public function publishInstagramStory(ChannelConnection $connection, string $imageUrl): array
+    {
+        throw_unless($connection->provider === 'instagram' && $connection->isActive(), new \RuntimeException('An active Instagram connection is required.'));
+        throw_if($imageUrl === '', new \RuntimeException('Instagram Story publishing requires a public product image.'));
+
+        $container = $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/media'), [
+                'image_url' => $imageUrl,
+                'media_type' => 'STORIES',
+            ])->throw()->json();
+        $creationId = (string) ($container['id'] ?? '');
+        throw_if($creationId === '', new \RuntimeException('Meta did not create an Instagram Story container.'));
+
+        return $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/media_publish'), [
+                'creation_id' => $creationId,
+            ])->throw()->json();
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function recentFacebookMessages(ChannelConnection $connection): array
     {

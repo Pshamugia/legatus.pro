@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Jobs\PrepareSocialMediaSlot;
 use App\Jobs\PublishSocialMediaPost;
+use App\Jobs\PublishSocialMediaStory;
 use App\Models\Organization;
 use App\Models\SocialMediaPost;
 use App\Models\User;
@@ -1086,6 +1087,7 @@ class SocialMediaSchedulerTest extends TestCase
 
     public function test_luna_generates_a_verified_image_aware_caption_once_before_meta_publish(): void
     {
+        Queue::fake();
         [, $agent] = $this->tenant('ai-publisher');
         $this->connections($agent);
         config()->set('services.openai.key', 'test-openai-key');
@@ -1134,6 +1136,8 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('gpt-5.6-luna', $fresh->ai_model);
         $this->assertNotNull($fresh->ai_generation_attempted_at);
         $this->assertNotNull($fresh->ai_generated_at);
+        $this->assertSame('queued', $fresh->story_status);
+        Queue::assertPushed(PublishSocialMediaStory::class, 1);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/responses'
             && $request['model'] === 'gpt-5.6-luna'
             && data_get($request->data(), 'input.0.content.1.type') === 'input_image'
@@ -1144,6 +1148,7 @@ class SocialMediaSchedulerTest extends TestCase
 
     public function test_failed_ai_generation_falls_back_to_original_content_without_repeating_ai(): void
     {
+        Queue::fake();
         [, $agent] = $this->tenant('ai-generation-failure');
         $this->connections($agent);
         config()->set('services.openai.key', 'test-openai-key');
@@ -1172,6 +1177,8 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('Prepared fallback caption', $post->fresh()->caption);
         $this->assertNotNull($post->fresh()->ai_generation_attempted_at);
         $this->assertNull($post->fresh()->ai_generated_at);
+        $this->assertSame('queued', $post->fresh()->story_status);
+        Queue::assertPushed(PublishSocialMediaStory::class, 1);
         Http::assertSentCount(2);
     }
 
@@ -1483,6 +1490,9 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'status' => 'published', 'provider_post_id' => 'fb-post-1']);
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'instagram', 'status' => 'published', 'provider_post_id' => 'ig-post-1']);
+        $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'story_status' => 'queued']);
+        $this->assertDatabaseHas('social_media_posts', ['provider' => 'instagram', 'story_status' => 'queued']);
+        Queue::assertPushed(PublishSocialMediaStory::class, 2);
         $this->assertDatabaseHas('social_publication_identities', [
             'agent_id' => $agent->id,
             'provider' => 'facebook',
@@ -1500,6 +1510,168 @@ class SocialMediaSchedulerTest extends TestCase
             && str_contains((string) $request['caption'], 'https://shop.example/products/scheduled-product'));
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media?') && $request['image_url'] === 'https://shop.example/images/product.jpg');
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
+    }
+
+    public function test_meta_feed_posts_are_published_as_facebook_and_instagram_stories(): void
+    {
+        [, $agent] = $this->tenant('meta-story-publisher');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Story Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram']);
+        $posts = collect(['facebook', 'instagram'])->mapWithKeys(function (string $provider) use ($schedule, $agent, $product): array {
+            $post = $schedule->posts()->create([
+                'agent_id' => $agent->id,
+                'product_id' => $product->id,
+                'provider' => $provider,
+                'status' => 'published',
+                'story_status' => 'queued',
+                'scheduled_for' => now('UTC'),
+                'published_at' => now('UTC'),
+                'title' => $product->name,
+                'description' => $product->description,
+                'product_url' => data_get($product->metadata, 'product_url'),
+                'image_url' => $product->publicImageUrl(),
+                'caption' => 'Verified caption',
+            ]);
+
+            return [$provider => $post];
+        });
+
+        Http::fake(function ($request) {
+            if (str_contains($request->url(), '/page-1/photos')) {
+                return Http::response(['id' => 'fb-story-photo']);
+            }
+            if (str_contains($request->url(), '/page-1/photo_stories')) {
+                return Http::response(['post_id' => 'fb-story-1']);
+            }
+            if (str_contains($request->url(), '/ig-1/media_publish')) {
+                return Http::response(['id' => 'ig-story-1']);
+            }
+            if (str_contains($request->url(), '/ig-1/media')) {
+                return Http::response(['id' => 'ig-story-container']);
+            }
+
+            return Http::response([], 404);
+        });
+
+        foreach ($posts as $post) {
+            (new PublishSocialMediaStory($post->id))->handle(app(MetaGraphClient::class));
+        }
+
+        $this->assertDatabaseHas('social_media_posts', [
+            'id' => $posts['facebook']->id,
+            'status' => 'published',
+            'story_status' => 'published',
+            'provider_story_id' => 'fb-story-1',
+            'story_attempts' => 1,
+        ]);
+        $this->assertDatabaseHas('social_media_posts', [
+            'id' => $posts['instagram']->id,
+            'status' => 'published',
+            'story_status' => 'published',
+            'provider_story_id' => 'ig-story-1',
+            'story_attempts' => 1,
+        ]);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photos')
+            && $request['url'] === $product->publicImageUrl()
+            && $request['published'] === false);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photo_stories')
+            && $request['photo_id'] === 'fb-story-photo');
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/ig-1/media')
+            && ! str_contains($request->url(), '/media_publish')
+            && $request['image_url'] === $product->publicImageUrl()
+            && $request['media_type'] === 'STORIES');
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/ig-1/media_publish')
+            && $request['creation_id'] === 'ig-story-container');
+    }
+
+    public function test_story_failure_never_changes_the_already_published_feed_post(): void
+    {
+        [, $agent] = $this->tenant('story-failure-isolation');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Published Feed Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'published',
+            'story_status' => 'queued',
+            'scheduled_for' => now('UTC'),
+            'published_at' => now('UTC'),
+            'provider_post_id' => 'existing-feed-post',
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'Verified caption',
+        ]);
+        Http::fake(['*' => Http::response(['error' => ['message' => 'Rejected']], 400)]);
+
+        (new PublishSocialMediaStory($post->id))->handle(app(MetaGraphClient::class));
+
+        $post->refresh();
+        $this->assertSame('published', $post->status);
+        $this->assertSame('existing-feed-post', $post->provider_post_id);
+        $this->assertSame('failed', $post->story_status);
+        $this->assertStringContainsString('HTTP 400', (string) $post->story_failure_reason);
+    }
+
+    public function test_uncertain_story_delivery_is_not_automatically_retried(): void
+    {
+        [, $agent] = $this->tenant('story-unknown-delivery');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Unknown Story Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['instagram']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'instagram',
+            'status' => 'published',
+            'story_status' => 'queued',
+            'scheduled_for' => now('UTC'),
+            'published_at' => now('UTC'),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'Verified caption',
+        ]);
+        Http::fake(['*' => Http::response(['error' => ['message' => 'Temporary']], 500)]);
+
+        (new PublishSocialMediaStory($post->id))->handle(app(MetaGraphClient::class));
+        (new PublishSocialMediaStory($post->id))->handle(app(MetaGraphClient::class));
+
+        $this->assertSame('delivery_unknown', $post->fresh()->story_status);
+        $this->assertSame(1, $post->fresh()->story_attempts);
+        Http::assertSentCount(1);
+    }
+
+    public function test_dispatch_command_recovers_a_story_job_left_queued_after_feed_publication(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('recover-queued-story');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Recover Story Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'published',
+            'story_status' => 'queued',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'published_at' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'Verified caption',
+        ]);
+
+        $this->artisan('legatus:dispatch-social-posts')->assertSuccessful();
+
+        Queue::assertPushed(PublishSocialMediaStory::class, fn ($job): bool => $job->postId === $post->id);
     }
 
     public function test_stale_slot_preparation_is_recovered_and_queued_again(): void

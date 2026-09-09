@@ -176,10 +176,23 @@ class PublishSocialMediaPost implements ShouldQueue
                 'provider_post_id' => (string) ($result['id'] ?? ''),
                 'published_at' => now(),
                 'failure_reason' => null,
+                'story_status' => in_array($post->provider, ['facebook', 'instagram'], true) ? 'queued' : null,
             ]);
             $publishedPost = $post->fresh(['product']);
             if ($publishedPost) {
                 $publicationHistory->rememberPublished($publishedPost);
+            }
+            if (in_array($post->provider, ['facebook', 'instagram'], true)) {
+                try {
+                    PublishSocialMediaStory::dispatch($post->id)->onQueue('channels');
+                } catch (\Throwable $storyQueueException) {
+                    // The feed is already live and must never be retried because
+                    // its follow-up Story job could not be persisted. The
+                    // minute dispatcher recovers rows left in queued state.
+                    $post->update([
+                        'story_failure_reason' => Str::limit('Story queue dispatch will be recovered automatically. '.$storyQueueException->getMessage(), 2000, ''),
+                    ]);
+                }
             }
         } catch (\Throwable $exception) {
             $post->update([

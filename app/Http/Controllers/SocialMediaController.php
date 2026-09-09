@@ -40,6 +40,11 @@ class SocialMediaController extends Controller
                 'posts',
                 'posts as published_posts_count' => fn ($query) => $query->where('status', 'published'),
                 'posts as failed_posts_count' => fn ($query) => $query->where('status', 'failed'),
+                'posts as story_posts_count' => fn ($query) => $query
+                    ->whereIn('provider', ['facebook', 'instagram'])
+                    ->where(fn ($storyQuery) => $storyQuery->where('status', '!=', 'published')->orWhereNotNull('story_status')),
+                'posts as published_stories_count' => fn ($query) => $query->where('story_status', 'published'),
+                'posts as failed_stories_count' => fn ($query) => $query->whereIn('story_status', ['failed', 'delivery_unknown']),
             ])->latest()->get();
         $upcoming = $agent->socialMediaPosts()->with('schedule:id,timezone')->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->orderBy('scheduled_for')->limit(12)->get();

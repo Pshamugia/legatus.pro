@@ -12,6 +12,7 @@ class SocialMediaPost extends Model
     protected $casts = [
         'scheduled_for' => 'datetime',
         'published_at' => 'datetime',
+        'story_published_at' => 'datetime',
         'ai_generation_attempted_at' => 'datetime',
         'ai_generated_at' => 'datetime',
     ];
