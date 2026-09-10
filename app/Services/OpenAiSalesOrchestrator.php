@@ -686,18 +686,18 @@ class OpenAiSalesOrchestrator
         }
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
             && $budgetConstraint === null
+            && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
             && $usedCollection->where('name', 'search_products')
                 ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
                 ->contains(fn (array $call): bool => collect(array_merge(
                     data_get($call, 'result.products', []),
                     data_get($call, 'result.unavailable_products', []),
-                ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')))
-            && $usedCollection->where('name', 'recommend_products')->isNotEmpty();
+                ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
         if ($exactLookupMiss) {
             $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
             $data['text'] = $georgian
-                ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე. გსურთ, მსგავსი ვარიანტები შემოგთავაზოთ?'
-                : 'I could not find the exact requested product in the catalog. Would you like me to suggest similar options?';
+                ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე.'
+                : 'I could not find the exact requested product in the catalog.';
             $data['intent'] = 'discovery';
             $data['confidence'] = 1;
             $data['handoff'] = false;
@@ -1220,13 +1220,13 @@ class OpenAiSalesOrchestrator
                         $availableCount === 0 => "კიდევ {$total} შესაბამისი ვარიანტი ვიპოვე, თუმცა ამჟამად ყველა ამოწურულია.",
                         default => "კიდევ {$total} შესაბამისი ვარიანტი ვიპოვე: {$availableCount} ხელმისაწვდომია, {$unavailableCount} კი ამჟამად ამოწურულია.",
                     }
-                    : match (true) {
-                        $total === 1 && $availableCount === 1 => 'I found one more matching option, and it is available.',
-                        $total === 1 => 'I found one more matching option, but it is currently unavailable.',
-                        $unavailableCount === 0 => "I found {$total} more matching options, and all are available.",
-                        $availableCount === 0 => "I found {$total} more matching options, but all are currently unavailable.",
-                        default => "I found {$total} more matching options: {$availableCount} available and {$unavailableCount} currently unavailable.",
-                    };
+                : match (true) {
+                    $total === 1 && $availableCount === 1 => 'I found one more matching option, and it is available.',
+                    $total === 1 => 'I found one more matching option, but it is currently unavailable.',
+                    $unavailableCount === 0 => "I found {$total} more matching options, and all are available.",
+                    $availableCount === 0 => "I found {$total} more matching options, but all are currently unavailable.",
+                    default => "I found {$total} more matching options: {$availableCount} available and {$unavailableCount} currently unavailable.",
+                };
 
                 return [
                     'text' => $text,
@@ -1711,7 +1711,8 @@ class OpenAiSalesOrchestrator
         $assistantIdentity .= '. You are a broadly capable AI shopping assistant, not a catalog lookup bot. Hold natural conversations on any topic, understand the customer’s underlying need, answer ordinary non-business questions from general knowledge when safe, and offer useful guidance. When a shopping opportunity is relevant, translate that need into the connected business’s real catalog attributes and proactively offer genuinely suitable verified products. General conversation never authorizes invented business products, prices, availability, policies, or links';
         $assistantIdentity .= '. Interpret each message as a dialogue turn inside the complete conversation, including confirmations, corrections, reactions, dissatisfaction, and requests to continue a previously offered action. Preserve the conversation\'s established language when the latest turn is short, multilingual, or only an interjection. Never repeat the previous answer unless the customer explicitly asks you to repeat it';
         $assistantIdentity .= '. A new message containing an explicit new product, category, person, or subject replaces any unresolved spelling suggestion or choice from older turns. Never carry a rejected or superseded candidate into the new request';
-        $assistantIdentity .= '. When customer input contains model-derived visual evidence, treat exact visible identifiers such as title, author, brand, model, label, ISBN, or SKU as the primary catalog query. Search those identifiers before using colors or design attributes. A failed search from uncertain OCR or visual description does not prove that the photographed product is absent from the catalog: state that the image could not be matched confidently and ask for one clearer identifier or route to a human, rather than asserting that the business does not carry it';
+        $assistantIdentity .= '. Customer photo or image recognition is not available in the current conversation tools. Never ask the customer to send or upload a cover, label, product photo, screenshot, barcode image, or ISBN photo so that you can identify or search for a product. If the current text is insufficient, ask for one text attribute that this tenant catalog actually contains';
+        $assistantIdentity .= $this->catalogIdentifierCapabilityInstructions($agent);
         $assistantIdentity .= '. Never offer, promise, or solicit customer data for an action that is not represented by an available tool. Legatus cannot place or finalize a connected-store order, accept payment, or collect recipient, shipping-address, card, or payment details for checkout. When a customer wants to buy, direct them to the verified product link and explain that they must complete the business website checkout there. If a customer nevertheless sends order or shipping details, do not repeat or treat them as an order or lead; briefly explain that checkout must be completed on the business website';
         $assistantIdentity .= '. Sold-out replacement rules override any more permissive recommendation wording below: never recommend an unavailable product or present it as purchasable. After verifying a sold-out item, call recommend_products with that item’s verified category, genres, tags, or product type as mandatory taxonomy constraints. Offer only verified available alternatives from the same or nearest trustworthy taxonomy; never drift to an unrelated category merely to return a result. If taxonomy is missing or no matching available alternative exists, say so instead of guessing';
 
@@ -1906,7 +1907,7 @@ class OpenAiSalesOrchestrator
         if ($this->claimsShortlistIsComplete($text, $successful)) {
             return 'The response presented a limited catalog shortlist as the total number of matching products.';
         }
-        if ($reason = $this->unsupportedActionReason($text)) {
+        if ($reason = $this->unsupportedActionReason($agent, $text)) {
             return $reason;
         }
 
@@ -2229,8 +2230,7 @@ class OpenAiSalesOrchestrator
         array &$modelUsage,
         string $model,
         string $stage,
-    ): void
-    {
+    ): void {
         $input = (int) data_get($response, 'usage.input_tokens', 0);
         $cachedInput = (int) data_get($response, 'usage.input_tokens_details.cached_tokens', 0);
         $cacheWrite = (int) data_get($response, 'usage.input_tokens_details.cache_write_tokens', 0);
@@ -2289,7 +2289,7 @@ class OpenAiSalesOrchestrator
      * contract. Legatus can verify products and direct customers to checkout,
      * but it cannot collect checkout data or place a connected-store order.
      */
-    private function unsupportedActionReason(string $text): ?string
+    private function unsupportedActionReason(Agent $agent, string $text): ?string
     {
         $orderContext = preg_match('/(?:\border\b|\bcheckout\b|\bpurchase\b|place\s+(?:the|an?)\s+order|complete\s+(?:the\s+)?order|შეკვეთ\p{L}*|გაფორმ\p{L}*|შეძენ\p{L}*)/iu', $text) === 1;
         $asksCustomerToProvide = preg_match('/(?:\bsend\s+me\b|\bprovide\b|\bshare\b|\bwrite\s+(?:me|your)\b|\btell\s+me\b|მომწერ\p{L}*|გამომიგზავნ\p{L}*|მიუთით\p{L}*|დამიწერ\p{L}*)/iu', $text) === 1;
@@ -2300,7 +2300,37 @@ class OpenAiSalesOrchestrator
             return 'The response offered an unsupported order-fulfilment action or requested customer data for it. Direct the customer to the verified business website checkout instead.';
         }
 
+        $mentionsImage = preg_match('/(?:\b(?:photo|image|picture|cover|screenshot|barcode)\b|ფოტო\p{L}*|სურათ\p{L}*|ყდ\p{L}*|ეტიკეტ\p{L}*|შტრიხ(?:კოდ|ის\s+კოდ)\p{L}*)/iu', $text) === 1;
+        $promisesIdentification = preg_match('/(?:identif\p{L}*|recogni[sz]\p{L}*|match\p{L}*|look\s*up|search\p{L}*|ამოვიცნობ\p{L}*|იდენტიფიც\p{L}*|დავამთხვევ\p{L}*|მოვძებნ\p{L}*|დავადგენ\p{L}*|გეტყვ\p{L}*)/iu', $text) === 1;
+        if ($asksCustomerToProvide && $mentionsImage && $promisesIdentification) {
+            return 'The response promised customer image or photo product identification, but no current conversation tool can inspect customer images. Ask only for a supported text attribute.';
+        }
+
+        if ($asksCustomerToProvide
+            && preg_match('/\bISBN(?:-?1[03])?\b/iu', $text) === 1
+            && ! $this->catalogHasIdentifier($agent, 'isbn')) {
+            return 'The response requested an ISBN even though this tenant catalog contains no ISBN data. Ask for a text attribute that exists in this catalog.';
+        }
+
         return null;
+    }
+
+    private function catalogIdentifierCapabilityInstructions(Agent $agent): string
+    {
+        if ($this->catalogHasIdentifier($agent, 'isbn')) {
+            return '. This tenant catalog contains ISBN values, so a customer-provided ISBN as text may be searched. Never ask for an ISBN photo';
+        }
+
+        return '. This tenant catalog contains no ISBN values. Never ask the customer for an ISBN and never imply that providing one would make identification possible';
+    }
+
+    private function catalogHasIdentifier(Agent $agent, string $identifier): bool
+    {
+        return $agent->customerProducts()
+            ->where('is_active', true)
+            ->whereNotNull('metadata->'.$identifier)
+            ->where('metadata->'.$identifier, '!=', '')
+            ->exists();
     }
 
     private function factualClaimReason(Agent $agent, string $text, Collection $claims, Collection $successful): ?string

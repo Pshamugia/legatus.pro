@@ -4,11 +4,12 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\AgentRun;
+use App\Models\RecommendationEvent;
 use App\Models\Reservation;
+use App\Services\ConversationEngine;
+use App\Services\OpenAiSalesOrchestrator;
 use App\Services\SalesAgentService;
 use App\Services\SalesToolbox;
-use App\Services\OpenAiSalesOrchestrator;
-use App\Services\ConversationEngine;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -755,6 +756,7 @@ class OpenAiOrchestrationTest extends TestCase
             }
             if (str_ends_with($request->url(), '/responses')) {
                 $followupCall++;
+
                 return Http::response(['id' => 'confirmed-typo-final', 'output' => [[
                     'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
                         'text' => "ვიპოვე „{$product->name}“.", 'intent' => 'discovery', 'confidence' => .99,
@@ -1120,7 +1122,7 @@ class OpenAiOrchestrationTest extends TestCase
 
         app(SalesAgentService::class)->reply($agent, 'Please recommend mystery items within 60 GEL', $conversation);
 
-        $event = \App\Models\RecommendationEvent::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $event = RecommendationEvent::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
         $this->assertSame('Aurora Curios', data_get($event->query, 'category'));
         $this->assertSame('', data_get($event->query, 'query'));
     }
@@ -1195,6 +1197,58 @@ class OpenAiOrchestrationTest extends TestCase
         ], collect());
 
         $this->assertStringContainsString('unsupported order-fulfilment action', $reason);
+    }
+
+    public function test_guardrail_rejects_promised_photo_identification_and_an_identifier_missing_from_the_tenant_catalog(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'unsupported-identification-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $payload = [
+            'intent' => 'clarification', 'confidence' => .96,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ];
+
+        $photoReason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, $payload + [
+            'text' => 'შეგიძლიათ ავტორი, ISBN ან ყდის ფოტო გამომიგზავნოთ, რომ უფრო ზუსტად მოვძებნო?',
+        ], collect());
+        $isbnReason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, $payload + [
+            'text' => 'მომწერეთ ISBN და ზუსტად მოვძებნი.',
+        ], collect());
+
+        $this->assertStringContainsString('no current conversation tool can inspect customer images', $photoReason);
+        $this->assertStringContainsString('tenant catalog contains no ISBN data', $isbnReason);
+    }
+
+    public function test_text_isbn_search_is_offered_only_when_the_tenant_catalog_contains_isbn_data(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->create([
+            'name' => 'ISBN indexed product', 'sku' => 'BOOK-ISBN', 'category' => 'Reference',
+            'description' => 'Verified reference product.', 'search_text' => 'ISBN indexed product 9780000000001',
+            'price' => 20, 'stock' => 1, 'is_active' => true,
+            'metadata' => ['isbn' => '9780000000001'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'supported-isbn-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $guardrail = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $instructions = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'instructions');
+
+        $reason = $guardrail->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => 'მომწერეთ ISBN ტექსტად და კატალოგში მოვძებნი.',
+            'intent' => 'clarification', 'confidence' => .96,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ], collect());
+
+        $this->assertNull($reason);
+        $this->assertStringContainsString('catalog contains ISBN values', $instructions->invoke(app(OpenAiSalesOrchestrator::class), $agent));
     }
 
     public function test_guardrail_allows_directing_a_customer_to_verified_website_checkout(): void
@@ -1476,7 +1530,7 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([$soldOut->id], collect($response->json('products'))->pluck('id')->all());
     }
 
-    public function test_an_empty_exact_lookup_offers_similar_options_without_defensive_wording(): void
+    public function test_an_empty_exact_lookup_stops_after_the_verified_not_found_answer(): void
     {
         $this->seed();
         $agent = Agent::firstOrFail();
@@ -1516,7 +1570,7 @@ class OpenAiOrchestrationTest extends TestCase
             ->assertJsonPath('products', []);
 
         $this->assertSame(
-            'I could not find the exact requested product in the catalog. Would you like me to suggest similar options?',
+            'I could not find the exact requested product in the catalog.',
             $response->json('text'),
         );
         $this->assertStringNotContainsString('I will not substitute', $response->json('text'));
