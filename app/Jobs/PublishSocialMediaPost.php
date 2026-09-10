@@ -87,7 +87,7 @@ class PublishSocialMediaPost implements ShouldQueue
         $template = data_get($post->schedule->template_snapshots, $post->provider);
         $copyMode = $post->copy_mode ?: $post->schedule->copy_mode;
         if ($copyMode === 'ai') {
-            if ($post->ai_generated_at === null && $post->ai_generation_attempted_at === null) {
+            if ($post->ai_generated_at === null) {
                 $title = (string) ($localized['name'] ?? $product->name);
                 $descriptionValue = $product->socialDescription($post->language, $post->description);
                 $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 700, '…');
@@ -109,8 +109,16 @@ class PublishSocialMediaPost implements ShouldQueue
                     $post->refresh();
                 } catch (\Throwable $exception) {
                     $post->update([
-                        'failure_reason' => Str::limit('AI Copywriter unavailable; Original content used. '.$exception->getMessage(), 2000, ''),
+                        'status' => $this->attempts() >= $this->tries ? 'failed' : 'queued',
+                        'ai_generation_attempted_at' => $this->attempts() >= $this->tries ? $post->ai_generation_attempted_at : null,
+                        'failure_reason' => Str::limit('AI Copywriter failed; AI mode did not publish Original template content. '.$exception->getMessage(), 2000, ''),
                     ]);
+
+                    if ($this->attempts() >= $this->tries) {
+                        return;
+                    }
+
+                    throw $exception;
                 }
             }
         }

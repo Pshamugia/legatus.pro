@@ -1103,16 +1103,14 @@ class SocialMediaSchedulerTest extends TestCase
             'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'caption' => 'Prepared fallback caption',
+            'ai_generation_attempted_at' => now()->subMinute(),
         ]);
-        $layout = json_encode([
-            'creative_copy' => 'A thoughtful new way to discover this catalog selection.',
-            'selected_facts' => ['category', 'price'],
-            'cta' => 'details',
-        ]);
+        $generated = 'A thoughtful post based on the verified product description.';
+        $rendered = $generated."\n\n".data_get($product->metadata, 'product_url');
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()
                 ->push([
-                    'output' => [['content' => [['type' => 'output_text', 'text' => $layout]]]],
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $generated])]]]],
                     'usage' => ['input_tokens' => 100, 'output_tokens' => 30],
                 ])
                 ->push([
@@ -1128,11 +1126,7 @@ class SocialMediaSchedulerTest extends TestCase
 
         $fresh = $post->fresh();
         $this->assertSame('published', $fresh->status);
-        $this->assertStringContainsString('A thoughtful new way', $fresh->caption);
-        $this->assertStringContainsString('Luna Product', $fresh->caption);
-        $this->assertStringNotContainsString('Verified public description.', $fresh->caption);
-        $this->assertStringContainsString('20.00 GEL', $fresh->caption);
-        $this->assertStringContainsString((string) data_get($product->metadata, 'product_url'), $fresh->caption);
+        $this->assertSame($rendered, $fresh->caption);
         $this->assertSame('gpt-5.6-luna', $fresh->ai_model);
         $this->assertNotNull($fresh->ai_generation_attempted_at);
         $this->assertNotNull($fresh->ai_generated_at);
@@ -1141,12 +1135,13 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/responses'
             && $request['model'] === 'gpt-5.6-luna'
             && data_get($request->data(), 'input.0.content.1.type') === 'input_image'
-            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Write original, channel-specific creative_copy'));
+            && data_get($request->data(), 'text.format.schema.properties.caption.type') === 'string'
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'natural, original marketing copy inspired by this specific product'));
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photos')
-            && str_contains((string) $request['caption'], 'Luna Product'));
+            && str_contains((string) $request['caption'], 'A thoughtful post based on the verified product description.'));
     }
 
-    public function test_failed_ai_generation_falls_back_to_original_content_without_repeating_ai(): void
+    public function test_failed_ai_generation_never_publishes_original_template_content_in_ai_mode(): void
     {
         Queue::fake();
         [, $agent] = $this->tenant('ai-generation-failure');
@@ -1169,27 +1164,28 @@ class SocialMediaSchedulerTest extends TestCase
             'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'fallback-facebook-post']),
         ]);
 
-        $job = new PublishSocialMediaPost($post->id);
-        $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
-        $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+        try {
+            (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+            $this->fail('A temporary AI failure must be retried by the queue.');
+        } catch (\Throwable $exception) {
+            $this->assertStringContainsString('503', $exception->getMessage());
+        }
 
-        $this->assertSame('published', $post->fresh()->status);
+        $this->assertSame('queued', $post->fresh()->status);
         $this->assertSame('Prepared fallback caption', $post->fresh()->caption);
-        $this->assertNotNull($post->fresh()->ai_generation_attempted_at);
+        $this->assertNull($post->fresh()->ai_generation_attempted_at);
         $this->assertNull($post->fresh()->ai_generated_at);
-        $this->assertSame('queued', $post->fresh()->story_status);
-        Queue::assertPushed(PublishSocialMediaStory::class, 1);
-        Http::assertSentCount(2);
+        $this->assertStringContainsString('AI mode did not publish Original template content', (string) $post->fresh()->failure_reason);
+        Queue::assertNothingPushed();
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'graph.facebook.test'));
     }
 
-    public function test_ai_copywriter_can_only_render_exact_catalog_values_for_any_product_type(): void
+    public function test_ai_copywriter_returns_product_specific_creative_copy_without_rendering_raw_category_fields(): void
     {
-        [, $agent] = $this->tenant('verified-ai-facts');
+        [, $agent] = $this->tenant('product-specific-ai-copy');
         config()->set('services.openai.key', 'test-openai-key');
-        $attributes = $this->product('Artisan Cheese', 'Dairy', 4);
-        $attributes['metadata']['manufacturer'] = 'Verified Farm';
-        $attributes['metadata']['attributes'] = ['Milk: Goat', 'Weight: 500 g'];
-        $product = $agent->products()->create($attributes);
+        $product = $agent->products()->create($this->product('სტომატოლოგიურ დაავადებათა პროფილაქტიკა', 'Books', 4));
         $schedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
             'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
@@ -1199,37 +1195,20 @@ class SocialMediaSchedulerTest extends TestCase
             'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
             'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
-            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
         ]);
+        $generated = 'კბილის ჯანმრთელობაზე ზრუნვა პატარა ნაბიჯებიდან იწყება 🦷📘'."\n\n"
+            .'გაიცანით წიგნი და შეიტყვეთ მეტი 👇';
+        $rendered = $generated."\n\n".data_get($product->metadata, 'product_url');
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()
                 ->push([
-                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
-                        'creative_copy' => 'Bring something memorable to the table. Invented Dairy Ltd made this from cow milk.',
-                        'selected_facts' => ['attribute_0', 'attribute_1'],
-                        'cta' => 'visit',
-                    ])]]]],
-                    'usage' => ['input_tokens' => 80, 'output_tokens' => 10],
+                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $generated])]]]],
+                    'usage' => ['input_tokens' => 80, 'output_tokens' => 30],
                 ])
                 ->push([
                     'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
-                        'supported' => false,
-                        'unsupported_fragments' => ['Invented Dairy Ltd made this from cow milk.'],
-                    ])]]]],
-                    'usage' => ['input_tokens' => 40, 'output_tokens' => 8],
-                ])
-                ->push([
-                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
-                        'creative_copy' => 'აღმოააჩინეთ კატალოგის გამორჩეული წიგნი. პიტერ ჰანდკეს ამ ნაწარმოებისთვის ნობელის პრემია აქვს.',
-                        'selected_facts' => ['author'],
-                        'cta' => 'details',
-                    ])]]]],
-                    'usage' => ['input_tokens' => 80, 'output_tokens' => 10],
-                ])
-                ->push([
-                    'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
-                        'supported' => false,
-                        'unsupported_fragments' => ['პიტერ ჰანდკეს ამ ნაწარმოებისთვის ნობელის პრემია აქვს.'],
+                        'supported' => true, 'unsupported_fragments' => [],
                     ])]]]],
                     'usage' => ['input_tokens' => 40, 'output_tokens' => 8],
                 ]),
@@ -1237,32 +1216,58 @@ class SocialMediaSchedulerTest extends TestCase
 
         $caption = app(SocialMediaAiCopywriter::class)->generate($post);
 
-        $this->assertStringContainsString('Artisan Cheese', $caption);
-        $this->assertStringContainsString('Manufacturer: Verified Farm', $caption);
-        $this->assertStringContainsString('Milk: Goat', $caption);
-        $this->assertStringContainsString('Weight: 500 g', $caption);
-        $this->assertStringContainsString('Bring something memorable to the table.', $caption);
-        $this->assertStringNotContainsString('Invented Dairy Ltd', $caption);
-        $this->assertStringNotContainsString('cow milk', $caption);
+        $this->assertSame($rendered, $caption);
+        $this->assertStringNotContainsString('კატეგორია: Books', $caption);
+        $this->assertStringNotContainsString('ახალი არჩევანი ჩვენი კატალოგიდან', $caption);
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'text.format.schema.properties.caption.type') === 'string'
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Never output database-style labels')
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Verified evidence:'));
+    }
 
-        $bookAttributes = $this->product('პანსიონატი', 'რომანი', 1);
-        $bookAttributes['metadata']['author'] = 'პიოტრ პაჟინსკი';
-        $book = $agent->products()->create($bookAttributes);
-        $bookPost = $schedule->posts()->create([
-            'agent_id' => $agent->id, 'product_id' => $book->id, 'provider' => 'facebook',
-            'status' => 'queued', 'scheduled_for' => now()->addMinute(), 'title' => $book->name,
-            'description' => $book->description, 'product_url' => data_get($book->metadata, 'product_url'),
-            'image_url' => $book->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+    public function test_ai_copywriter_retries_a_fully_rejected_draft_instead_of_publishing_a_generic_template(): void
+    {
+        [, $agent] = $this->tenant('ai-copy-retry');
+        config()->set('services.openai.key', 'test-openai-key');
+        $product = $agent->products()->create($this->product('პანსიონატი', 'Books', 2));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
         ]);
-        $bookCaption = app(SocialMediaAiCopywriter::class)->generate($bookPost);
-        $this->assertStringContainsString('პანსიონატი', $bookCaption);
-        $this->assertStringContainsString('ავტორი: პიოტრ პაჟინსკი', $bookCaption);
-        $this->assertStringContainsString('აღმოააჩინეთ კატალოგის გამორჩეული წიგნი.', $bookCaption);
-        $this->assertStringNotContainsString('პიტერ ჰანდკე', $bookCaption);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+        $rejected = 'პიტერ ჰანდკეს ნობელის პრემიის მფლობელი რომანია.';
+        $safe = 'ზოგჯერ ერთი წიგნი საკმარისია, რომ ნაცნობ სივრცეს სხვა თვალით შეხედოთ. 📖'."\n\n"
+            .'გაეცანით „პანსიონატს“ და მის ამბავს.';
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $rejected], JSON_UNESCAPED_UNICODE)]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => false, 'unsupported_fragments' => [$rejected],
+                ], JSON_UNESCAPED_UNICODE)]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $safe], JSON_UNESCAPED_UNICODE)]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => true, 'unsupported_fragments' => [],
+                ], JSON_UNESCAPED_UNICODE)]]]]]),
+        ]);
 
-        Http::assertSent(fn ($request): bool => data_get($request->data(), 'text.format.schema.properties.creative_copy.type') === 'string'
-            && in_array('manufacturer', data_get($request->data(), 'text.format.schema.properties.selected_facts.items.enum', []), true)
-            && in_array('attribute_0', data_get($request->data(), 'text.format.schema.properties.selected_facts.items.enum', []), true));
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringContainsString($safe, $caption);
+        $this->assertStringContainsString((string) data_get($product->metadata, 'product_url'), $caption);
+        $this->assertStringNotContainsString('პიტერ ჰანდკე', $caption);
+        $this->assertStringNotContainsString('ახალი არჩევანი ჩვენი კატალოგიდან', $caption);
+        $this->assertStringNotContainsString('კატეგორია: Books', $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'The previous draft lost its meaningful copy during factual review.',
+        ));
     }
 
     public function test_social_schedule_filters_and_snapshots_the_selected_website_language(): void
