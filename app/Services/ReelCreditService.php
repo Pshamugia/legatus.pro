@@ -10,6 +10,18 @@ use Illuminate\Validation\ValidationException;
 
 class ReelCreditService
 {
+    /** @return array<int, int> duration in seconds => credit cost */
+    public function durationOptions(): array
+    {
+        return [5 => 1, 10 => 2, 15 => 3];
+    }
+
+    public function creditsForDuration(int $duration): int
+    {
+        return $this->durationOptions()[$duration]
+            ?? throw new \InvalidArgumentException('Unsupported Reel duration.');
+    }
+
     public function balance(Organization $organization): int
     {
         return (int) ReelCreditLedger::query()
@@ -64,7 +76,7 @@ class ReelCreditService
                 ['reference' => 'reel-refund:'.$locked->id],
                 [
                     'organization_id' => $locked->agent()->value('organization_id'),
-                    'amount' => 1,
+                    'amount' => max(1, (int) $locked->credit_cost),
                     'type' => 'refund',
                     'metadata' => ['reel_id' => $locked->id, 'reason' => $reason],
                 ],

@@ -193,17 +193,15 @@ class SuperAdminController extends Controller
                 'checked_at' => now()->toIso8601String(),
             ]);
             $credits = max(0, (int) data_get($cached, 'organization.creditBalance', 0));
-            $duration = max(1, (int) config('services.runway.duration', 5));
-            $rates = (array) config('services.runway.credit_rates_per_second', []);
-            $productRate = (int) ($rates[(string) config('services.runway.product_model')] ?? 0);
-            $customRate = (int) ($rates[(string) config('services.runway.custom_model')] ?? 0);
+            $duration = 5;
+            $multiShotRate = max(0, (int) config('services.runway.multi_shot_credit_rate_per_second', 13));
 
             return [
                 'status' => 'available',
                 'credits' => $credits,
                 'usd' => $credits * 0.01,
-                'product_reels' => $productRate > 0 ? intdiv($credits, $productRate * $duration) : null,
-                'custom_reels' => $customRate > 0 ? intdiv($credits, $customRate * $duration) : null,
+                'product_reels' => $multiShotRate > 0 ? intdiv($credits, $multiShotRate * $duration) : null,
+                'custom_reels' => $multiShotRate > 0 ? intdiv($credits, $multiShotRate * $duration) : null,
                 'checked_at' => Carbon::parse((string) $cached['checked_at']),
             ];
         } catch (\Throwable) {

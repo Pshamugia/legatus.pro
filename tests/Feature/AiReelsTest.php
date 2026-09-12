@@ -42,7 +42,10 @@ class AiReelsTest extends TestCase
 
         $response->assertOk()
             ->assertSee('Create AI Reels')
-            ->assertSee('$1 per generated Reel')
+            ->assertSee('$1–$3 per generated Reel')
+            ->assertSee('includes AI-generated audio')
+            ->assertSee('Minimum 5 seconds · Maximum 15 seconds')
+            ->assertSee('15 seconds — 3 credits')
             ->assertSee('Minimum 10')
             ->assertSee('Schedule Facebook')
             ->assertSee('Instagram Reels')
@@ -105,26 +108,30 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseCount('reel_credit_ledger', 0);
     }
 
-    public function test_runway_uses_model_compatible_portrait_ratios_and_api_version(): void
+    public function test_runway_creates_portrait_multi_shot_reels_with_audio_and_selected_duration(): void
     {
         config()->set('services.runway.key', 'runway-test-key');
         Http::fake([
-            'https://api.dev.runwayml.com/v1/image_to_video' => Http::sequence()
-                ->push(['id' => 'product-task'])
-                ->push(['id' => 'custom-task']),
+            'https://api.dev.runwayml.com/v1/recipes/multi_shot_video' => Http::sequence()
+                ->push(['id' => 'five-second-task'])
+                ->push(['id' => 'fifteen-second-task']),
         ]);
 
         $client = app(RunwayClient::class);
-        $this->assertSame('product-task', $client->create('Product motion', 'https://shop.example/product.jpg', false));
-        $this->assertSame('custom-task', $client->create('Custom scene', null, true));
+        $this->assertSame('five-second-task', $client->create('Product story', 'https://shop.example/product.jpg', 5));
+        $this->assertSame('fifteen-second-task', $client->create('Custom story', null, 15));
 
-        Http::assertSent(fn ($request) => $request['model'] === 'gen4_turbo'
-            && $request['ratio'] === '768:1280'
-            && $request['promptImage'] === 'https://shop.example/product.jpg'
-            && $request->hasHeader('X-Runway-Version', '2024-11-06'));
-        Http::assertSent(fn ($request) => $request['model'] === 'gen4.5'
+        Http::assertSent(fn ($request) => $request['version'] === '2026-06'
+            && $request['mode'] === 'auto'
+            && $request['duration'] === 5
             && $request['ratio'] === '720:1280'
-            && ! isset($request['promptImage']));
+            && $request['audio'] === true
+            && data_get($request->data(), 'firstFrame.uri') === 'https://shop.example/product.jpg'
+            && $request->hasHeader('X-Runway-Version', '2024-11-06'));
+        Http::assertSent(fn ($request) => $request['duration'] === 15
+            && $request['ratio'] === '720:1280'
+            && $request['audio'] === true
+            && ! isset($request['firstFrame']));
     }
 
     public function test_runway_cancel_uses_the_task_delete_endpoint(): void
@@ -141,7 +148,7 @@ class AiReelsTest extends TestCase
             && $request->hasHeader('X-Runway-Version', '2024-11-06'));
     }
 
-    public function test_schedule_reserves_one_credit_per_video_and_uses_one_video_for_both_channels(): void
+    public function test_schedule_reserves_duration_priced_credits_and_uses_one_video_for_both_channels(): void
     {
         Queue::fake();
         [$user, $agent, $organization] = $this->tenant('reel-schedule');
@@ -149,15 +156,18 @@ class AiReelsTest extends TestCase
         foreach (range(1, 3) as $number) {
             $agent->products()->create($this->product('Product '.$number));
         }
-        app(ReelCreditService::class)->grantPurchase($organization, 3, 'txn-seed');
+        app(ReelCreditService::class)->grantPurchase($organization, 9, 'txn-seed');
 
         $this->actingAs($user)->post(route('ai-reels.schedules.store'), [
             'reel_count' => 3, 'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'duration_seconds' => 15,
             'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi', 'timing_mode' => 'auto', 'ai_tone' => 'creative',
         ])->assertRedirect(route('ai-reels.index'));
 
         $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+        $this->assertDatabaseHas('ai_reel_schedules', ['duration_seconds' => 15, 'credits_per_reel' => 3]);
         $this->assertDatabaseCount('ai_reels', 3);
+        $this->assertSame([3], AiReel::query()->pluck('credit_cost')->unique()->all());
         $this->assertDatabaseCount('ai_reel_deliveries', 6);
         Queue::assertPushed(GenerateAiReel::class, 3);
     }
@@ -203,6 +213,46 @@ class AiReelsTest extends TestCase
         $this->assertSame('ready', $reel->fresh()->status);
         $this->artisan('legatus:dispatch-ai-reels')->assertSuccessful();
         $this->assertDatabaseMissing('ai_reel_deliveries', ['ai_reel_id' => $reel->id, 'status' => 'scheduled']);
+    }
+
+    public function test_ten_second_custom_reel_costs_two_credits(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('ten-second-custom-reel');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 3, 'txn-ten-second-custom');
+
+        $this->actingAs($user)->post(route('ai-reels.custom.store'), [
+            'prompt' => 'Create a cinematic multi-shot brand story with clear motion and warm light.',
+            'duration_seconds' => 10,
+            'providers' => ['facebook', 'instagram'],
+        ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']));
+
+        $reel = AiReel::firstOrFail();
+        $this->assertSame(10, $reel->duration_seconds);
+        $this->assertSame(2, $reel->credit_cost);
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        Queue::assertPushed(GenerateAiReel::class, 1);
+    }
+
+    public function test_unsupported_custom_reel_duration_is_rejected_without_charging(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('invalid-duration-custom-reel');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 3, 'txn-invalid-duration');
+
+        $this->actingAs($user)->from(route('ai-reels.index', ['tab' => 'custom']))
+            ->post(route('ai-reels.custom.store'), [
+                'prompt' => 'Create a cinematic multi-shot brand story with clear motion and warm light.',
+                'duration_seconds' => 12,
+                'providers' => ['facebook'],
+            ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHasErrors('duration_seconds');
+
+        $this->assertDatabaseCount('ai_reels', 0);
+        $this->assertSame(3, app(ReelCreditService::class)->balance($organization));
+        Queue::assertNothingPushed();
     }
 
     public function test_custom_reel_can_use_a_private_uploaded_image_instead_of_the_website_image(): void
@@ -293,7 +343,7 @@ class AiReelsTest extends TestCase
         $runway->shouldReceive('create')->once()->with(
             \Mockery::type('string'),
             \Mockery::on(fn ($image) => is_string($image) && str_starts_with($image, 'data:image/jpeg;base64,')),
-            true,
+            5,
         )->andReturn('prepared-task');
 
         (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
@@ -338,7 +388,7 @@ class AiReelsTest extends TestCase
             ->push(['error' => 'Internal server error'], 500)
             ->push(['id' => 'recovered-task'], 200);
 
-        $taskId = app(RunwayClient::class)->create('A simple camera push-in.', null, true);
+        $taskId = app(RunwayClient::class)->create('A simple camera push-in.', null, 5);
 
         $this->assertSame('recovered-task', $taskId);
         Http::assertSentCount(2);
@@ -370,13 +420,14 @@ class AiReelsTest extends TestCase
     {
         Storage::fake('local');
         [$user, $agent, $organization] = $this->tenant('stop-queued-reel');
-        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-stop-queued');
+        app(ReelCreditService::class)->grantPurchase($organization, 2, 'txn-stop-queued');
         Storage::disk('local')->put('reel-inputs/stop-queued.jpg', 'image');
         $reel = $agent->aiReels()->create([
             'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'duration_seconds' => 10, 'credit_cost' => 2,
             'source_image_path' => 'reel-inputs/stop-queued.jpg',
         ]);
-        app(ReelCreditService::class)->debit($organization, 1, 'custom-reel:'.$reel->id);
+        app(ReelCreditService::class)->debit($organization, 2, 'custom-reel:'.$reel->id);
 
         $this->actingAs($user)->post(route('ai-reels.cancel', $reel))
             ->assertRedirect()
@@ -385,7 +436,7 @@ class AiReelsTest extends TestCase
         $reel->refresh();
         $this->assertSame('canceled', $reel->status);
         $this->assertNotNull($reel->credit_refunded_at);
-        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        $this->assertSame(2, app(ReelCreditService::class)->balance($organization));
         Storage::disk('local')->assertMissing('reel-inputs/stop-queued.jpg');
     }
 
@@ -492,7 +543,8 @@ class AiReelsTest extends TestCase
         $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
             ->assertOk()
             ->assertSee('Generate another preview')
-            ->assertSee('data-can-generate="1"', false);
+            ->assertSee('data-can-manage="1"', false)
+            ->assertSee('data-pending="0"', false);
     }
 
     public function test_business_can_remove_an_unapproved_preview_without_a_credit_refund(): void
@@ -575,9 +627,12 @@ class AiReelsTest extends TestCase
     public function test_generation_failure_refunds_the_credit_once(): void
     {
         [$user, $agent, $organization] = $this->tenant('reel-refund');
-        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-refund');
-        $reel = $agent->aiReels()->create(['mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued']);
-        app(ReelCreditService::class)->debit($organization, 1, 'reel-test:'.$reel->id);
+        app(ReelCreditService::class)->grantPurchase($organization, 3, 'txn-refund');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'duration_seconds' => 15, 'credit_cost' => 3,
+        ]);
+        app(ReelCreditService::class)->debit($organization, 3, 'reel-test:'.$reel->id);
         $writer = \Mockery::mock(AiReelPromptWriter::class);
         $writer->shouldReceive('write')->once()->andThrow(new \RuntimeException('AI unavailable'));
         $runway = \Mockery::mock(RunwayClient::class);
@@ -586,7 +641,7 @@ class AiReelsTest extends TestCase
         $job->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
         app(ReelCreditService::class)->refund($reel->fresh(), 'duplicate-attempt');
 
-        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        $this->assertSame(3, app(ReelCreditService::class)->balance($organization));
         $this->assertDatabaseCount('reel_credit_ledger', 3);
         $this->assertStringStartsWith('Reel copy preparation failed:', $reel->fresh()->last_error);
     }

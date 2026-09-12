@@ -32,7 +32,7 @@
                 <strong>Unavailable</strong><small>Runway could not be reached; refresh later</small>
             @endif
         </div>
-        <div class="metric"><span>Runway reel capacity</span><strong>{{ $runway['product_reels'] === null ? '—' : number_format($runway['product_reels']) }}</strong><small>Product reels · custom: {{ $runway['custom_reels'] === null ? '—' : number_format($runway['custom_reels']) }}</small></div>
+        <div class="metric"><span>Runway Reel capacity</span><strong>{{ $runway['product_reels'] === null ? '—' : number_format($runway['product_reels']) }}</strong><small>Estimated 5-second multi-shot Reels</small></div>
         <div class="metric"><span>Business Reel credits</span><strong>{{ number_format($metrics['business_reel_credits']) }}</strong><small>Purchased and currently unused</small></div>
     </section>
     <section class="panel"><div class="toolbar"><h2>Registered businesses</h2><span class="env">{{ $environment }}</span><form class="search" method="get"><input name="search" value="{{ $search }}" placeholder="Business, owner, or email"><button>Search</button></form></div>

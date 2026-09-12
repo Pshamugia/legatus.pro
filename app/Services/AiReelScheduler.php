@@ -17,6 +17,7 @@ class AiReelScheduler
 
     public function create(Agent $agent, array $data): AiReelSchedule
     {
+        $creditsPerReel = $this->credits->creditsForDuration((int) $data['duration_seconds']);
         $products = $agent->customerProducts()->where('is_active', true)->where('stock', '>', 0)->get()
             ->filter(fn ($product): bool => $product->publicImageUrl() !== null)
             ->filter(function ($product) use ($data): bool {
@@ -38,15 +39,21 @@ class AiReelScheduler
             throw ValidationException::withMessages(['reel_count' => 'The selected dates and times do not contain enough future Reel slots.']);
         }
 
-        return DB::transaction(function () use ($agent, $data, $variants, $slots): AiReelSchedule {
+        return DB::transaction(function () use ($agent, $data, $variants, $slots, $creditsPerReel): AiReelSchedule {
             $schedule = $agent->aiReelSchedules()->create([
                 'starts_on' => $data['starts_on'], 'ends_on' => $data['ends_on'], 'reel_count' => $data['reel_count'],
+                'duration_seconds' => $data['duration_seconds'], 'credits_per_reel' => $creditsPerReel,
                 'categories' => array_values($data['categories'] ?? []), 'languages' => array_values($data['languages'] ?? []),
                 'providers' => array_values($data['providers']), 'timezone' => $data['timezone'],
                 'timing_mode' => $data['timing_mode'], 'posting_times' => $data['posting_times'] ?? null,
                 'ai_tone' => $data['ai_tone'], 'status' => 'active',
             ]);
-            $this->credits->debit($agent->organization, (int) $data['reel_count'], 'reel-schedule:'.$schedule->id, ['schedule_id' => $schedule->id]);
+            $totalCredits = (int) $data['reel_count'] * $creditsPerReel;
+            $this->credits->debit($agent->organization, $totalCredits, 'reel-schedule:'.$schedule->id, [
+                'schedule_id' => $schedule->id,
+                'duration_seconds' => (int) $data['duration_seconds'],
+                'credits_per_reel' => $creditsPerReel,
+            ]);
 
             for ($index = 0; $index < (int) $data['reel_count']; $index++) {
                 $variant = $variants[$index];
@@ -55,6 +62,7 @@ class AiReelScheduler
                 $localized = $language ? (array) data_get($product->metadata, 'localized.'.$language, []) : [];
                 $reel = $schedule->reels()->create([
                     'agent_id' => $agent->id, 'product_id' => $product->id, 'mode' => 'scheduled',
+                    'duration_seconds' => $data['duration_seconds'], 'credit_cost' => $creditsPerReel,
                     'language' => $language, 'providers' => array_values($data['providers']),
                     'source_image_url' => $localized['image'] ?? $product->publicImageUrl(),
                     'scheduled_for' => $slots[$index]->utc(), 'status' => 'queued',

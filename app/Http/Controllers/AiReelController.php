@@ -42,6 +42,7 @@ class AiReelController extends Controller
             'agent' => $agent, 'organization' => $organization, 'categories' => $categories,
             'languages' => $languages, 'connections' => $connections, 'schedules' => $schedules, 'reels' => $reels,
             'balance' => $credits->balance($organization), 'minimumPurchase' => config('paddle.reel_minimum_purchase', 10),
+            'durationCredits' => $credits->durationOptions(),
             'reelPriceId' => config('paddle.reel_credit_price'), 'paddleClientToken' => config('paddle.client_token'),
             'paddleEnvironment' => config('paddle.environment'), 'billingReference' => Crypt::encryptString((string) $organization->id),
             'activeTab' => $request->query('tab', 'schedule'), 'canManage' => in_array($tenant->role(), ['owner', 'admin'], true),
@@ -56,9 +57,13 @@ class AiReelController extends Controller
     public function storeSchedule(Request $request, TenantContext $tenant, AiReelScheduler $scheduler)
     {
         $tenant->authorize(['owner', 'admin']);
-        $request->merge(['timing_mode' => $request->input('timing_mode', 'auto')]);
+        $request->merge([
+            'timing_mode' => $request->input('timing_mode', 'auto'),
+            'duration_seconds' => $request->input('duration_seconds', 5),
+        ]);
         $data = $request->validate([
             'reel_count' => ['required', 'integer', 'min:1', 'max:365'],
+            'duration_seconds' => ['required', 'integer', Rule::in([5, 10, 15])],
             'starts_on' => ['required', 'date', 'after_or_equal:today'], 'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
             'categories' => ['nullable', 'array'], 'categories.*' => ['string', 'max:255'],
             'languages' => ['nullable', 'array'], 'languages.*' => ['string', 'max:150'],
@@ -84,8 +89,10 @@ class AiReelController extends Controller
     public function storeCustom(Request $request, TenantContext $tenant, ReelCreditService $credits, AiReelSourceImageStorage $images)
     {
         $tenant->authorize(['owner', 'admin']);
+        $request->merge(['duration_seconds' => $request->input('duration_seconds', 5)]);
         $data = $request->validate([
             'prompt' => ['required', 'string', 'min:20', 'max:3000'], 'reference_url' => ['nullable', 'url', 'max:2000'],
+            'duration_seconds' => ['required', 'integer', Rule::in([5, 10, 15])],
             'source_image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:min_width=640,min_height=640,max_width=8000,max_height=8000'],
             'providers' => ['required', 'array', 'min:1'], 'providers.*' => [Rule::in(['facebook', 'instagram'])],
         ]);
@@ -108,15 +115,20 @@ class AiReelController extends Controller
             }
         }
         $storedImage = $uploadedImage ? $images->store($uploadedImage) : null;
+        $creditCost = $credits->creditsForDuration((int) $data['duration_seconds']);
         try {
-            $reel = DB::transaction(function () use ($agent, $data, $product, $credits, $storedImage): AiReel {
+            $reel = DB::transaction(function () use ($agent, $data, $product, $credits, $storedImage, $creditCost): AiReel {
                 $reel = $agent->aiReels()->create([
                     'product_id' => $product?->id, 'mode' => 'custom', 'providers' => array_values($data['providers']),
+                    'duration_seconds' => $data['duration_seconds'], 'credit_cost' => $creditCost,
                     'user_prompt' => $data['prompt'], 'reference_url' => $data['reference_url'] ?? null,
                     'source_image_url' => $storedImage['url'] ?? $product?->publicImageUrl(),
                     'source_image_path' => $storedImage['path'] ?? null, 'status' => 'queued',
                 ]);
-                $credits->debit($agent->organization, 1, 'custom-reel:'.$reel->id, ['reel_id' => $reel->id]);
+                $credits->debit($agent->organization, $creditCost, 'custom-reel:'.$reel->id, [
+                    'reel_id' => $reel->id,
+                    'duration_seconds' => (int) $data['duration_seconds'],
+                ]);
                 foreach ($data['providers'] as $provider) {
                     $reel->deliveries()->create(['provider' => $provider, 'status' => 'scheduled']);
                 }

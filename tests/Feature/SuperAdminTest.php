@@ -151,10 +151,7 @@ class SuperAdminTest extends TestCase
 
     public function test_super_admin_sees_live_runway_balance_capacity_and_outstanding_business_credits(): void
     {
-        config([
-            'services.runway.key' => 'runway-test-key',
-            'services.runway.duration' => 5,
-        ]);
+        config(['services.runway.key' => 'runway-test-key']);
         Http::fake([
             'https://api.dev.runwayml.com/v1/organization' => Http::response([
                 'creditBalance' => 850,
@@ -175,7 +172,8 @@ class SuperAdminTest extends TestCase
             ->assertSee('Runway balance')
             ->assertSee('850')
             ->assertSee('$8.50')
-            ->assertSee('Product reels · custom: 14')
+            ->assertSee('Estimated 5-second multi-shot Reels')
+            ->assertSee('13')
             ->assertSee('Business Reel credits')
             ->assertSee('17');
 

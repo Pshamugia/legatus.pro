@@ -61,7 +61,7 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
                 return;
             }
             $sourceImageUrl = $images->prepareForRunway($reel);
-            $taskId = $runway->create($copy['prompt'], $sourceImageUrl, $reel->mode === 'custom');
+            $taskId = $runway->create($copy['prompt'], $sourceImageUrl, (int) $reel->duration_seconds);
             $reel->update(['runway_task_id' => $taskId]);
             $reel->refresh();
             if ($reel->status === 'canceling') {

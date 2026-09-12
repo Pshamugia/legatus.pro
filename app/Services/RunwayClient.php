@@ -24,24 +24,26 @@ class RunwayClient
             ->json();
     }
 
-    public function create(string $prompt, ?string $imageUrl, bool $custom): string
+    public function create(string $prompt, ?string $imageUrl, int $duration = 5): string
     {
         throw_if(blank(config('services.runway.key')), new \RuntimeException('Runway API is not configured.'));
-        $model = (string) config($custom ? 'services.runway.custom_model' : 'services.runway.product_model');
+        throw_unless(in_array($duration, [5, 10, 15], true), new \InvalidArgumentException('Unsupported Reel duration.'));
         $payload = [
-            'model' => $model,
-            'promptText' => $prompt,
-            'ratio' => config($custom ? 'services.runway.custom_ratio' : 'services.runway.product_ratio'),
-            'duration' => (int) config('services.runway.duration', 5),
+            'version' => config('services.runway.multi_shot_version', '2026-06'),
+            'mode' => 'auto',
+            'prompt' => $prompt,
+            'ratio' => config('services.runway.multi_shot_ratio', '720:1280'),
+            'duration' => $duration,
+            'audio' => true,
         ];
         if ($imageUrl) {
-            $payload['promptImage'] = $imageUrl;
+            $payload['firstFrame'] = ['uri' => $imageUrl];
         }
 
         $response = $this->request()
             ->retry(3, 750, fn (\Throwable $exception): bool => $exception instanceof ConnectionException
                 || ($exception instanceof RequestException && $exception->response->serverError()))
-            ->post('/image_to_video', $payload)
+            ->post('/recipes/multi_shot_video', $payload)
             ->throw()
             ->json();
         $id = (string) ($response['id'] ?? '');

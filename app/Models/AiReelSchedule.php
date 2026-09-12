@@ -17,6 +17,8 @@ class AiReelSchedule extends Model
         'languages' => 'array',
         'providers' => 'array',
         'posting_times' => 'array',
+        'duration_seconds' => 'integer',
+        'credits_per_reel' => 'integer',
         'paused_at' => 'datetime',
     ];
 
