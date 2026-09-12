@@ -2,16 +2,24 @@
 
 namespace Tests\Feature;
 
-use App\Models\Organization;
 use App\Models\AgentRun;
+use App\Models\Organization;
 use App\Models\PaddleSubscription;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class SuperAdminTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Cache::clear();
+    }
 
     public function test_only_configured_email_can_open_super_admin(): void
     {
@@ -139,5 +147,54 @@ class SuperAdminTest extends TestCase
             'duration' => 'lifetime',
         ])->assertForbidden();
         $this->assertDatabaseCount('billing_access_grants', 0);
+    }
+
+    public function test_super_admin_sees_live_runway_balance_capacity_and_outstanding_business_credits(): void
+    {
+        config([
+            'services.runway.key' => 'runway-test-key',
+            'services.runway.duration' => 5,
+        ]);
+        Http::fake([
+            'https://api.dev.runwayml.com/v1/organization' => Http::response([
+                'creditBalance' => 850,
+                'tier' => [],
+                'usage' => [],
+            ]),
+        ]);
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        $organization = Organization::create(['name' => 'Reel Store', 'slug' => 'reel-store']);
+        $organization->reelCreditLedger()->create([
+            'amount' => 17,
+            'type' => 'purchase',
+            'reference' => 'paddle:test-runway-dashboard',
+        ]);
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Runway balance')
+            ->assertSee('850')
+            ->assertSee('$8.50')
+            ->assertSee('Product reels · custom: 14')
+            ->assertSee('Business Reel credits')
+            ->assertSee('17');
+
+        Http::assertSent(fn ($request) => $request->method() === 'GET'
+            && $request->url() === 'https://api.dev.runwayml.com/v1/organization'
+            && $request->hasHeader('Authorization', 'Bearer runway-test-key'));
+    }
+
+    public function test_runway_failure_does_not_break_super_admin_dashboard(): void
+    {
+        config(['services.runway.key' => 'runway-test-key']);
+        Http::fake([
+            'https://api.dev.runwayml.com/v1/organization' => Http::response(['error' => 'temporary'], 503),
+        ]);
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Runway balance')
+            ->assertSee('Unavailable');
     }
 }

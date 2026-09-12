@@ -5,16 +5,18 @@ namespace App\Http\Controllers;
 use App\Models\Organization;
 use App\Models\PaddleSubscription;
 use App\Services\OpenAiCostEstimator;
+use App\Services\RunwayClient;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class SuperAdminController extends Controller
 {
-    public function index(Request $request, OpenAiCostEstimator $costEstimator): View
+    public function index(Request $request, OpenAiCostEstimator $costEstimator, RunwayClient $runwayClient): View
     {
         $environment = config('paddle.environment');
         $search = trim((string) $request->query('search', ''));
@@ -94,9 +96,12 @@ class SuperAdminController extends Controller
             'ai_today_usd' => $todayAiUsage['usd'],
             'ai_sol_fallbacks' => $monthlyAiUsage['sol_fallbacks'],
             'ai_unpriced_models' => $monthlyAiUsage['unpriced_models'],
+            'business_reel_credits' => max(0, (int) DB::table('reel_credit_ledger')->sum('amount')),
         ];
 
-        return view('super-admin.index', compact('organizations', 'metrics', 'environment', 'search'));
+        $runway = $this->runwaySummary($runwayClient);
+
+        return view('super-admin.index', compact('organizations', 'metrics', 'runway', 'environment', 'search'));
     }
 
     public function grantAccess(Request $request, Organization $organization): RedirectResponse
@@ -161,5 +166,48 @@ class SuperAdminController extends Controller
         $summary['unpriced_models'] = array_values(array_unique($summary['unpriced_models']));
 
         return $summary;
+    }
+
+    /**
+     * @return array{status: string, credits: int|null, usd: float|null, product_reels: int|null, custom_reels: int|null, checked_at: Carbon|null}
+     */
+    private function runwaySummary(RunwayClient $client): array
+    {
+        $empty = [
+            'status' => blank(config('services.runway.key')) ? 'not_configured' : 'unavailable',
+            'credits' => null,
+            'usd' => null,
+            'product_reels' => null,
+            'custom_reels' => null,
+            'checked_at' => null,
+        ];
+
+        if ($empty['status'] === 'not_configured') {
+            return $empty;
+        }
+
+        try {
+            $cacheKey = 'runway.organization.'.sha1((string) config('services.runway.key'));
+            $cached = Cache::remember($cacheKey, now()->addMinutes(5), fn (): array => [
+                'organization' => $client->organization(),
+                'checked_at' => now()->toIso8601String(),
+            ]);
+            $credits = max(0, (int) data_get($cached, 'organization.creditBalance', 0));
+            $duration = max(1, (int) config('services.runway.duration', 5));
+            $rates = (array) config('services.runway.credit_rates_per_second', []);
+            $productRate = (int) ($rates[(string) config('services.runway.product_model')] ?? 0);
+            $customRate = (int) ($rates[(string) config('services.runway.custom_model')] ?? 0);
+
+            return [
+                'status' => 'available',
+                'credits' => $credits,
+                'usd' => $credits * 0.01,
+                'product_reels' => $productRate > 0 ? intdiv($credits, $productRate * $duration) : null,
+                'custom_reels' => $customRate > 0 ? intdiv($credits, $customRate * $duration) : null,
+                'checked_at' => Carbon::parse((string) $cached['checked_at']),
+            ];
+        } catch (\Throwable) {
+            return $empty;
+        }
     }
 }

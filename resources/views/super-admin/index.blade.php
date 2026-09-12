@@ -22,6 +22,18 @@
         <div class="metric"><span>Estimated AI spend · month</span><strong>${{ number_format($metrics['ai_month_usd'], 4) }}</strong><small>Recorded Responses API usage</small></div>
         <div class="metric"><span>Estimated AI spend · today</span><strong>${{ number_format($metrics['ai_today_usd'], 4) }}</strong><small>Since 00:00 {{ config('app.timezone') }}</small></div>
         <div class="metric"><span>Sol fallback turns · month</span><strong>{{ number_format($metrics['ai_sol_fallbacks']) }}</strong><small>Luna recovered by Sol</small></div>
+        <div class="metric">
+            <span>Runway balance</span>
+            @if($runway['status'] === 'available')
+                <strong>{{ number_format($runway['credits']) }}</strong><small>${{ number_format($runway['usd'], 2) }} · checked {{ $runway['checked_at']->timezone(config('app.timezone'))->format('H:i') }}</small>
+            @elseif($runway['status'] === 'not_configured')
+                <strong>Not configured</strong><small>Add the Runway API key in production</small>
+            @else
+                <strong>Unavailable</strong><small>Runway could not be reached; refresh later</small>
+            @endif
+        </div>
+        <div class="metric"><span>Runway reel capacity</span><strong>{{ $runway['product_reels'] === null ? '—' : number_format($runway['product_reels']) }}</strong><small>Product reels · custom: {{ $runway['custom_reels'] === null ? '—' : number_format($runway['custom_reels']) }}</small></div>
+        <div class="metric"><span>Business Reel credits</span><strong>{{ number_format($metrics['business_reel_credits']) }}</strong><small>Purchased and currently unused</small></div>
     </section>
     <section class="panel"><div class="toolbar"><h2>Registered businesses</h2><span class="env">{{ $environment }}</span><form class="search" method="get"><input name="search" value="{{ $search }}" placeholder="Business, owner, or email"><button>Search</button></form></div>
         <div class="cost-note">AI spend is an estimate from recorded chat-model token usage. It does not yet include embeddings, moderation, direct API tests, or unrecorded failed requests. No business is automatically blocked by this dashboard.</div>

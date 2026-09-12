@@ -7,6 +7,21 @@ use Illuminate\Support\Facades\Http;
 
 class RunwayClient
 {
+    /**
+     * @return array{creditBalance: int, tier: array<string, mixed>, usage: array<string, mixed>}
+     */
+    public function organization(): array
+    {
+        throw_if(blank(config('services.runway.key')), new \RuntimeException('Runway API is not configured.'));
+
+        return $this->request()
+            ->connectTimeout(3)
+            ->timeout(8)
+            ->get('/organization')
+            ->throw()
+            ->json();
+    }
+
     public function create(string $prompt, ?string $imageUrl, bool $custom): string
     {
         throw_if(blank(config('services.runway.key')), new \RuntimeException('Runway API is not configured.'));

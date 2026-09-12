@@ -36,6 +36,10 @@ return [
         'product_ratio' => env('RUNWAYML_PRODUCT_RATIO', '768:1280'),
         'custom_ratio' => env('RUNWAYML_CUSTOM_RATIO', '720:1280'),
         'duration' => max(5, min(10, (int) env('RUNWAYML_REEL_DURATION', 5))),
+        'credit_rates_per_second' => [
+            'gen4_turbo' => 5,
+            'gen4.5' => 12,
+        ],
     ],
 
     /*
