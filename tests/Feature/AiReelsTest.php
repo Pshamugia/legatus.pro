@@ -350,6 +350,54 @@ class AiReelsTest extends TestCase
             ->assertJsonPath('status', 'generating');
     }
 
+    public function test_completed_preview_does_not_block_the_next_custom_reel(): void
+    {
+        [$user, $agent, $organization] = $this->tenant('next-custom-reel');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-next-preview');
+        $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+        ]);
+
+        $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertOk()
+            ->assertSee('Generate another preview')
+            ->assertSee('data-can-generate="1"', false);
+    }
+
+    public function test_business_can_remove_an_unapproved_preview_without_a_credit_refund(): void
+    {
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('remove-custom-reel');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-remove-preview');
+        Storage::disk('local')->put('reels/remove-preview.mp4', 'video');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'video_path' => 'reels/remove-preview.mp4', 'generated_at' => now(),
+        ]);
+        app(ReelCreditService::class)->debit($organization, 1, 'custom-reel:'.$reel->id);
+
+        $this->actingAs($user)->delete(route('ai-reels.destroy', $reel))
+            ->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHas('reel_success', 'Reel preview removed. Nothing was published.');
+
+        $this->assertDatabaseMissing('ai_reels', ['id' => $reel->id]);
+        Storage::disk('local')->assertMissing('reels/remove-preview.mp4');
+        $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+    }
+
+    public function test_business_cannot_remove_another_tenants_preview(): void
+    {
+        [$user] = $this->tenant('remove-own-reel');
+        [, $otherAgent] = $this->tenant('remove-other-reel');
+        $reel = $otherAgent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+        ]);
+
+        $this->actingAs($user)->delete(route('ai-reels.destroy', $reel))->assertNotFound();
+        $this->assertDatabaseHas('ai_reels', ['id' => $reel->id]);
+    }
+
     public function test_custom_reel_status_is_tenant_scoped(): void
     {
         [$owner] = $this->tenant('status-owner');

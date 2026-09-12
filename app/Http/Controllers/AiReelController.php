@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -150,6 +151,23 @@ class AiReelController extends Controller
         $reel->update(['status' => 'ready', 'approved_at' => now(), 'scheduled_for' => now()]);
 
         return back()->with('reel_success', 'Reel approved. It is queued for Facebook and Instagram publishing.');
+    }
+
+    public function destroy(AiReel $reel, TenantContext $tenant, AiReelSourceImageStorage $images)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
+        abort_unless($reel->status === 'awaiting_approval' && ! $reel->approved_at, 422);
+
+        $videoPath = $reel->video_path;
+        $images->delete($reel);
+        if (filled($videoPath)) {
+            Storage::disk('local')->delete($videoPath);
+        }
+        $reel->delete();
+
+        return redirect()->route('ai-reels.index', ['tab' => 'custom'])
+            ->with('reel_success', 'Reel preview removed. Nothing was published.');
     }
 
     public function pause(AiReelSchedule $schedule, TenantContext $tenant)

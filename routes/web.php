@@ -206,6 +206,8 @@ Route::middleware('auth')->group(function () {
             ->middleware('throttle:60,1')->name('ai-reels.status');
         Route::post('/app/ai-reels/{reel}/approve', [AiReelController::class, 'approve'])
             ->middleware('throttle:20,1')->name('ai-reels.approve');
+        Route::delete('/app/ai-reels/{reel}', [AiReelController::class, 'destroy'])
+            ->middleware('throttle:20,1')->name('ai-reels.destroy');
         Route::get('/app/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
         Route::get('/app/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/app/settings', [SettingsController::class, 'update'])->name('settings.update');
