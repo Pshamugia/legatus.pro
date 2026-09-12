@@ -30,9 +30,9 @@ class AiReelPromptWriter
             ? 'Follow the business creative brief faithfully. It may describe a non-catalog campaign.'
             : 'Create a polished product showcase driven only by the verified product facts.';
         $tone = $reel->schedule?->ai_tone ?? 'creative';
-        $prompt = "Write a Runway prompt and a social Reel caption for {$reel->agent->business_name}. {$instruction}\n"
-            .'The video is vertical 9:16, five seconds, one coherent shot, tasteful commercial lighting, and no generated text, logos, prices, URLs, people, hands, or factual details that are not supplied. Preserve the reference product exactly; use camera/background motion rather than deforming it. '
-            ."The requested copy style is {$tone}. The caption must use the same language as the supplied brief or product. Do not invent claims. "
+        $prompt = "Write a Runway video prompt and a social Reel caption for {$reel->agent->business_name}. {$instruction}\n"
+            .'The Runway prompt must be in English, 35 to 75 words, affirmative, direct, and focused on visible subject, camera, lighting, and background motion in one coherent five-second vertical shot. Describe preservation positively: the reference product remains stable, recognizable, sharply focused, and visually unchanged. Keep the Runway prompt free of negative instructions, command-like wording, generated text, people, hands, and unsupported factual details. '
+            ."The requested copy style is {$tone}. Only the caption must use the same language as the supplied brief or product and must not invent claims. "
             .'Business brief: '.($reel->user_prompt ?: 'Automatic product Reel')
             ."\nOptional reference URL supplied by the business (context only; do not infer claims from it): ".($reel->reference_url ?: 'none')
             ."\nVerified facts: ".json_encode($facts, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -50,7 +50,7 @@ class AiReelPromptWriter
                     'schema' => [
                         'type' => 'object', 'additionalProperties' => false,
                         'properties' => [
-                            'prompt' => ['type' => 'string', 'maxLength' => 1800],
+                            'prompt' => ['type' => 'string', 'maxLength' => 900],
                             'caption' => ['type' => 'string', 'maxLength' => 1800],
                         ],
                         'required' => ['prompt', 'caption'],
@@ -69,6 +69,6 @@ class AiReelPromptWriter
             $caption .= "\n\n".$verifiedUrl;
         }
 
-        return ['prompt' => Str::limit(trim((string) $data['prompt']), 1800, ''), 'caption' => Str::limit($caption, 2200, '')];
+        return ['prompt' => Str::limit(trim((string) $data['prompt']), 900, ''), 'caption' => Str::limit($caption, 2200, '')];
     }
 }

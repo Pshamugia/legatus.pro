@@ -47,6 +47,8 @@ class AiReelsTest extends TestCase
             ->assertSee('Schedule Facebook')
             ->assertSee('Instagram Reels')
             ->assertSee('Reels your way')
+            ->assertSee('3,000 characters')
+            ->assertSee('Your description is too long. The maximum is 3,000 characters.')
             ->assertSee('data-price-id="pri_reel_credit"', false);
         $this->assertStringContainsString('https://cdn.paddle.com', (string) $response->headers->get('Content-Security-Policy'));
     }
@@ -215,6 +217,79 @@ class AiReelsTest extends TestCase
             ->assertHeader('Content-Type', 'image/png')
             ->assertHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         Queue::assertPushed(GenerateAiReel::class);
+    }
+
+    public function test_custom_reel_rejects_an_uploaded_image_that_is_too_small_for_runway(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('small-reel-upload');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-small-upload');
+
+        $this->actingAs($user)->from(route('ai-reels.index', ['tab' => 'custom']))
+            ->post(route('ai-reels.custom.store'), [
+                'prompt' => 'Create a cinematic product scene with slow camera movement and warm light.',
+                'source_image' => UploadedFile::fake()->image('small.jpg', 400, 400),
+                'providers' => ['facebook'],
+            ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHasErrors('source_image');
+
+        $this->assertDatabaseCount('ai_reels', 0);
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_custom_reel_rejects_a_brief_over_the_visible_character_limit(): void
+    {
+        Queue::fake();
+        [$user, $agent] = $this->tenant('long-reel-brief');
+        $this->connections($agent);
+
+        $this->actingAs($user)->from(route('ai-reels.index', ['tab' => 'custom']))
+            ->post(route('ai-reels.custom.store'), [
+                'prompt' => str_repeat('ა', 3001),
+                'providers' => ['facebook'],
+            ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHasErrors('prompt');
+
+        $this->assertDatabaseCount('ai_reels', 0);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_small_website_image_is_prepared_as_a_portrait_jpeg_before_runway(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [$user, $agent] = $this->tenant('prepared-reel-image');
+        $sourceFile = UploadedFile::fake()->image('website.jpg', 400, 400);
+        Http::fake([
+            'https://shop.example/small.jpg' => Http::response(file_get_contents($sourceFile->getRealPath()), 200, ['Content-Type' => 'image/jpeg']),
+        ]);
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'source_image_url' => 'https://shop.example/small.jpg',
+        ]);
+        $writer = \Mockery::mock(AiReelPromptWriter::class);
+        $writer->shouldReceive('write')->once()->andReturn([
+            'prompt' => 'The camera moves slowly toward the stable product in warm studio light.',
+            'caption' => 'Caption',
+        ]);
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('create')->once()->with(
+            \Mockery::type('string'),
+            \Mockery::on(fn ($url) => is_string($url) && str_contains($url, '/media/reel-inputs/')),
+            true,
+        )->andReturn('prepared-task');
+
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+
+        $reel->refresh();
+        $this->assertSame('prepared-task', $reel->runway_task_id);
+        $this->assertNotNull($reel->source_image_path);
+        $dimensions = getimagesizefromstring(Storage::disk('local')->get($reel->source_image_path));
+        $this->assertSame([720, 1280], [$dimensions[0], $dimensions[1]]);
+        Queue::assertPushed(PollAiReelGeneration::class);
     }
 
     public function test_custom_reel_page_and_status_endpoint_report_generation_progress(): void

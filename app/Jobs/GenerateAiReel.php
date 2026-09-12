@@ -46,7 +46,8 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $taskId = $runway->create($copy['prompt'], $reel->source_image_url, $reel->mode === 'custom');
+            $sourceImageUrl = $images->prepareForRunway($reel);
+            $taskId = $runway->create($copy['prompt'], $sourceImageUrl, $reel->mode === 'custom');
             $reel->update(['runway_task_id' => $taskId]);
             PollAiReelGeneration::dispatch($reel->id)->delay(now()->addSeconds(15))->onQueue('channels');
         } catch (\Throwable $exception) {
