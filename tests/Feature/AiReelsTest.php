@@ -198,7 +198,7 @@ class AiReelsTest extends TestCase
 
         $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
             ->assertOk()
-            ->assertSee('Your Reel is being generated…')
+            ->assertSee('Your Reel is being generated. You will review it before publishing.')
             ->assertSee(route('ai-reels.status', $reel), false)
             ->assertSee('reel-spinner');
 
