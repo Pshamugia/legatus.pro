@@ -200,6 +200,8 @@ Route::middleware('auth')->group(function () {
             ->name('ai-reels.schedules.pause');
         Route::post('/app/ai-reels/custom', [AiReelController::class, 'storeCustom'])
             ->middleware('throttle:10,1')->name('ai-reels.custom.store');
+        Route::get('/app/ai-reels/{reel}/status', [AiReelController::class, 'status'])
+            ->middleware('throttle:60,1')->name('ai-reels.status');
         Route::post('/app/ai-reels/{reel}/approve', [AiReelController::class, 'approve'])
             ->middleware('throttle:20,1')->name('ai-reels.approve');
         Route::get('/app/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');

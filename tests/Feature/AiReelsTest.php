@@ -187,6 +187,37 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseMissing('ai_reel_deliveries', ['ai_reel_id' => $reel->id, 'status' => 'scheduled']);
     }
 
+    public function test_custom_reel_page_and_status_endpoint_report_generation_progress(): void
+    {
+        [$user, $agent, $organization] = $this->tenant('custom-reel-progress');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-progress');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generating',
+        ]);
+
+        $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertOk()
+            ->assertSee('Your Reel is being generated…')
+            ->assertSee(route('ai-reels.status', $reel), false)
+            ->assertSee('reel-spinner');
+
+        $this->actingAs($user)->getJson(route('ai-reels.status', $reel))
+            ->assertOk()
+            ->assertJsonPath('status', 'generating');
+    }
+
+    public function test_custom_reel_status_is_tenant_scoped(): void
+    {
+        [$owner] = $this->tenant('status-owner');
+        [, $otherAgent] = $this->tenant('status-other');
+        $reel = $otherAgent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generating',
+        ]);
+
+        $this->actingAs($owner)->getJson(route('ai-reels.status', $reel))->assertNotFound();
+    }
+
     public function test_runway_success_is_downloaded_to_durable_storage_and_waits_for_custom_approval(): void
     {
         Queue::fake();
@@ -221,6 +252,27 @@ class AiReelsTest extends TestCase
 
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         $this->assertDatabaseCount('reel_credit_ledger', 3);
+        $this->assertStringStartsWith('Reel copy preparation failed:', $reel->fresh()->last_error);
+    }
+
+    public function test_runway_request_failure_is_identified_and_refunded(): void
+    {
+        [$user, $agent, $organization] = $this->tenant('runway-request-refund');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-runway-refund');
+        $reel = $agent->aiReels()->create(['mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued']);
+        app(ReelCreditService::class)->debit($organization, 1, 'reel-test:'.$reel->id);
+        $writer = \Mockery::mock(AiReelPromptWriter::class);
+        $writer->shouldReceive('write')->once()->andReturn(['prompt' => 'A valid video prompt', 'caption' => 'Caption']);
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('create')->once()->andThrow(new \RuntimeException('HTTP 500'));
+
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class));
+
+        $reel->refresh();
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        $this->assertSame('A valid video prompt', $reel->generated_prompt);
+        $this->assertSame('Caption', $reel->caption);
+        $this->assertSame('Runway generation request failed: HTTP 500', $reel->last_error);
     }
 
     private function tenant(string $slug): array

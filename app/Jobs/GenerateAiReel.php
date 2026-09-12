@@ -34,14 +34,32 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
             return;
         }
         $reel->update(['status' => 'generating', 'last_error' => null]);
+
         try {
             $copy = $writer->write($reel);
+            $reel->update(['generated_prompt' => $copy['prompt'], 'caption' => $copy['caption']]);
+        } catch (\Throwable $exception) {
+            $this->failGeneration($reel, $credits, 'Reel copy preparation failed', $exception);
+
+            return;
+        }
+
+        try {
             $taskId = $runway->create($copy['prompt'], $reel->source_image_url, $reel->mode === 'custom');
-            $reel->update(['runway_task_id' => $taskId, 'generated_prompt' => $copy['prompt'], 'caption' => $copy['caption']]);
+            $reel->update(['runway_task_id' => $taskId]);
             PollAiReelGeneration::dispatch($reel->id)->delay(now()->addSeconds(15))->onQueue('channels');
         } catch (\Throwable $exception) {
-            $reel->update(['status' => 'generation_failed', 'last_error' => Str::limit($exception->getMessage(), 1000)]);
-            $credits->refund($reel, 'generation_failed');
+            $this->failGeneration($reel, $credits, 'Runway generation request failed', $exception);
         }
+    }
+
+    private function failGeneration(AiReel $reel, ReelCreditService $credits, string $stage, \Throwable $exception): void
+    {
+        report($exception);
+        $reel->update([
+            'status' => 'generation_failed',
+            'last_error' => Str::limit($stage.': '.$exception->getMessage(), 1000),
+        ]);
+        $credits->refund($reel, 'generation_failed');
     }
 }

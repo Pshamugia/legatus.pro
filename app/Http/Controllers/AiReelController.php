@@ -8,6 +8,7 @@ use App\Models\AiReelSchedule;
 use App\Services\AiReelScheduler;
 use App\Services\ReelCreditService;
 use App\Services\TenantContext;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -102,6 +103,17 @@ class AiReelController extends Controller
         GenerateAiReel::dispatch($reel->id)->onQueue('channels')->afterCommit();
 
         return redirect()->route('ai-reels.index', ['tab' => 'custom'])->with('reel_success', 'Your Reel is being generated. You will review it before publishing.');
+    }
+
+    public function status(AiReel $reel, TenantContext $tenant): JsonResponse
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
+
+        return response()->json([
+            'status' => $reel->status,
+            'updated_at' => $reel->updated_at?->toIso8601String(),
+        ]);
     }
 
     public function approve(AiReel $reel, TenantContext $tenant)
