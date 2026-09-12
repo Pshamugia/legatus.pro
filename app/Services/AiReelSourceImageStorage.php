@@ -28,16 +28,24 @@ class AiReelSourceImageStorage
 
     public function prepareForRunway(AiReel $reel): ?string
     {
-        if (blank($reel->source_image_url) || filled($reel->source_image_path) || ! extension_loaded('gd')) {
+        if (blank($reel->source_image_url) || ! extension_loaded('gd')) {
             return $reel->source_image_url;
         }
 
         try {
-            $response = Http::connectTimeout(5)->timeout(15)->get($reel->source_image_url);
-            if (! $response->successful() || strlen($response->body()) > 12_000_000) {
-                return $reel->source_image_url;
+            if (filled($reel->source_image_path)) {
+                $originalPath = $reel->source_image_path;
+                $input = Storage::disk('local')->get($originalPath);
+            } else {
+                $originalPath = null;
+                $response = Http::connectTimeout(5)->timeout(15)->get($reel->source_image_url);
+                if (! $response->successful() || strlen($response->body()) > 12_000_000) {
+                    return $reel->source_image_url;
+                }
+                $input = $response->body();
             }
-            $source = @imagecreatefromstring($response->body());
+
+            $source = @imagecreatefromstring($input);
             if (! $source) {
                 return $reel->source_image_url;
             }
@@ -77,8 +85,11 @@ class AiReelSourceImageStorage
             Storage::disk('local')->put($path, $contents);
             $url = route('ai-reels.input', ['filename' => $filename]);
             $reel->update(['source_image_path' => $path, 'source_image_url' => $url]);
+            if ($originalPath && $originalPath !== $path) {
+                Storage::disk('local')->delete($originalPath);
+            }
 
-            return $url;
+            return 'data:image/jpeg;base64,'.base64_encode($contents);
         } catch (\Throwable) {
             return $reel->source_image_url;
         }

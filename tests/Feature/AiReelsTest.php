@@ -278,7 +278,7 @@ class AiReelsTest extends TestCase
         $runway = \Mockery::mock(RunwayClient::class);
         $runway->shouldReceive('create')->once()->with(
             \Mockery::type('string'),
-            \Mockery::on(fn ($url) => is_string($url) && str_contains($url, '/media/reel-inputs/')),
+            \Mockery::on(fn ($image) => is_string($image) && str_starts_with($image, 'data:image/jpeg;base64,')),
             true,
         )->andReturn('prepared-task');
 
@@ -290,6 +290,44 @@ class AiReelsTest extends TestCase
         $dimensions = getimagesizefromstring(Storage::disk('local')->get($reel->source_image_path));
         $this->assertSame([720, 1280], [$dimensions[0], $dimensions[1]]);
         Queue::assertPushed(PollAiReelGeneration::class);
+    }
+
+    public function test_uploaded_image_is_sent_directly_to_runway_without_a_public_fetch(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [, $agent] = $this->tenant('direct-reel-image');
+        $uploaded = UploadedFile::fake()->image('uploaded.png', 720, 1280);
+        $stored = app(AiReelSourceImageStorage::class)->store($uploaded);
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'source_image_path' => $stored['path'], 'source_image_url' => $stored['url'],
+        ]);
+
+        $input = app(AiReelSourceImageStorage::class)->prepareForRunway($reel);
+
+        $this->assertStringStartsWith('data:image/jpeg;base64,', $input);
+        $this->assertLessThan(5_000_000, strlen($input));
+        $reel->refresh();
+        Storage::disk('local')->assertExists($reel->source_image_path);
+        Storage::disk('local')->assertMissing($stored['path']);
+    }
+
+    public function test_runway_retries_a_transient_server_error(): void
+    {
+        config([
+            'services.runway.key' => 'runway-secret',
+            'services.runway.base_url' => 'https://api.dev.runwayml.com/v1',
+            'services.runway.api_version' => '2024-11-06',
+        ]);
+        Http::fakeSequence()
+            ->push(['error' => 'Internal server error'], 500)
+            ->push(['id' => 'recovered-task'], 200);
+
+        $taskId = app(RunwayClient::class)->create('A simple camera push-in.', null, true);
+
+        $this->assertSame('recovered-task', $taskId);
+        Http::assertSentCount(2);
     }
 
     public function test_custom_reel_page_and_status_endpoint_report_generation_progress(): void

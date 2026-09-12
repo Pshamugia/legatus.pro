@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 
 class RunwayClient
@@ -36,7 +38,12 @@ class RunwayClient
             $payload['promptImage'] = $imageUrl;
         }
 
-        $response = $this->request()->post('/image_to_video', $payload)->throw()->json();
+        $response = $this->request()
+            ->retry(3, 750, fn (\Throwable $exception): bool => $exception instanceof ConnectionException
+                || ($exception instanceof RequestException && $exception->response->serverError()))
+            ->post('/image_to_video', $payload)
+            ->throw()
+            ->json();
         $id = (string) ($response['id'] ?? '');
         throw_if($id === '', new \RuntimeException('Runway did not return a generation task ID.'));
 
