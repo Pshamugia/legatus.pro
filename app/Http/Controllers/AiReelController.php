@@ -27,7 +27,12 @@ class AiReelController extends Controller
         $languages = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')->pluck('taxonomy_label')->filter()->values();
         $connections = $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram'])->where('status', 'active')->get()->keyBy('provider');
         $schedules = $agent->aiReelSchedules()->withCount(['reels', 'reels as published_reels_count' => fn ($query) => $query->where('status', 'published')])->latest()->get();
-        $reels = $agent->aiReels()->with(['product', 'deliveries'])->latest()->limit(30)->get();
+        $reels = $agent->aiReels()
+            ->with(['product', 'deliveries'])
+            ->where('status', '!=', 'generation_failed')
+            ->latest()
+            ->limit(30)
+            ->get();
 
         return view('ai-reels', [
             'agent' => $agent, 'organization' => $organization, 'categories' => $categories,

@@ -218,6 +218,21 @@ class AiReelsTest extends TestCase
         $this->actingAs($owner)->getJson(route('ai-reels.status', $reel))->assertNotFound();
     }
 
+    public function test_failed_generations_are_not_left_in_the_reel_gallery(): void
+    {
+        [$user, $agent] = $this->tenant('failed-reel-gallery');
+        $this->connections($agent);
+        $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generation_failed',
+            'user_prompt' => 'This failed prompt must not remain visible in the gallery.',
+        ]);
+
+        $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertOk()
+            ->assertDontSee('This failed prompt must not remain visible in the gallery.')
+            ->assertSee('Your custom Reel previews will appear here.');
+    }
+
     public function test_runway_success_is_downloaded_to_durable_storage_and_waits_for_custom_approval(): void
     {
         Queue::fake();
