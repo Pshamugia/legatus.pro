@@ -34,25 +34,74 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
         if (! $reel || ! in_array($reel->status, ['queued', 'generation_failed'], true) || $reel->runway_task_id) {
             return;
         }
-        $reel->update(['status' => 'generating', 'last_error' => null]);
+        $claimed = AiReel::query()
+            ->whereKey($reel->id)
+            ->whereIn('status', ['queued', 'generation_failed'])
+            ->whereNull('runway_task_id')
+            ->update(['status' => 'generating', 'last_error' => null]);
+        if ($claimed !== 1) {
+            return;
+        }
+        $reel->refresh();
 
         try {
             $copy = $writer->write($reel);
             $reel->update(['generated_prompt' => $copy['prompt'], 'caption' => $copy['caption']]);
         } catch (\Throwable $exception) {
+            if ($this->finishRequestedCancellation($reel, $images)) {
+                return;
+            }
             $this->failGeneration($reel, $credits, $images, 'Reel copy preparation failed', $exception);
 
             return;
         }
 
         try {
+            if ($this->finishRequestedCancellation($reel, $images)) {
+                return;
+            }
             $sourceImageUrl = $images->prepareForRunway($reel);
             $taskId = $runway->create($copy['prompt'], $sourceImageUrl, $reel->mode === 'custom');
             $reel->update(['runway_task_id' => $taskId]);
+            $reel->refresh();
+            if ($reel->status === 'canceling') {
+                try {
+                    $runway->cancel($taskId);
+                } catch (\Throwable $exception) {
+                    report($exception);
+                    $reel->update([
+                        'status' => 'generating',
+                        'last_error' => Str::limit('Runway cancellation failed: '.$exception->getMessage(), 1000),
+                    ]);
+                    PollAiReelGeneration::dispatch($reel->id)->delay(now()->addSeconds(15))->onQueue('channels');
+
+                    return;
+                }
+                $reel->update(['status' => 'canceled']);
+                $images->delete($reel);
+
+                return;
+            }
             PollAiReelGeneration::dispatch($reel->id)->delay(now()->addSeconds(15))->onQueue('channels');
         } catch (\Throwable $exception) {
+            if ($this->finishRequestedCancellation($reel, $images)) {
+                return;
+            }
             $this->failGeneration($reel, $credits, $images, 'Runway generation request failed', $exception);
         }
+    }
+
+    private function finishRequestedCancellation(AiReel $reel, AiReelSourceImageStorage $images): bool
+    {
+        $reel->refresh();
+        if ($reel->status !== 'canceling' || filled($reel->runway_task_id)) {
+            return false;
+        }
+
+        $reel->update(['status' => 'canceled']);
+        $images->delete($reel);
+
+        return true;
     }
 
     private function failGeneration(AiReel $reel, ReelCreditService $credits, AiReelSourceImageStorage $images, string $stage, \Throwable $exception): void

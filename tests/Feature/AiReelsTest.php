@@ -127,6 +127,20 @@ class AiReelsTest extends TestCase
             && ! isset($request['promptImage']));
     }
 
+    public function test_runway_cancel_uses_the_task_delete_endpoint(): void
+    {
+        config()->set('services.runway.key', 'runway-test-key');
+        Http::fake([
+            'https://api.dev.runwayml.com/v1/tasks/task-to-stop' => Http::response(status: 204),
+        ]);
+
+        app(RunwayClient::class)->cancel('task-to-stop');
+
+        Http::assertSent(fn ($request) => $request->method() === 'DELETE'
+            && $request->url() === 'https://api.dev.runwayml.com/v1/tasks/task-to-stop'
+            && $request->hasHeader('X-Runway-Version', '2024-11-06'));
+    }
+
     public function test_schedule_reserves_one_credit_per_video_and_uses_one_video_for_both_channels(): void
     {
         Queue::fake();
@@ -342,12 +356,128 @@ class AiReelsTest extends TestCase
         $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
             ->assertOk()
             ->assertSee('Your Reel is being generated. You will review it before publishing.')
+            ->assertSee('Stop generation')
+            ->assertSee(route('ai-reels.cancel', $reel), false)
             ->assertSee(route('ai-reels.status', $reel), false)
             ->assertSee('reel-spinner');
 
         $this->actingAs($user)->getJson(route('ai-reels.status', $reel))
             ->assertOk()
             ->assertJsonPath('status', 'generating');
+    }
+
+    public function test_queued_custom_reel_can_be_stopped_and_its_credit_is_returned(): void
+    {
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('stop-queued-reel');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-stop-queued');
+        Storage::disk('local')->put('reel-inputs/stop-queued.jpg', 'image');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'source_image_path' => 'reel-inputs/stop-queued.jpg',
+        ]);
+        app(ReelCreditService::class)->debit($organization, 1, 'custom-reel:'.$reel->id);
+
+        $this->actingAs($user)->post(route('ai-reels.cancel', $reel))
+            ->assertRedirect()
+            ->assertSessionHas('reel_success', 'Reel generation stopped. Nothing was published.');
+
+        $reel->refresh();
+        $this->assertSame('canceled', $reel->status);
+        $this->assertNotNull($reel->credit_refunded_at);
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        Storage::disk('local')->assertMissing('reel-inputs/stop-queued.jpg');
+    }
+
+    public function test_running_custom_reel_is_canceled_at_runway_without_returning_used_credit(): void
+    {
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('stop-running-reel');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-stop-running');
+        Storage::disk('local')->put('reel-inputs/stop-running.jpg', 'image');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generating',
+            'runway_task_id' => 'active-task', 'source_image_path' => 'reel-inputs/stop-running.jpg',
+        ]);
+        app(ReelCreditService::class)->debit($organization, 1, 'custom-reel:'.$reel->id);
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('cancel')->once()->with('active-task');
+        $this->app->instance(RunwayClient::class, $runway);
+
+        $this->actingAs($user)->post(route('ai-reels.cancel', $reel))
+            ->assertRedirect()
+            ->assertSessionHas('reel_success', 'Reel generation stopped. Nothing was published.');
+
+        $reel->refresh();
+        $this->assertSame('canceled', $reel->status);
+        $this->assertNull($reel->credit_refunded_at);
+        $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+        Storage::disk('local')->assertMissing('reel-inputs/stop-running.jpg');
+    }
+
+    public function test_failed_runway_cancellation_keeps_the_reel_tracked_and_does_not_return_credit(): void
+    {
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('failed-stop-running-reel');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-failed-stop-running');
+        Storage::disk('local')->put('reel-inputs/failed-stop-running.jpg', 'image');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generating',
+            'runway_task_id' => 'task-not-stopped', 'source_image_path' => 'reel-inputs/failed-stop-running.jpg',
+        ]);
+        app(ReelCreditService::class)->debit($organization, 1, 'custom-reel:'.$reel->id);
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('cancel')->once()->andThrow(new \RuntimeException('Runway unavailable'));
+        $this->app->instance(RunwayClient::class, $runway);
+
+        $this->actingAs($user)->post(route('ai-reels.cancel', $reel))
+            ->assertRedirect()
+            ->assertSessionHasErrors('reel');
+
+        $reel->refresh();
+        $this->assertSame('generating', $reel->status);
+        $this->assertStringStartsWith('Runway cancellation failed:', $reel->last_error);
+        $this->assertNull($reel->credit_refunded_at);
+        $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+        Storage::disk('local')->assertExists('reel-inputs/failed-stop-running.jpg');
+    }
+
+    public function test_business_cannot_stop_another_tenants_reel(): void
+    {
+        [$user] = $this->tenant('stop-own-reel');
+        [, $otherAgent] = $this->tenant('stop-other-reel');
+        $reel = $otherAgent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+        ]);
+
+        $this->actingAs($user)->post(route('ai-reels.cancel', $reel))->assertNotFound();
+        $this->assertSame('queued', $reel->fresh()->status);
+    }
+
+    public function test_generation_job_honors_a_stop_requested_while_the_prompt_is_prepared(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [, $agent] = $this->tenant('stop-during-prompt');
+        Storage::disk('local')->put('reel-inputs/stop-during-prompt.jpg', 'image');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'source_image_path' => 'reel-inputs/stop-during-prompt.jpg',
+        ]);
+        $writer = \Mockery::mock(AiReelPromptWriter::class);
+        $writer->shouldReceive('write')->once()->andReturnUsing(function () use ($reel): array {
+            $reel->update(['status' => 'canceling']);
+
+            return ['prompt' => 'A valid video prompt', 'caption' => 'Caption'];
+        });
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldNotReceive('create');
+
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+
+        $this->assertSame('canceled', $reel->fresh()->status);
+        Storage::disk('local')->assertMissing('reel-inputs/stop-during-prompt.jpg');
+        Queue::assertNothingPushed();
     }
 
     public function test_completed_preview_does_not_block_the_next_custom_reel(): void

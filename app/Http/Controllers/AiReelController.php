@@ -8,6 +8,7 @@ use App\Models\AiReelSchedule;
 use App\Services\AiReelScheduler;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
+use App\Services\RunwayClient;
 use App\Services\TenantContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,7 +33,7 @@ class AiReelController extends Controller
         $schedules = $agent->aiReelSchedules()->withCount(['reels', 'reels as published_reels_count' => fn ($query) => $query->where('status', 'published')])->latest()->get();
         $reels = $agent->aiReels()
             ->with(['product', 'deliveries'])
-            ->where('status', '!=', 'generation_failed')
+            ->whereNotIn('status', ['generation_failed', 'canceled'])
             ->latest()
             ->limit(30)
             ->get();
@@ -151,6 +152,48 @@ class AiReelController extends Controller
         $reel->update(['status' => 'ready', 'approved_at' => now(), 'scheduled_for' => now()]);
 
         return back()->with('reel_success', 'Reel approved. It is queued for Facebook and Instagram publishing.');
+    }
+
+    public function cancel(AiReel $reel, TenantContext $tenant, RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
+        $previousStatus = null;
+        foreach (range(1, 3) as $_) {
+            $reel->refresh();
+            abort_unless(in_array($reel->status, ['queued', 'generating'], true), 422);
+            $previousStatus = $reel->status;
+            $changed = AiReel::query()
+                ->whereKey($reel->id)
+                ->where('status', $previousStatus)
+                ->update(['status' => 'canceling', 'last_error' => null]);
+            if ($changed === 1) {
+                break;
+            }
+            $previousStatus = null;
+        }
+        abort_if($previousStatus === null, 409, 'The Reel status changed. Please try again.');
+        $reel->refresh();
+        if ($reel->runway_task_id) {
+            try {
+                $runway->cancel($reel->runway_task_id);
+            } catch (\Throwable $exception) {
+                report($exception);
+                $reel->update(['status' => 'generating', 'last_error' => Str::limit('Runway cancellation failed: '.$exception->getMessage(), 1000)]);
+
+                return back()->withErrors(['reel' => 'The Reel could not be stopped yet. Please try again.']);
+            }
+        } elseif ($previousStatus === 'generating') {
+            return back()->with('reel_success', 'Cancellation requested. The Reel is stopping.');
+        }
+
+        $reel->update(['status' => 'canceled']);
+        $images->delete($reel);
+        if ($previousStatus === 'queued') {
+            $credits->refund($reel, 'canceled_before_generation');
+        }
+
+        return back()->with('reel_success', 'Reel generation stopped. Nothing was published.');
     }
 
     public function destroy(AiReel $reel, TenantContext $tenant, AiReelSourceImageStorage $images)

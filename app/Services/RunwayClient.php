@@ -55,6 +55,11 @@ class RunwayClient
         return $this->request()->get('/tasks/'.$taskId)->throw()->json();
     }
 
+    public function cancel(string $taskId): void
+    {
+        $this->request()->delete('/tasks/'.$taskId)->throw();
+    }
+
     public function download(string $url): string
     {
         $response = Http::connectTimeout(10)->timeout(60)->get($url)->throw();
