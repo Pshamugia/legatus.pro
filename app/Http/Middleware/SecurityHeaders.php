@@ -26,7 +26,7 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-        $response->headers->set('Cross-Origin-Resource-Policy', ($widget || $request->routeIs('ai-reels.media')) ? 'cross-origin' : 'same-origin');
+        $response->headers->set('Cross-Origin-Resource-Policy', ($widget || $request->routeIs('ai-reels.media', 'ai-reels.input')) ? 'cross-origin' : 'same-origin');
 
         if (! $widget) {
             $response->headers->set('X-Frame-Options', 'DENY');

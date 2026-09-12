@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\AiReel;
 use App\Services\AiReelPromptWriter;
+use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
 use App\Services\RunwayClient;
 use Illuminate\Bus\Queueable;
@@ -27,7 +28,7 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
         return (string) $this->reelId;
     }
 
-    public function handle(AiReelPromptWriter $writer, RunwayClient $runway, ReelCreditService $credits): void
+    public function handle(AiReelPromptWriter $writer, RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images): void
     {
         $reel = AiReel::query()->with(['agent.organization', 'product'])->find($this->reelId);
         if (! $reel || ! in_array($reel->status, ['queued', 'generation_failed'], true) || $reel->runway_task_id) {
@@ -39,7 +40,7 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
             $copy = $writer->write($reel);
             $reel->update(['generated_prompt' => $copy['prompt'], 'caption' => $copy['caption']]);
         } catch (\Throwable $exception) {
-            $this->failGeneration($reel, $credits, 'Reel copy preparation failed', $exception);
+            $this->failGeneration($reel, $credits, $images, 'Reel copy preparation failed', $exception);
 
             return;
         }
@@ -49,11 +50,11 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
             $reel->update(['runway_task_id' => $taskId]);
             PollAiReelGeneration::dispatch($reel->id)->delay(now()->addSeconds(15))->onQueue('channels');
         } catch (\Throwable $exception) {
-            $this->failGeneration($reel, $credits, 'Runway generation request failed', $exception);
+            $this->failGeneration($reel, $credits, $images, 'Runway generation request failed', $exception);
         }
     }
 
-    private function failGeneration(AiReel $reel, ReelCreditService $credits, string $stage, \Throwable $exception): void
+    private function failGeneration(AiReel $reel, ReelCreditService $credits, AiReelSourceImageStorage $images, string $stage, \Throwable $exception): void
     {
         report($exception);
         $reel->update([
@@ -61,5 +62,6 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
             'last_error' => Str::limit($stage.': '.$exception->getMessage(), 1000),
         ]);
         $credits->refund($reel, 'generation_failed');
+        $images->delete($reel);
     }
 }

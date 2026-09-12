@@ -8,9 +8,11 @@ use App\Models\AiReel;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\AiReelPromptWriter;
+use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
 use App\Services\RunwayClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -187,6 +189,34 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseMissing('ai_reel_deliveries', ['ai_reel_id' => $reel->id, 'status' => 'scheduled']);
     }
 
+    public function test_custom_reel_can_use_a_private_uploaded_image_instead_of_the_website_image(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('custom-reel-upload');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Upload Product'));
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-upload');
+
+        $this->actingAs($user)->post(route('ai-reels.custom.store'), [
+            'prompt' => 'Create a cinematic product scene with slow camera movement and warm light.',
+            'reference_url' => data_get($product->metadata, 'product_url'),
+            'source_image' => UploadedFile::fake()->image('my-product.png', 720, 1280),
+            'providers' => ['facebook'],
+        ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']));
+
+        $reel = AiReel::firstOrFail();
+        $this->assertSame($product->id, $reel->product_id);
+        $this->assertNotNull($reel->source_image_path);
+        $this->assertNotSame($product->publicImageUrl(), $reel->source_image_url);
+        Storage::disk('local')->assertExists($reel->source_image_path);
+        $this->get($reel->source_image_url)
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
+            ->assertHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        Queue::assertPushed(GenerateAiReel::class);
+    }
+
     public function test_custom_reel_page_and_status_endpoint_report_generation_progress(): void
     {
         [$user, $agent, $organization] = $this->tenant('custom-reel-progress');
@@ -243,7 +273,7 @@ class AiReelsTest extends TestCase
         $runway->shouldReceive('task')->once()->with('task-1')->andReturn(['status' => 'SUCCEEDED', 'output' => ['https://runway.test/video.mp4']]);
         $runway->shouldReceive('download')->once()->andReturn('video-contents');
 
-        (new PollAiReelGeneration($reel->id))->handle($runway, app(ReelCreditService::class));
+        (new PollAiReelGeneration($reel->id))->handle($runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
 
         $reel->refresh();
         $this->assertSame('awaiting_approval', $reel->status);
@@ -262,7 +292,7 @@ class AiReelsTest extends TestCase
         $runway = \Mockery::mock(RunwayClient::class);
 
         $job = new GenerateAiReel($reel->id);
-        $job->handle($writer, $runway, app(ReelCreditService::class));
+        $job->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
         app(ReelCreditService::class)->refund($reel->fresh(), 'duplicate-attempt');
 
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
@@ -274,20 +304,26 @@ class AiReelsTest extends TestCase
     {
         [$user, $agent, $organization] = $this->tenant('runway-request-refund');
         app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-runway-refund');
-        $reel = $agent->aiReels()->create(['mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued']);
+        Storage::fake('local');
+        Storage::disk('local')->put('reel-inputs/test.jpg', 'image');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'source_image_path' => 'reel-inputs/test.jpg',
+        ]);
         app(ReelCreditService::class)->debit($organization, 1, 'reel-test:'.$reel->id);
         $writer = \Mockery::mock(AiReelPromptWriter::class);
         $writer->shouldReceive('write')->once()->andReturn(['prompt' => 'A valid video prompt', 'caption' => 'Caption']);
         $runway = \Mockery::mock(RunwayClient::class);
         $runway->shouldReceive('create')->once()->andThrow(new \RuntimeException('HTTP 500'));
 
-        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class));
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
 
         $reel->refresh();
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         $this->assertSame('A valid video prompt', $reel->generated_prompt);
         $this->assertSame('Caption', $reel->caption);
         $this->assertSame('Runway generation request failed: HTTP 500', $reel->last_error);
+        Storage::disk('local')->assertMissing('reel-inputs/test.jpg');
     }
 
     private function tenant(string $slug): array

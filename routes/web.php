@@ -43,6 +43,8 @@ Route::get('/media/social/{filename}', [SocialMediaImageController::class, 'show
     ->where('filename', '[a-f0-9]{64}\\.jpg')->name('social-media.image');
 Route::get('/media/reels/{filename}', [AiReelMediaController::class, 'show'])
     ->where('filename', '[a-f0-9]{64}\\.mp4')->name('ai-reels.media');
+Route::get('/media/reel-inputs/{filename}', [AiReelMediaController::class, 'input'])
+    ->where('filename', '[a-f0-9]{64}\\.(?:jpg|png|webp)')->name('ai-reels.input');
 Route::withoutMiddleware([
     EncryptCookies::class,
     AddQueuedCookiesToResponse::class,

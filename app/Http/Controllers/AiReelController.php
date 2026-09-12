@@ -6,6 +6,7 @@ use App\Jobs\GenerateAiReel;
 use App\Models\AiReel;
 use App\Models\AiReelSchedule;
 use App\Services\AiReelScheduler;
+use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
 use App\Services\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class AiReelController extends Controller
 {
@@ -77,11 +79,12 @@ class AiReelController extends Controller
         return redirect()->route('ai-reels.index')->with('reel_success', 'Paid Reel schedule created. Video generation has started.');
     }
 
-    public function storeCustom(Request $request, TenantContext $tenant, ReelCreditService $credits)
+    public function storeCustom(Request $request, TenantContext $tenant, ReelCreditService $credits, AiReelSourceImageStorage $images)
     {
         $tenant->authorize(['owner', 'admin']);
         $data = $request->validate([
             'prompt' => ['required', 'string', 'min:20', 'max:3000'], 'reference_url' => ['nullable', 'url', 'max:2000'],
+            'source_image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:min_width=640,min_height=640,max_width=8000,max_height=8000'],
             'providers' => ['required', 'array', 'min:1'], 'providers.*' => [Rule::in(['facebook', 'instagram'])],
         ]);
         $agent = $tenant->agent();
@@ -92,19 +95,37 @@ class AiReelController extends Controller
         $product = filled($data['reference_url'] ?? null)
             ? $agent->customerProducts()->where('is_active', true)->get()->first(fn ($candidate) => $candidate->matchesPublicProductUrl($data['reference_url']))
             : null;
-        $reel = DB::transaction(function () use ($agent, $data, $product, $credits): AiReel {
-            $reel = $agent->aiReels()->create([
-                'product_id' => $product?->id, 'mode' => 'custom', 'providers' => array_values($data['providers']),
-                'user_prompt' => $data['prompt'], 'reference_url' => $data['reference_url'] ?? null,
-                'source_image_url' => $product?->publicImageUrl(), 'status' => 'queued',
-            ]);
-            $credits->debit($agent->organization, 1, 'custom-reel:'.$reel->id, ['reel_id' => $reel->id]);
-            foreach ($data['providers'] as $provider) {
-                $reel->deliveries()->create(['provider' => $provider, 'status' => 'scheduled']);
+        $uploadedImage = $request->file('source_image');
+        if ($uploadedImage) {
+            $dimensions = @getimagesize($uploadedImage->getRealPath());
+            $ratio = $dimensions ? $dimensions[0] / max(1, $dimensions[1]) : 0;
+            if ($ratio < 0.5 || $ratio > 2) {
+                throw ValidationException::withMessages([
+                    'source_image' => 'The Reel image width-to-height ratio must be between 1:2 and 2:1.',
+                ]);
             }
+        }
+        $storedImage = $uploadedImage ? $images->store($uploadedImage) : null;
+        try {
+            $reel = DB::transaction(function () use ($agent, $data, $product, $credits, $storedImage): AiReel {
+                $reel = $agent->aiReels()->create([
+                    'product_id' => $product?->id, 'mode' => 'custom', 'providers' => array_values($data['providers']),
+                    'user_prompt' => $data['prompt'], 'reference_url' => $data['reference_url'] ?? null,
+                    'source_image_url' => $storedImage['url'] ?? $product?->publicImageUrl(),
+                    'source_image_path' => $storedImage['path'] ?? null, 'status' => 'queued',
+                ]);
+                $credits->debit($agent->organization, 1, 'custom-reel:'.$reel->id, ['reel_id' => $reel->id]);
+                foreach ($data['providers'] as $provider) {
+                    $reel->deliveries()->create(['provider' => $provider, 'status' => 'scheduled']);
+                }
 
-            return $reel;
-        }, 3);
+                return $reel;
+            }, 3);
+        } catch (\Throwable $exception) {
+            $images->deletePath($storedImage['path'] ?? null);
+
+            throw $exception;
+        }
         GenerateAiReel::dispatch($reel->id)->onQueue('channels')->afterCommit();
 
         return redirect()->route('ai-reels.index', ['tab' => 'custom'])->with('reel_success', 'Your Reel is being generated. You will review it before publishing.');
