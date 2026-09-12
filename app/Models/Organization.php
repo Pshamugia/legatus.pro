@@ -32,6 +32,16 @@ class Organization extends Model
         return $this->hasMany(BillingAccessGrant::class);
     }
 
+    public function reelCreditLedger(): HasMany
+    {
+        return $this->hasMany(ReelCreditLedger::class);
+    }
+
+    public function reelCreditBalance(): int
+    {
+        return (int) $this->reelCreditLedger()->sum('amount');
+    }
+
     public function currentBillingAccessGrant(): ?BillingAccessGrant
     {
         return $this->billingAccessGrants()->active()->latest()->first();

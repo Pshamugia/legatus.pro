@@ -56,6 +56,21 @@ OPENAI_MAX_OUTPUT_TOKENS=900
 OPENAI_REASONING_EFFORT=none
 OPENAI_TOTAL_TIMEOUT=45
 
+PADDLE_CLIENT_TOKEN=use_a_secret_manager
+PADDLE_API_KEY=use_a_secret_manager
+PADDLE_WEBHOOK_SECRET=use_a_secret_manager
+PADDLE_PRICE_REEL_CREDIT=pri_one_time_reel_credit
+PADDLE_REEL_MINIMUM_PURCHASE=10
+
+RUNWAYML_API_SECRET=use_a_secret_manager
+RUNWAYML_BASE_URL=https://api.dev.runwayml.com/v1
+RUNWAYML_API_VERSION=2024-11-06
+RUNWAYML_PRODUCT_MODEL=gen4_turbo
+RUNWAYML_CUSTOM_MODEL=gen4.5
+RUNWAYML_PRODUCT_RATIO=768:1280
+RUNWAYML_CUSTOM_RATIO=720:1280
+RUNWAYML_REEL_DURATION=5
+
 META_APP_ID=use_a_secret_manager
 META_APP_SECRET=use_a_secret_manager
 META_WEBHOOK_VERIFY_TOKEN=use_a_long_random_secret
@@ -140,6 +155,8 @@ Restart every queue worker after switching releases so it loads the new code and
 
 Facebook Page and Instagram Business Story publishing uses the same approved publishing permissions as feed publishing. Each successful Meta feed post queues a separate photo-only Story delivery. Instagram counts the feed item and Story as separate API-published media objects, so monitor the account's rolling content-publishing allowance. Story delivery requires the continuously running `channels` worker; run migrations before restarting it because Story state is persisted on `social_media_posts`.
 
+AI Reels also require the continuously running `channels` worker and once-per-minute scheduler. Configure a Paddle one-time unit price of USD 1.00 and put that exact price ID in `PADDLE_PRICE_REEL_CREDIT`; credit purchases are granted only from a verified `transaction.completed` webhook. Runway output is copied immediately into persistent Laravel storage because provider output URLs are temporary. Ensure the web process can retain and serve `storage/app/private/reels` through the application's public media route.
+
 Point the web server to `/path/to/legatus/public`, not the repository root. Ensure the web process can write only to Laravel’s required `storage/` and `bootstrap/cache/` directories.
 
 ## 4. Scheduler
@@ -154,6 +171,7 @@ Confirm these baseline scheduled commands run under the same release and environ
 
 - `legatus:expire-reservations` — every minute;
 - `legatus:dispatch-social-posts` — every minute;
+- `legatus:dispatch-ai-reels` — every minute, recovering queued generations and publishing approved/due Reels;
 - `legatus:resume-knowledge` — every five minutes, continuing incomplete catalog crawls from their saved cursor;
 - `legatus:purge-expired-data` — daily at 03:45 application time.
 
@@ -213,6 +231,9 @@ The live commands consume OpenAI API usage. Inspect the model, tools, intent, an
 - [ ] Facebook OAuth connects only the explicitly selected Page, a real Page message creates exactly one conversation/reply, and a human Business Suite echo pauses AI for that thread.
 - [ ] Instagram OAuth connects only the explicitly selected Professional account and a real DM receives one UTF-8-safe reply within Meta's permitted messaging window.
 - [ ] A real Facebook Page photo post and Instagram Business photo post each create exactly one photo-only Story; Story failure remains visible without changing the successful feed post, and an unknown delivery is not retried into a duplicate.
+- [ ] A 10-credit Paddle purchase grants exactly 10 Reel credits after the signed webhook, one generated video debits one credit even when both Meta destinations are selected, and a technical generation failure refunds exactly one credit.
+- [ ] Runway creates a 5-second portrait MP4 from both a synchronized product image and a text-only custom brief; the file remains playable after the temporary Runway URL expires.
+- [ ] A scheduled Reel publishes once to each selected destination, while a custom Reel cannot publish before the business clicks Approve.
 - [ ] Duplicate Meta webhooks and outbox recovery do not duplicate OpenAI runs or outbound replies; queued, sent, failed, and unknown delivery states are visible to operators.
 - [ ] A persistent queue worker and the once-per-minute scheduler are both monitored; `failed_jobs` is empty before the demo.
 - [ ] `/privacy`, `/terms`, and `/data-deletion` return 200 over HTTPS, `LEGATUS_PRIVACY_EMAIL` is monitored, and those exact URLs are configured in the Meta app.

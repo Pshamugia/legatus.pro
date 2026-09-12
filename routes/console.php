@@ -17,6 +17,7 @@ Schedule::command('legatus:expire-reservations')->everyMinute()->withoutOverlapp
 Schedule::command('legatus:sync-commerce')->hourly()->withoutOverlapping();
 Schedule::command('legatus:dispatch-channel-outbox')->everyMinute()->withoutOverlapping();
 Schedule::command('legatus:dispatch-social-posts')->everyMinute()->withoutOverlapping(10);
+Schedule::command('legatus:dispatch-ai-reels')->everyMinute()->withoutOverlapping(10);
 // Webhooks remain the real-time path. This lightweight reconciliation closes
 // delivery gaps caused by Meta development mode, routing changes, or outages.
 Schedule::command('legatus:reconcile-meta-inbox')->everyMinute()->withoutOverlapping();

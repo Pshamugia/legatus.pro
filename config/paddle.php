@@ -17,4 +17,6 @@ return [
         'six_months' => env('PADDLE_PRICE_SOCIAL_SIX_MONTHS'),
         'yearly' => env('PADDLE_PRICE_SOCIAL_YEARLY'),
     ],
+    'reel_credit_price' => env('PADDLE_PRICE_REEL_CREDIT'),
+    'reel_minimum_purchase' => max(10, (int) env('PADDLE_REEL_MINIMUM_PURCHASE', 10)),
 ];

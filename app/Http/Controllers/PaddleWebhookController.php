@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Organization;
 use App\Models\PaddleSubscription;
 use App\Services\PaddleWebhookVerifier;
+use App\Services\ReelCreditService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,7 @@ use Throwable;
 
 class PaddleWebhookController extends Controller
 {
-    public function __invoke(Request $request, PaddleWebhookVerifier $verifier): JsonResponse
+    public function __invoke(Request $request, PaddleWebhookVerifier $verifier, ReelCreditService $credits): JsonResponse
     {
         $rawBody = $request->getContent();
         $signature = (string) $request->header('Paddle-Signature', '');
@@ -26,7 +27,7 @@ class PaddleWebhookController extends Controller
         try {
             $verifier->verify($rawBody, $signature);
             $event = json_decode($rawBody, true, flags: JSON_THROW_ON_ERROR);
-            $this->process($event);
+            $this->process($event, $credits);
 
             return response()->json(['received' => true]);
         } catch (Throwable $exception) {
@@ -36,7 +37,7 @@ class PaddleWebhookController extends Controller
         }
     }
 
-    private function process(array $event): void
+    private function process(array $event, ReelCreditService $credits): void
     {
         $eventId = (string) ($event['event_id'] ?? '');
         $eventType = (string) ($event['event_type'] ?? '');
@@ -44,13 +45,16 @@ class PaddleWebhookController extends Controller
             throw new \RuntimeException('Malformed Paddle event.');
         }
 
-        DB::transaction(function () use ($event, $eventId, $eventType): void {
+        DB::transaction(function () use ($event, $eventId, $eventType, $credits): void {
             if (DB::table('paddle_webhook_events')->where('event_id', $eventId)->exists()) {
                 return;
             }
 
             if (in_array($eventType, ['subscription.created', 'subscription.updated', 'subscription.activated', 'subscription.canceled', 'subscription.paused', 'subscription.resumed'], true)) {
                 $this->syncSubscription($event);
+            }
+            if ($eventType === 'transaction.completed') {
+                $this->grantReelCredits($event, $credits);
             }
 
             DB::table('paddle_webhook_events')->insert([
@@ -60,6 +64,35 @@ class PaddleWebhookController extends Controller
                 'processed_at' => now(),
             ]);
         }, 3);
+    }
+
+    private function grantReelCredits(array $event, ReelCreditService $credits): void
+    {
+        $data = $event['data'] ?? [];
+        $transactionId = (string) ($data['id'] ?? '');
+        $priceId = (string) config('paddle.reel_credit_price');
+        $billingReference = data_get($data, 'custom_data.billing_reference');
+        $purchaseKind = data_get($data, 'custom_data.purchase_kind');
+        if ($transactionId === '' || $priceId === '' || $purchaseKind !== 'reel_credits' || ! is_string($billingReference) || $billingReference === '') {
+            return;
+        }
+        $quantity = collect((array) ($data['items'] ?? []))->sum(function ($item) use ($priceId): int {
+            $itemPriceId = (string) data_get($item, 'price.id', data_get($item, 'price_id', ''));
+
+            return hash_equals($priceId, $itemPriceId) ? max(0, (int) data_get($item, 'quantity', 0)) : 0;
+        });
+        if ($quantity < (int) config('paddle.reel_minimum_purchase', 10)) {
+            return;
+        }
+        $organizationId = filter_var(Crypt::decryptString($billingReference), FILTER_VALIDATE_INT);
+        $organization = $organizationId ? Organization::query()->find($organizationId) : null;
+        if (! $organization) {
+            throw new \RuntimeException('Paddle Reel purchase has no valid organization mapping.');
+        }
+        $credits->grantPurchase($organization, $quantity, $transactionId, [
+            'paddle_event_id' => $event['event_id'] ?? null,
+            'paddle_customer_id' => $data['customer_id'] ?? null,
+        ]);
     }
 
     private function syncSubscription(array $event): void

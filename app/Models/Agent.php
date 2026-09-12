@@ -121,6 +121,16 @@ class Agent extends Model
         return $this->hasMany(SocialMediaTemplate::class);
     }
 
+    public function aiReelSchedules(): HasMany
+    {
+        return $this->hasMany(AiReelSchedule::class);
+    }
+
+    public function aiReels(): HasMany
+    {
+        return $this->hasMany(AiReel::class);
+    }
+
     public function knowledgeSources(): HasMany
     {
         return $this->hasMany(KnowledgeSource::class);

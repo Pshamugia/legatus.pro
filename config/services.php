@@ -27,6 +27,17 @@ return [
         'moderation_timeout' => (int) env('OPENAI_MODERATION_TIMEOUT', 7),
     ],
 
+    'runway' => [
+        'key' => env('RUNWAYML_API_SECRET'),
+        'base_url' => env('RUNWAYML_BASE_URL', 'https://api.dev.runwayml.com/v1'),
+        'api_version' => env('RUNWAYML_API_VERSION', '2024-11-06'),
+        'product_model' => env('RUNWAYML_PRODUCT_MODEL', 'gen4_turbo'),
+        'custom_model' => env('RUNWAYML_CUSTOM_MODEL', 'gen4.5'),
+        'product_ratio' => env('RUNWAYML_PRODUCT_RATIO', '768:1280'),
+        'custom_ratio' => env('RUNWAYML_CUSTOM_RATIO', '720:1280'),
+        'duration' => max(5, min(10, (int) env('RUNWAYML_REEL_DURATION', 5))),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

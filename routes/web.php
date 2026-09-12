@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\AgentController;
+use App\Http\Controllers\AiReelController;
+use App\Http\Controllers\AiReelMediaController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
@@ -19,9 +21,9 @@ use App\Http\Controllers\SocialMediaImageController;
 use App\Http\Controllers\SocialMediaTemplateController;
 use App\Http\Controllers\SuperAdminController;
 use App\Http\Controllers\UiLocaleController;
-use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\WhatsAppConnectionController;
 use App\Http\Controllers\WhatsAppWebhookController;
+use App\Http\Controllers\WidgetController;
 use App\Http\Controllers\WorkspaceController;
 use App\Http\Middleware\RequireSuperAdmin;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -39,6 +41,8 @@ Route::view('/refund-policy', 'refund-policy')->name('refund-policy');
 Route::view('/data-deletion', 'data-deletion')->name('data-deletion');
 Route::get('/media/social/{filename}', [SocialMediaImageController::class, 'show'])
     ->where('filename', '[a-f0-9]{64}\\.jpg')->name('social-media.image');
+Route::get('/media/reels/{filename}', [AiReelMediaController::class, 'show'])
+    ->where('filename', '[a-f0-9]{64}\\.mp4')->name('ai-reels.media');
 Route::withoutMiddleware([
     EncryptCookies::class,
     AddQueuedCookiesToResponse::class,
@@ -189,6 +193,15 @@ Route::middleware('auth')->group(function () {
             ->name('social-media.pause');
         Route::delete('/app/social-media/schedules/{schedule}', [SocialMediaController::class, 'destroy'])
             ->name('social-media.destroy');
+        Route::get('/app/ai-reels', [AiReelController::class, 'index'])->name('ai-reels.index');
+        Route::post('/app/ai-reels/schedules', [AiReelController::class, 'storeSchedule'])
+            ->middleware('throttle:10,1')->name('ai-reels.schedules.store');
+        Route::patch('/app/ai-reels/schedules/{schedule}/pause', [AiReelController::class, 'pause'])
+            ->name('ai-reels.schedules.pause');
+        Route::post('/app/ai-reels/custom', [AiReelController::class, 'storeCustom'])
+            ->middleware('throttle:10,1')->name('ai-reels.custom.store');
+        Route::post('/app/ai-reels/{reel}/approve', [AiReelController::class, 'approve'])
+            ->middleware('throttle:20,1')->name('ai-reels.approve');
         Route::get('/app/analytics', [AnalyticsController::class, 'index'])->name('analytics.index');
         Route::get('/app/settings', [SettingsController::class, 'index'])->name('settings.index');
         Route::put('/app/settings', [SettingsController::class, 'update'])->name('settings.update');

@@ -63,6 +63,7 @@
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}"><span class="app-nav-glyph">IN</span> Inbox @if($navigationInboxCount)<span class="app-nav-count">{{ $navigationInboxCount }}</span>@endif</a>
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}"><span class="app-nav-glyph">KN</span> Knowledge</a>
             <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}"><span class="app-nav-glyph">SM</span> Social media</a>
+            <a @class(['active' => $navigationActive === 'ai-reels']) href="{{ route('ai-reels.index') }}"><span class="app-nav-glyph">AR</span> Create AI Reels</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}"><span class="app-nav-glyph">AN</span> Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}"><span class="app-nav-glyph">ST</span> Settings</a>
         </nav>
@@ -101,6 +102,7 @@
             <a @class(['active' => $navigationActive === 'inbox']) href="{{ route('inbox.index') }}">Inbox @if($navigationInboxCount)({{ $navigationInboxCount }})@endif</a>
             <a @class(['active' => $navigationActive === 'knowledge']) href="{{ route('knowledge.index') }}">Knowledge</a>
             <a @class(['active' => $navigationActive === 'social-media']) href="{{ route('social-media.index') }}">Social media</a>
+            <a @class(['active' => $navigationActive === 'ai-reels']) href="{{ route('ai-reels.index') }}">AI Reels</a>
             <a @class(['active' => $navigationActive === 'analytics']) href="{{ route('analytics.index') }}">Analytics</a>
             <a @class(['active' => $navigationActive === 'settings']) href="{{ route('settings.index') }}">Settings</a>
         </nav>

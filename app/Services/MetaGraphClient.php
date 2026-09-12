@@ -222,6 +222,66 @@ class MetaGraphClient
             ])->throw()->json();
     }
 
+    public function createInstagramReelContainer(ChannelConnection $connection, string $videoUrl, string $caption): string
+    {
+        throw_unless($connection->provider === 'instagram' && $connection->isActive(), new \RuntimeException('An active Instagram connection is required.'));
+        $response = $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/media'), [
+                'media_type' => 'REELS', 'video_url' => $videoUrl,
+                'caption' => Str::limit($caption, 2200, ''), 'share_to_feed' => true,
+            ])->throw()->json();
+        $id = (string) ($response['id'] ?? '');
+        throw_if($id === '', new \RuntimeException('Meta did not create an Instagram Reel container.'));
+
+        return $id;
+    }
+
+    public function instagramReelContainerStatus(ChannelConnection $connection, string $containerId): string
+    {
+        return (string) data_get(
+            $this->authorizedRequest($connection->access_token, retry: false)
+                ->get($this->url($containerId), ['fields' => 'status_code'])->throw()->json(),
+            'status_code',
+            '',
+        );
+    }
+
+    public function publishInstagramReelContainer(ChannelConnection $connection, string $containerId): array
+    {
+        return $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/media_publish'), ['creation_id' => $containerId])
+            ->throw()->json();
+    }
+
+    public function startFacebookReel(ChannelConnection $connection): string
+    {
+        throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
+        $response = $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/video_reels'), ['upload_phase' => 'start'])
+            ->throw()->json();
+        $id = (string) ($response['video_id'] ?? '');
+        throw_if($id === '', new \RuntimeException('Meta did not create a Facebook Reel upload session.'));
+
+        return $id;
+    }
+
+    public function uploadFacebookReel(ChannelConnection $connection, string $videoId, string $videoUrl): void
+    {
+        $this->authorizedRequest($connection->access_token, retry: false)
+            ->withHeaders(['file_url' => $videoUrl])
+            ->post('https://rupload.facebook.com/video-upload/'.config('meta.graph_version').'/'.$videoId)
+            ->throw();
+    }
+
+    public function finishFacebookReel(ChannelConnection $connection, string $videoId, string $caption): array
+    {
+        return $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($connection->external_account_id.'/video_reels'), [
+                'upload_phase' => 'finish', 'video_id' => $videoId,
+                'video_state' => 'PUBLISHED', 'description' => Str::limit($caption, 2200, ''),
+            ])->throw()->json();
+    }
+
     /** @return array<int, array<string, mixed>> */
     public function recentFacebookMessages(ChannelConnection $connection): array
     {

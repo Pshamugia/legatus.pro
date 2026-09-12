@@ -14,7 +14,7 @@ class SecurityHeaders
         $request->attributes->set('csp_nonce', $nonce);
         $response = $next($request);
         $widget = $request->is('widget/*');
-        $billing = $request->routeIs('billing.index');
+        $billing = $request->routeIs('billing.index', 'ai-reels.index');
         $whatsAppSignup = $request->routeIs('channels.whatsapp.connect');
         $frameAncestors = $widget ? $this->widgetFrameAncestors($request) : "'none'";
         $paddleSources = $billing ? ' https://cdn.paddle.com https://*.paddle.com https://*.paddle.io' : '';
@@ -26,7 +26,7 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('Referrer-Policy', 'strict-origin-when-cross-origin');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-        $response->headers->set('Cross-Origin-Resource-Policy', $widget ? 'cross-origin' : 'same-origin');
+        $response->headers->set('Cross-Origin-Resource-Policy', ($widget || $request->routeIs('ai-reels.media')) ? 'cross-origin' : 'same-origin');
 
         if (! $widget) {
             $response->headers->set('X-Frame-Options', 'DENY');
