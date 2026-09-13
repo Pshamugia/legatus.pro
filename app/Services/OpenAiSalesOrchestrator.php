@@ -457,7 +457,8 @@ class OpenAiSalesOrchestrator
                     // removes topical filters. Treating "any category" as a
                     // literal mandatory catalogue term produces a false empty
                     // result even though eligible tenant products exist.
-                    if ($broadRecommendation) {
+                    if ($broadRecommendation
+                        && ($budgetConstraint !== null || blank($args['query'] ?? null))) {
                         $args['query'] = '';
                         $args['category'] = null;
                         $args['mood'] = null;
@@ -584,6 +585,21 @@ class OpenAiSalesOrchestrator
             }
         }
         $usedCollection = collect($used);
+        if ($fallbackUsed && $usedCollection->contains(fn (array $call): bool => ($call['name'] ?? null) === 'recommend_products')) {
+            $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
+            $data = [
+                'text' => $georgian
+                    ? 'კატალოგში ამ თემის შესაბამისი ხელმისაწვდომი პროდუქტი ვერ მოვიძიე.'
+                    : 'I could not find an available catalog product matching that topic.',
+                'intent' => 'recommendation',
+                'confidence' => 1,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [],
+                'sources' => [],
+                'factual_claims' => [],
+            ];
+        }
         if (! $activeBudgetRequest) {
             $semanticBudgetCall = $usedCollection
                 ->where('name', 'recommend_products')
@@ -629,7 +645,7 @@ class OpenAiSalesOrchestrator
                 ->unique(fn (array $product): int => (int) $product['id'])
                 ->values()
             : collect();
-        if ($activeBudgetRequest && $budgetRecommendations->isNotEmpty()) {
+        if (! $fallbackUsed && $activeBudgetRequest && $budgetRecommendations->isNotEmpty()) {
             $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
             $bundleCall = $usedCollection->where('name', 'recommend_products')->last();
             $bundleComplete = (bool) data_get($bundleCall, 'result.bundle_complete', false);
@@ -1288,18 +1304,11 @@ class OpenAiSalesOrchestrator
             }
         }
 
+        // A deterministic recovery may repeat verified exact-search evidence,
+        // but it must never turn ranked recommendation candidates into a
+        // customer-facing suggestion. Recommendations require a valid Luna
+        // answer that interprets the customer's topic and explains the fit.
         $products = $availableSearchProducts->take(5)->values();
-        if ($products->isEmpty() && $unavailableProducts->isEmpty()) {
-            $products = $successfulCatalogCalls
-                ->where('name', 'recommend_products')
-                ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
-                ->filter(fn ($product): bool => is_array($product)
-                    && (int) ($product['id'] ?? 0) > 0
-                    && ($product['available'] ?? true) === true)
-                ->unique(fn (array $product): int => (int) $product['id'])
-                ->take(5)
-                ->values();
-        }
         $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
 
         return [

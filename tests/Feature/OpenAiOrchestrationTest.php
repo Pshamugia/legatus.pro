@@ -1012,6 +1012,199 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('17.00', $reply['text']);
     }
 
+    public function test_a_broad_misclassification_cannot_erase_the_models_explicit_topic_and_return_unrelated_products(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Topic catalog', 'url' => 'https://shop.example/catalog', 'status' => 'ready',
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'Sunny Romance', 'sku' => 'UNRELATED-ROMANCE',
+            'description' => 'A contemporary love story set on a warm island.',
+            'search_text' => 'Sunny Romance contemporary love story island',
+            'price' => 20, 'stock' => 3, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'thematic-recommendation-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        $topicContextResponse = ['id' => 'topic-context', 'output' => [[
+            'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'is_delivery_request' => false,
+                'delivery_request_type' => 'none',
+                'is_human_request' => false,
+                'is_catalog_follow_up' => false,
+                'catalog_scope_action' => 'replace',
+                // Even if this preliminary classifier is too permissive,
+                // the main model's concrete topic must not be erased.
+                'recommendation_scope' => 'broad',
+                'recommendation_query' => null,
+                'recommendation_category' => null,
+                'recommendation_occasion' => null,
+                'resolved_query' => null,
+                'resolved_queries' => [],
+                'resolved_category' => null,
+                'catalog_match_scope' => 'exact_identity',
+                'exclude_product_ids' => [],
+                'expects_complete_set' => false,
+            ])]],
+        ]], 'usage' => []];
+        $topicToolResponse = ['id' => 'graded-topic-tool', 'output' => [[
+            'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'topic-call',
+            'arguments' => json_encode([
+                'query' => 'political repression', 'budget' => null, 'quantity' => null,
+                'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 5,
+                'exclude_product_ids' => [],
+            ]),
+        ]], 'usage' => []];
+        $topicAnswerResponse = ['id' => 'topic-answer', 'output' => [[
+            'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'text' => 'I could not find a matching available product.',
+                'intent' => 'recommendation', 'confidence' => 1,
+                'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+                'sources' => [], 'factual_claims' => [],
+            ])]],
+        ]], 'usage' => []];
+        Http::fake(function ($request) use ($topicContextResponse, $topicToolResponse, $topicAnswerResponse) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response($topicContextResponse);
+                }
+                if (($request->data()['previous_response_id'] ?? null) === 'graded-topic-tool') {
+                    return Http::response($topicAnswerResponse);
+                }
+                if (($request->data()['text']['format']['name'] ?? null) === 'sales_reply') {
+                    return Http::response($topicToolResponse);
+                }
+
+                return Http::response(['id' => 'irrelevant-storefront-parser', 'output' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Thanks. If you have anything about political repression, I will buy it.',
+            $conversation,
+        );
+
+        $this->assertSame([], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString('could not find a matching available product', $reply['text']);
+        $recommendation = RecommendationEvent::query()->latest('id')->firstOrFail();
+        $this->assertSame('political repression', $recommendation->query['query']);
+    }
+
+    public function test_deterministic_catalog_recovery_never_turns_recommendation_candidates_into_suggestions(): void
+    {
+        $fallback = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'verifiedCatalogFallbackReply');
+        $result = $fallback->invoke(app(OpenAiSalesOrchestrator::class), 'Anything about political repression?', collect([[
+            'name' => 'recommend_products',
+            'arguments' => ['query' => 'political repression'],
+            'result' => [
+                'ok' => true,
+                'recommendations' => [[
+                    'id' => 987,
+                    'name' => 'Sunny Romance',
+                    'available' => true,
+                ]],
+            ],
+        ]]));
+
+        $this->assertSame([], $result['product_ids']);
+        $this->assertStringNotContainsString('Sunny Romance', $result['text']);
+        $this->assertStringContainsString('could not find', $result['text']);
+    }
+
+    public function test_a_fallback_model_cannot_publish_product_recommendations_after_luna_fails(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $product = $agent->products()->create([
+            'name' => 'History of Political Repression', 'sku' => 'REPRESSION-HISTORY',
+            'description' => 'Documented political repression and twentieth-century history.',
+            'search_text' => 'History political repression twentieth century',
+            'price' => 20, 'stock' => 2, 'is_active' => true,
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'luna-only-recommendation', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config([
+            'services.openai.key' => 'test-key',
+            'services.openai.hybrid_enabled' => true,
+            'services.openai.hybrid_rollout_percent' => 100,
+            'services.openai.primary_model' => 'gpt-5.6-luna',
+            'services.openai.fallback_enabled' => true,
+            'services.openai.fallback_model' => 'gpt-5.6-sol',
+            'services.openai.retries' => 1,
+        ]);
+
+        Http::fake(function ($request) use ($product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (! str_ends_with($request->url(), '/responses')) {
+                return Http::response('<html><body>No additional products</body></html>');
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response(['id' => 'luna-topic-context', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                        'is_human_request' => false, 'is_catalog_follow_up' => false,
+                        'catalog_scope_action' => 'replace', 'recommendation_scope' => 'constrained',
+                        'recommendation_query' => 'political repression', 'recommendation_category' => null,
+                        'recommendation_occasion' => null, 'resolved_query' => null, 'resolved_queries' => [],
+                        'resolved_category' => null, 'catalog_match_scope' => 'exact_identity',
+                        'exclude_product_ids' => [], 'expects_complete_set' => false,
+                    ])]],
+                ]], 'usage' => []]);
+            }
+            if (($request->data()['model'] ?? null) === 'gpt-5.6-sol') {
+                return Http::response(['id' => 'sol-fallback-answer', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'Buy this matching title.', 'intent' => 'recommendation', 'confidence' => 1,
+                        'handoff' => false, 'escalation_reason' => null, 'product_ids' => [$product->id],
+                        'sources' => [], 'factual_claims' => [[
+                            'type' => 'product', 'product_id' => $product->id,
+                            'amount' => null, 'quantity' => null, 'reference' => null,
+                        ]],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+            if (($request->data()['previous_response_id'] ?? null) === 'luna-topic-tool') {
+                return Http::response(['error' => ['message' => 'Luna continuation failed']], 500);
+            }
+
+            return Http::response(['id' => 'luna-topic-tool', 'output' => [[
+                'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'luna-topic-call',
+                'arguments' => json_encode([
+                    'query' => 'political repression', 'budget' => null, 'quantity' => null,
+                    'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 5,
+                    'exclude_product_ids' => [],
+                ]),
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Please recommend something about political repression.',
+            $conversation,
+        );
+
+        $this->assertSame([], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringNotContainsString($product->name, $reply['text']);
+        $this->assertStringContainsString('could not find', $reply['text']);
+        $this->assertFalse($reply['handoff']);
+    }
+
     public function test_short_category_follow_up_builds_the_requested_bundle_from_the_saved_budget(): void
     {
         $this->seed();
