@@ -49,6 +49,11 @@ class AiReelsTest extends TestCase
             ->assertSee('select its instrumental background music')
             ->assertSee('CC0 Public Domain license')
             ->assertSee('Bright &amp; upbeat — City Sunshine', false)
+            ->assertSee('Bright &amp; upbeat — Motions', false)
+            ->assertSee('Elegant &amp; warm — Romantic Inspiration', false)
+            ->assertSee('Calm &amp; ambient — Infinite Peace', false)
+            ->assertSee('Epic &amp; powerful — Heroic Adventure', false)
+            ->assertSee('World &amp; acoustic — Shenzhen Nightlife', false)
             ->assertSee('Minimum 5 seconds · Maximum 15 seconds')
             ->assertSee('15 seconds — 3 credits')
             ->assertSee('Minimum 10')
@@ -66,6 +71,23 @@ class AiReelsTest extends TestCase
         $this->assertStringContainsString('https://cdn.paddle.com', (string) $response->headers->get('Content-Security-Policy'));
         $this->assertStringContainsString('.form-submit>span{', $response->getContent());
         $this->assertStringNotContainsString('.form-submit span{', $response->getContent());
+    }
+
+    public function test_reel_music_library_has_many_pinned_cc0_choices_across_categories(): void
+    {
+        $tracks = config('reel_music.tracks');
+
+        $this->assertCount(45, $tracks);
+        $this->assertCount(8, collect($tracks)->pluck('label')->unique());
+        $this->assertSame('CC0 1.0 Universal', config('reel_music.license_name'));
+
+        foreach ($tracks as $track) {
+            $this->assertStringStartsWith(
+                'https://raw.githubusercontent.com/0lhi/FreePD/cf011c7016595833b550a88ff127f089188b25f8/',
+                $track['url'],
+            );
+            $this->assertStringEndsWith('.mp3', $track['url']);
+        }
     }
 
     public function test_music_preview_is_served_from_legatus_instead_of_a_csp_blocked_external_url(): void
