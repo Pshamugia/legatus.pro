@@ -110,11 +110,15 @@ class AiReelController extends Controller
         ]);
         $data = $request->validate([
             'prompt' => ['required', 'string', 'min:20', 'max:3000'], 'reference_url' => ['nullable', 'url', 'max:2000'],
+            'caption' => ['nullable', 'string', 'max:2200'],
             'duration_seconds' => ['required', 'integer', Rule::in([5, 10, 15])],
             'music_track' => ['required', 'string', Rule::in(array_keys(config('reel_music.tracks', [])))],
             'source_image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:min_width=640,min_height=640,max_width=8000,max_height=8000'],
             'providers' => ['required', 'array', 'min:1'], 'providers.*' => [Rule::in(['facebook', 'instagram'])],
         ]);
+        $data['caption'] = filled($data['caption'] ?? null)
+            ? trim(strip_tags((string) $data['caption']))
+            : null;
         $agent = $tenant->agent();
         $active = $agent->channelConnections()->whereIn('provider', $data['providers'])->where('status', 'active')->pluck('provider');
         if (collect($data['providers'])->diff($active)->isNotEmpty()) {
@@ -142,6 +146,7 @@ class AiReelController extends Controller
                     'duration_seconds' => $data['duration_seconds'], 'credit_cost' => $creditCost,
                     'music_track' => $data['music_track'],
                     'user_prompt' => $data['prompt'], 'reference_url' => $data['reference_url'] ?? null,
+                    'caption' => $data['caption'],
                     'source_image_url' => $storedImage['url'] ?? $product?->publicImageUrl(),
                     'source_image_path' => $storedImage['path'] ?? null, 'status' => 'queued',
                 ]);

@@ -55,12 +55,17 @@ class AiReelsTest extends TestCase
             ->assertSee('Schedule Facebook')
             ->assertSee('Instagram Reels')
             ->assertSee('Reels your way')
+            ->assertSee('Describe the video you want')
+            ->assertSee('Facebook & Instagram post caption', false)
+            ->assertSee('Leave blank and Luna will write the caption for you.')
             ->assertSee('3,000 characters')
             ->assertSee('Your description is too long. The maximum is 3,000 characters.')
             ->assertSee(route('ai-reels.music', ['trackId' => 'cinematic']), false)
             ->assertDontSee('raw.githubusercontent.com', false)
             ->assertSee('data-price-id="pri_reel_credit"', false);
         $this->assertStringContainsString('https://cdn.paddle.com', (string) $response->headers->get('Content-Security-Policy'));
+        $this->assertStringContainsString('.form-submit>span{', $response->getContent());
+        $this->assertStringNotContainsString('.form-submit span{', $response->getContent());
     }
 
     public function test_music_preview_is_served_from_legatus_instead_of_a_csp_blocked_external_url(): void
@@ -362,6 +367,7 @@ class AiReelsTest extends TestCase
 
         $this->actingAs($user)->post(route('ai-reels.custom.store'), [
             'prompt' => 'Create a cinematic multi-shot brand story with clear motion and warm light.',
+            'caption' => '<strong>Our own caption ✨</strong> #Business',
             'duration_seconds' => 10,
             'music_track' => 'modern',
             'providers' => ['facebook', 'instagram'],
@@ -371,6 +377,7 @@ class AiReelsTest extends TestCase
         $this->assertSame(10, $reel->duration_seconds);
         $this->assertSame(2, $reel->credit_cost);
         $this->assertSame('modern', $reel->music_track);
+        $this->assertSame('Our own caption ✨ #Business', $reel->caption);
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         Queue::assertPushed(GenerateAiReel::class, 1);
     }
@@ -493,6 +500,7 @@ class AiReelsTest extends TestCase
         $reel = $agent->aiReels()->create([
             'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
             'source_image_url' => 'https://shop.example/small.jpg',
+            'caption' => 'Business-written caption ✨ #KeepIt',
         ]);
         $writer = \Mockery::mock(AiReelPromptWriter::class);
         $writer->shouldReceive('write')->once()->andReturn([
@@ -510,6 +518,7 @@ class AiReelsTest extends TestCase
 
         $reel->refresh();
         $this->assertSame('prepared-task', $reel->runway_task_id);
+        $this->assertSame('Business-written caption ✨ #KeepIt', $reel->caption);
         $this->assertNotNull($reel->source_image_path);
         $dimensions = getimagesizefromstring(Storage::disk('local')->get($reel->source_image_path));
         $this->assertSame([720, 1280], [$dimensions[0], $dimensions[1]]);

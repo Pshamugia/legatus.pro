@@ -58,7 +58,10 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
 
         try {
             $copy = $writer->write($reel);
-            $reel->update(['generated_prompt' => $copy['prompt'], 'caption' => $copy['caption']]);
+            $reel->update([
+                'generated_prompt' => $copy['prompt'],
+                'caption' => filled($reel->caption) ? $reel->caption : $copy['caption'],
+            ]);
         } catch (\Throwable $exception) {
             if ($this->finishRequestedCancellation($reel, $images)) {
                 return;
