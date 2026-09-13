@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\AiReel;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
+use App\Services\ReelMusicService;
 use App\Services\RunwayClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,7 +21,7 @@ class PollAiReelGeneration implements ShouldQueue
 
     public function __construct(public readonly int $reelId) {}
 
-    public function handle(RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images): void
+    public function handle(RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images, ReelMusicService $music): void
     {
         $reel = AiReel::query()->find($this->reelId);
         if (! $reel || $reel->status !== 'generating' || ! $reel->runway_task_id) {
@@ -48,6 +49,7 @@ class PollAiReelGeneration implements ShouldQueue
         }
         try {
             $contents = $runway->download((string) data_get($task, 'output.0'));
+            $contents = $music->mix($contents, (string) $reel->music_track, (int) $reel->duration_seconds);
             $filename = hash('sha256', $reel->id.'|'.$reel->runway_task_id.'|'.Str::random(32)).'.mp4';
             $path = 'reels/'.$filename;
             Storage::disk('local')->put($path, $contents);

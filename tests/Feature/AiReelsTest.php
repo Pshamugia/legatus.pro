@@ -12,6 +12,7 @@ use App\Services\AiReelPromptWriter;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\MetaGraphClient;
 use App\Services\ReelCreditService;
+use App\Services\ReelMusicService;
 use App\Services\RunwayClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -45,7 +46,9 @@ class AiReelsTest extends TestCase
         $response->assertOk()
             ->assertSee('Create AI Reels')
             ->assertSee('$1–$3 per generated Reel')
-            ->assertSee('includes AI-generated audio')
+            ->assertSee('select its instrumental background music')
+            ->assertSee('CC0 Public Domain license')
+            ->assertSee('Bright &amp; upbeat — City Sunshine', false)
             ->assertSee('Minimum 5 seconds · Maximum 15 seconds')
             ->assertSee('15 seconds — 3 credits')
             ->assertSee('Minimum 10')
@@ -110,7 +113,7 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseCount('reel_credit_ledger', 0);
     }
 
-    public function test_runway_creates_portrait_multi_shot_reels_with_audio_and_selected_duration(): void
+    public function test_runway_creates_silent_portrait_multi_shot_reels_for_selected_music_and_duration(): void
     {
         config()->set('services.runway.key', 'runway-test-key');
         Http::fake([
@@ -127,12 +130,12 @@ class AiReelsTest extends TestCase
             && $request['mode'] === 'auto'
             && $request['duration'] === 5
             && $request['ratio'] === '720:1280'
-            && $request['audio'] === true
+            && $request['audio'] === false
             && data_get($request->data(), 'firstFrame.uri') === 'https://shop.example/product.jpg'
             && $request->hasHeader('X-Runway-Version', '2024-11-06'));
         Http::assertSent(fn ($request) => $request['duration'] === 15
             && $request['ratio'] === '720:1280'
-            && $request['audio'] === true
+            && $request['audio'] === false
             && ! isset($request['firstFrame']));
     }
 
@@ -163,13 +166,15 @@ class AiReelsTest extends TestCase
         $this->actingAs($user)->post(route('ai-reels.schedules.store'), [
             'reel_count' => 3, 'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
             'duration_seconds' => 15,
+            'music_track' => 'cinematic',
             'providers' => ['facebook', 'instagram'], 'timezone' => 'Asia/Tbilisi', 'timing_mode' => 'auto', 'ai_tone' => 'creative',
         ])->assertRedirect(route('ai-reels.index'));
 
         $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
-        $this->assertDatabaseHas('ai_reel_schedules', ['duration_seconds' => 15, 'credits_per_reel' => 3]);
+        $this->assertDatabaseHas('ai_reel_schedules', ['duration_seconds' => 15, 'credits_per_reel' => 3, 'music_track' => 'cinematic']);
         $this->assertDatabaseCount('ai_reels', 3);
         $this->assertSame([3], AiReel::query()->pluck('credit_cost')->unique()->all());
+        $this->assertSame(['cinematic'], AiReel::query()->pluck('music_track')->unique()->all());
         $this->assertDatabaseCount('ai_reel_deliveries', 6);
         Queue::assertPushed(GenerateAiReel::class, 3);
     }
@@ -295,12 +300,14 @@ class AiReelsTest extends TestCase
         $this->actingAs($user)->post(route('ai-reels.custom.store'), [
             'prompt' => 'Create a cinematic multi-shot brand story with clear motion and warm light.',
             'duration_seconds' => 10,
+            'music_track' => 'modern',
             'providers' => ['facebook', 'instagram'],
         ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']));
 
         $reel = AiReel::firstOrFail();
         $this->assertSame(10, $reel->duration_seconds);
         $this->assertSame(2, $reel->credit_cost);
+        $this->assertSame('modern', $reel->music_track);
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         Queue::assertPushed(GenerateAiReel::class, 1);
     }
@@ -322,6 +329,26 @@ class AiReelsTest extends TestCase
 
         $this->assertDatabaseCount('ai_reels', 0);
         $this->assertSame(3, app(ReelCreditService::class)->balance($organization));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_unknown_music_track_is_rejected_without_charging(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('invalid-reel-music');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-invalid-music');
+
+        $this->actingAs($user)->from(route('ai-reels.index', ['tab' => 'custom']))
+            ->post(route('ai-reels.custom.store'), [
+                'prompt' => 'Create a cinematic brand story with clear movement and warm light.',
+                'music_track' => 'unlicensed-upload',
+                'providers' => ['facebook'],
+            ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHasErrors('music_track');
+
+        $this->assertDatabaseCount('ai_reels', 0);
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         Queue::assertNothingPushed();
     }
 
@@ -416,7 +443,7 @@ class AiReelsTest extends TestCase
             5,
         )->andReturn('prepared-task');
 
-        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class), $this->availableMusic());
 
         $reel->refresh();
         $this->assertSame('prepared-task', $reel->runway_task_id);
@@ -594,7 +621,7 @@ class AiReelsTest extends TestCase
         $runway = \Mockery::mock(RunwayClient::class);
         $runway->shouldNotReceive('create');
 
-        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class), $this->availableMusic());
 
         $this->assertSame('canceled', $reel->fresh()->status);
         Storage::disk('local')->assertMissing('reel-inputs/stop-during-prompt.jpg');
@@ -689,13 +716,16 @@ class AiReelsTest extends TestCase
         $runway = \Mockery::mock(RunwayClient::class);
         $runway->shouldReceive('task')->once()->with('task-1')->andReturn(['status' => 'SUCCEEDED', 'output' => ['https://runway.test/video.mp4']]);
         $runway->shouldReceive('download')->once()->andReturn('video-contents');
+        $music = \Mockery::mock(ReelMusicService::class);
+        $music->shouldReceive('mix')->once()->with('video-contents', 'bright', 5)->andReturn('video-with-selected-music');
 
-        (new PollAiReelGeneration($reel->id))->handle($runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+        (new PollAiReelGeneration($reel->id))->handle($runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class), $music);
 
         $reel->refresh();
         $this->assertSame('awaiting_approval', $reel->status);
         $this->assertNotNull($reel->video_path);
         Storage::disk('local')->assertExists($reel->video_path);
+        $this->assertSame('video-with-selected-music', Storage::disk('local')->get($reel->video_path));
     }
 
     public function test_generation_failure_refunds_the_credit_once(): void
@@ -712,12 +742,43 @@ class AiReelsTest extends TestCase
         $runway = \Mockery::mock(RunwayClient::class);
 
         $job = new GenerateAiReel($reel->id);
-        $job->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+        $job->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class), $this->availableMusic());
         app(ReelCreditService::class)->refund($reel->fresh(), 'duplicate-attempt');
 
         $this->assertSame(3, app(ReelCreditService::class)->balance($organization));
         $this->assertDatabaseCount('reel_credit_ledger', 3);
         $this->assertStringStartsWith('Reel copy preparation failed:', $reel->fresh()->last_error);
+    }
+
+    public function test_music_is_preflighted_before_paid_runway_generation(): void
+    {
+        [$user, $agent, $organization] = $this->tenant('reel-music-preflight');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-music-preflight');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'music_track' => 'cinematic',
+        ]);
+        app(ReelCreditService::class)->debit($organization, 1, 'reel-test:'.$reel->id);
+
+        $music = \Mockery::mock(ReelMusicService::class);
+        $music->shouldReceive('ensureAvailable')->once()->with('cinematic')
+            ->andThrow(new \RuntimeException('FFmpeg unavailable'));
+        $writer = \Mockery::mock(AiReelPromptWriter::class);
+        $writer->shouldNotReceive('write');
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldNotReceive('create');
+
+        (new GenerateAiReel($reel->id))->handle(
+            $writer,
+            $runway,
+            app(ReelCreditService::class),
+            app(AiReelSourceImageStorage::class),
+            $music,
+        );
+
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        $this->assertSame('generation_failed', $reel->fresh()->status);
+        $this->assertSame('Reel music preparation failed: FFmpeg unavailable', $reel->fresh()->last_error);
     }
 
     public function test_runway_request_failure_is_identified_and_refunded(): void
@@ -736,7 +797,7 @@ class AiReelsTest extends TestCase
         $runway = \Mockery::mock(RunwayClient::class);
         $runway->shouldReceive('create')->once()->andThrow(new \RuntimeException('HTTP 500'));
 
-        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class));
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class), $this->availableMusic());
 
         $reel->refresh();
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
@@ -757,6 +818,14 @@ class AiReelsTest extends TestCase
         ]);
 
         return [$user, $agent, $organization];
+    }
+
+    private function availableMusic(): ReelMusicService
+    {
+        $music = \Mockery::mock(ReelMusicService::class);
+        $music->shouldReceive('ensureAvailable')->once()->with('bright');
+
+        return $music;
     }
 
     private function connections($agent): void

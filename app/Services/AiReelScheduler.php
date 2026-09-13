@@ -43,6 +43,7 @@ class AiReelScheduler
             $schedule = $agent->aiReelSchedules()->create([
                 'starts_on' => $data['starts_on'], 'ends_on' => $data['ends_on'], 'reel_count' => $data['reel_count'],
                 'duration_seconds' => $data['duration_seconds'], 'credits_per_reel' => $creditsPerReel,
+                'music_track' => $data['music_track'],
                 'categories' => array_values($data['categories'] ?? []), 'languages' => array_values($data['languages'] ?? []),
                 'providers' => array_values($data['providers']), 'timezone' => $data['timezone'],
                 'timing_mode' => $data['timing_mode'], 'posting_times' => $data['posting_times'] ?? null,
@@ -63,6 +64,7 @@ class AiReelScheduler
                 $reel = $schedule->reels()->create([
                     'agent_id' => $agent->id, 'product_id' => $product->id, 'mode' => 'scheduled',
                     'duration_seconds' => $data['duration_seconds'], 'credit_cost' => $creditsPerReel,
+                    'music_track' => $data['music_track'],
                     'language' => $language, 'providers' => array_values($data['providers']),
                     'source_image_url' => $localized['image'] ?? $product->publicImageUrl(),
                     'scheduled_for' => $slots[$index]->utc(), 'status' => 'queued',

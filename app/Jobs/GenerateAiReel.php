@@ -6,6 +6,7 @@ use App\Models\AiReel;
 use App\Services\AiReelPromptWriter;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
+use App\Services\ReelMusicService;
 use App\Services\RunwayClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -28,7 +29,7 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
         return (string) $this->reelId;
     }
 
-    public function handle(AiReelPromptWriter $writer, RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images): void
+    public function handle(AiReelPromptWriter $writer, RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images, ReelMusicService $music): void
     {
         $reel = AiReel::query()->with(['agent.organization', 'product'])->find($this->reelId);
         if (! $reel || ! in_array($reel->status, ['queued', 'generation_failed'], true) || $reel->runway_task_id) {
@@ -43,6 +44,17 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
             return;
         }
         $reel->refresh();
+
+        try {
+            $music->ensureAvailable((string) $reel->music_track);
+        } catch (\Throwable $exception) {
+            if ($this->finishRequestedCancellation($reel, $images)) {
+                return;
+            }
+            $this->failGeneration($reel, $credits, $images, 'Reel music preparation failed', $exception);
+
+            return;
+        }
 
         try {
             $copy = $writer->write($reel);

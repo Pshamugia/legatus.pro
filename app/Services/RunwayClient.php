@@ -34,7 +34,7 @@ class RunwayClient
             'prompt' => $prompt,
             'ratio' => config('services.runway.multi_shot_ratio', '720:1280'),
             'duration' => $duration,
-            'audio' => true,
+            'audio' => false,
         ];
         if ($imageUrl) {
             $payload['firstFrame'] = ['uri' => $imageUrl];
