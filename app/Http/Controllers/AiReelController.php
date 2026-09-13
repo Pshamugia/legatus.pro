@@ -8,6 +8,7 @@ use App\Models\AiReelSchedule;
 use App\Services\AiReelScheduler;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
+use App\Services\ReelMusicService;
 use App\Services\RunwayClient;
 use App\Services\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -53,6 +54,17 @@ class AiReelController extends Controller
     public function purchaseComplete()
     {
         return redirect()->route('ai-reels.index', ['checkout' => 'complete'])->with('reel_success', 'Payment received. Credits will appear after Paddle confirms the transaction.');
+    }
+
+    public function music(string $trackId, TenantContext $tenant, ReelMusicService $music)
+    {
+        $tenant->authorize(['owner', 'admin', 'viewer']);
+        abort_unless(array_key_exists($trackId, config('reel_music.tracks', [])), 404);
+
+        return response()->file($music->previewPath($trackId), [
+            'Content-Type' => 'audio/mpeg',
+            'Cache-Control' => 'private, max-age=86400',
+        ]);
     }
 
     public function storeSchedule(Request $request, TenantContext $tenant, AiReelScheduler $scheduler)

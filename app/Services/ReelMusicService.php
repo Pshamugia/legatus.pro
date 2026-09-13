@@ -50,6 +50,13 @@ class ReelMusicService
         }
     }
 
+    public function previewPath(string $trackId): string
+    {
+        $track = $this->track($trackId);
+
+        return $this->cachedTrack($trackId, (string) $track['url']);
+    }
+
     private function track(string $trackId): array
     {
         $track = data_get(config('reel_music.tracks'), $trackId);

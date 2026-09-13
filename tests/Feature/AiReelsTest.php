@@ -57,8 +57,25 @@ class AiReelsTest extends TestCase
             ->assertSee('Reels your way')
             ->assertSee('3,000 characters')
             ->assertSee('Your description is too long. The maximum is 3,000 characters.')
+            ->assertSee(route('ai-reels.music', ['trackId' => 'cinematic']), false)
+            ->assertDontSee('raw.githubusercontent.com', false)
             ->assertSee('data-price-id="pri_reel_credit"', false);
         $this->assertStringContainsString('https://cdn.paddle.com', (string) $response->headers->get('Content-Security-Policy'));
+    }
+
+    public function test_music_preview_is_served_from_legatus_instead_of_a_csp_blocked_external_url(): void
+    {
+        Storage::fake('local');
+        [$user] = $this->tenant('reel-music-preview');
+        Storage::disk('local')->put('reel-music/preview.mp3', 'preview-audio');
+        $music = \Mockery::mock(ReelMusicService::class);
+        $music->shouldReceive('previewPath')->once()->with('cinematic')
+            ->andReturn(Storage::disk('local')->path('reel-music/preview.mp3'));
+        $this->app->instance(ReelMusicService::class, $music);
+
+        $response = $this->actingAs($user)->get(route('ai-reels.music', ['trackId' => 'cinematic']));
+        $response->assertOk()->assertHeader('content-type', 'audio/mpeg');
+        $this->assertSame('preview-audio', $response->baseResponse->getFile()->getContent());
     }
 
     public function test_completed_paddle_transaction_grants_actual_reel_quantity_once(): void
