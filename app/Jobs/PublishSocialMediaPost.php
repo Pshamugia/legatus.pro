@@ -181,7 +181,10 @@ class PublishSocialMediaPost implements ShouldQueue
             };
             $post->update([
                 'status' => 'published',
-                'provider_post_id' => (string) ($result['id'] ?? ''),
+                // Facebook photo publishing returns both a photo object ID and
+                // the Page post ID. Retain the Page post ID so the business can
+                // later edit or delete the actual feed post from Legatus.
+                'provider_post_id' => (string) ($result['post_id'] ?? $result['id'] ?? ''),
                 'published_at' => now(),
                 'failure_reason' => null,
                 'story_status' => in_array($post->provider, ['facebook', 'instagram'], true) ? 'queued' : null,

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\SocialMediaPost;
 use App\Models\SocialMediaSchedule;
+use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaPublicationHistory;
@@ -48,6 +50,14 @@ class SocialMediaController extends Controller
             ])->latest()->get();
         $upcoming = $agent->socialMediaPosts()->with('schedule:id,timezone')->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->orderBy('scheduled_for')->limit(12)->get();
+        $publishedFacebookPosts = $agent->socialMediaPosts()
+            ->with('schedule:id,timezone')
+            ->where('provider', 'facebook')
+            ->where('status', 'published')
+            ->whereNotNull('provider_post_id')
+            ->latest('published_at')
+            ->limit(20)
+            ->get();
         $canManage = in_array($tenant->role(), ['owner', 'admin'], true);
         $templates = $templateService->configurations($agent);
         $configuredPreviewUrl = trim((string) data_get($agent->settings, 'social_preview_product_url'));
@@ -108,7 +118,7 @@ class SocialMediaController extends Controller
                 }];
             })->all();
 
-        return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'canManage', 'templates', 'previewProduct'));
+        return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'publishedFacebookPosts', 'canManage', 'templates', 'previewProduct'));
     }
 
     public function store(Request $request, TenantContext $tenant, SocialMediaScheduler $scheduler)
@@ -240,6 +250,86 @@ class SocialMediaController extends Controller
         });
 
         return back()->with('social_success', 'Schedule removed. Published-product history was retained to prevent duplicate posts.');
+    }
+
+    public function updateFacebookPost(Request $request, SocialMediaPost $post, TenantContext $tenant, MetaGraphClient $meta)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $agent = $tenant->agent();
+        $this->authorizeFacebookPostManagement($post, $agent->id);
+        $data = $request->validate([
+            'caption' => ['required', 'string', 'max:5900'],
+        ]);
+        $connection = $agent->channelConnections()
+            ->where('provider', 'facebook')
+            ->where('status', 'active')
+            ->first();
+
+        if (! $connection || ! $connection->isActive()) {
+            throw ValidationException::withMessages(['facebook_post' => 'Reconnect the Facebook Page before editing this post.']);
+        }
+
+        try {
+            $meta->updateFacebookPost(
+                $connection,
+                (string) $post->provider_post_id,
+                $data['caption'],
+                filled($post->image_url) && ! str_contains((string) $post->provider_post_id, '_'),
+            );
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return back()->withErrors(['facebook_post' => 'Facebook could not update this post. It was left unchanged in Legatus.']);
+        }
+
+        $post->update([
+            'caption' => $data['caption'],
+            'provider_updated_at' => now(),
+        ]);
+
+        return back()->with('social_success', 'Facebook Page post updated successfully.');
+    }
+
+    public function deleteFacebookPost(Request $request, SocialMediaPost $post, TenantContext $tenant, MetaGraphClient $meta)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $agent = $tenant->agent();
+        $this->authorizeFacebookPostManagement($post, $agent->id);
+        $request->validate(['confirm_delete' => ['accepted']]);
+        $connection = $agent->channelConnections()
+            ->where('provider', 'facebook')
+            ->where('status', 'active')
+            ->first();
+
+        if (! $connection || ! $connection->isActive()) {
+            throw ValidationException::withMessages(['facebook_post' => 'Reconnect the Facebook Page before deleting this post.']);
+        }
+
+        try {
+            $meta->deleteFacebookPost($connection, (string) $post->provider_post_id);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return back()->withErrors(['facebook_post' => 'Facebook could not delete this post. No local record was changed.']);
+        }
+
+        // Preserve the local publication record for audit/history and for the
+        // existing duplicate-product safeguards. Only the remote post is gone.
+        $post->update(['provider_deleted_at' => now()]);
+
+        return back()->with('social_success', 'Facebook Page post deleted. Its Legatus history was retained.');
+    }
+
+    private function authorizeFacebookPostManagement(SocialMediaPost $post, int $agentId): void
+    {
+        abort_unless(
+            $post->agent_id === $agentId
+                && $post->provider === 'facebook'
+                && $post->status === 'published'
+                && filled($post->provider_post_id)
+                && $post->provider_deleted_at === null,
+            404,
+        );
     }
 
     private function publicHttpUrl(mixed $url): bool

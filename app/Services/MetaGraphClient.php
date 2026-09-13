@@ -165,6 +165,27 @@ class MetaGraphClient
             ])->throw()->json();
     }
 
+    public function updateFacebookPost(ChannelConnection $connection, string $postId, string $message, bool $photoObject = false): void
+    {
+        throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
+        throw_if(trim($postId) === '', new \InvalidArgumentException('A Facebook post ID is required.'));
+
+        $this->authorizedRequest($connection->access_token, retry: false)
+            ->post($this->url($postId), [
+                $photoObject ? 'caption' : 'message' => Str::limit($message, $photoObject ? 5900 : 6000, ''),
+            ])->throw();
+    }
+
+    public function deleteFacebookPost(ChannelConnection $connection, string $postId): void
+    {
+        throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));
+        throw_if(trim($postId) === '', new \InvalidArgumentException('A Facebook post ID is required.'));
+
+        $this->authorizedRequest($connection->access_token, retry: false)
+            ->delete($this->url($postId))
+            ->throw();
+    }
+
     public function publishInstagramPost(ChannelConnection $connection, string $caption, string $imageUrl): array
     {
         throw_unless($connection->provider === 'instagram' && $connection->isActive(), new \RuntimeException('An active Instagram connection is required.'));

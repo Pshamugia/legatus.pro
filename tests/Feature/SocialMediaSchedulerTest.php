@@ -1486,14 +1486,14 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PublishSocialMediaPost::class, 2);
 
         Http::fake([
-            'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'fb-post-1']),
+            'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'fb-photo-1', 'post_id' => 'page-1_fb-post-1']),
             'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'container-1'])->push(['id' => 'ig-post-1']),
         ]);
         foreach (SocialMediaPost::query()->get() as $post) {
             (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
         }
 
-        $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'status' => 'published', 'provider_post_id' => 'fb-post-1']);
+        $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'status' => 'published', 'provider_post_id' => 'page-1_fb-post-1']);
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'instagram', 'status' => 'published', 'provider_post_id' => 'ig-post-1']);
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'facebook', 'story_status' => 'queued']);
         $this->assertDatabaseHas('social_media_posts', ['provider' => 'instagram', 'story_status' => 'queued']);
@@ -1502,7 +1502,7 @@ class SocialMediaSchedulerTest extends TestCase
             'agent_id' => $agent->id,
             'provider' => 'facebook',
             'status' => 'published',
-            'provider_post_id' => 'fb-post-1',
+            'provider_post_id' => 'page-1_fb-post-1',
         ]);
         $this->assertDatabaseHas('social_publication_identities', [
             'agent_id' => $agent->id,
@@ -1982,6 +1982,157 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->assertDatabaseHas('social_media_posts', ['id' => $post->id, 'status' => 'skipped']);
         Http::assertNothingSent();
+    }
+
+    public function test_owner_can_edit_and_delete_a_published_facebook_page_post(): void
+    {
+        [$user, $agent] = $this->tenant('facebook-post-manager');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Managed Facebook Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'published',
+            'scheduled_for' => now('UTC')->subHour(),
+            'published_at' => now('UTC')->subHour(),
+            'provider_post_id' => 'page-1_post-77',
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'Original Facebook caption',
+        ]);
+        Http::fake(fn () => Http::response(['success' => true]));
+
+        $this->actingAs($user)->put(route('social-media.facebook-posts.update', $post), [
+            'caption' => 'Updated Facebook caption',
+        ])->assertRedirect()->assertSessionHas('social_success', 'Facebook Page post updated successfully.');
+
+        $this->assertSame('Updated Facebook caption', $post->fresh()->caption);
+        $this->assertNotNull($post->fresh()->provider_updated_at);
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && str_contains($request->url(), '/v25.0/page-1_post-77?')
+            && $request['message'] === 'Updated Facebook caption'
+            && $request->hasHeader('Authorization', 'Bearer facebook-token'));
+
+        $this->actingAs($user)->delete(route('social-media.facebook-posts.destroy', $post), [
+            'confirm_delete' => '1',
+        ])->assertRedirect()->assertSessionHas('social_success', 'Facebook Page post deleted. Its Legatus history was retained.');
+
+        $this->assertDatabaseHas('social_media_posts', ['id' => $post->id]);
+        $this->assertNotNull($post->fresh()->provider_deleted_at);
+        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+            && str_contains($request->url(), '/v25.0/page-1_post-77?'));
+
+        $this->actingAs($user)->put(route('social-media.facebook-posts.update', $post), [
+            'caption' => 'Must not be sent',
+        ])->assertNotFound();
+    }
+
+    public function test_legacy_facebook_photo_post_uses_caption_when_edited(): void
+    {
+        [$user, $agent] = $this->tenant('legacy-facebook-photo');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Legacy Facebook Photo', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => now('UTC')->subHour(), 'published_at' => now('UTC')->subHour(),
+            'provider_post_id' => 'legacy-photo-77', 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Old photo caption',
+        ]);
+        Http::fake(fn () => Http::response(['success' => true]));
+
+        $this->actingAs($user)->put(route('social-media.facebook-posts.update', $post), [
+            'caption' => 'Updated photo caption',
+        ])->assertSessionHasNoErrors();
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'POST'
+            && $request['caption'] === 'Updated photo caption'
+            && ! isset($request['message']));
+    }
+
+    public function test_facebook_post_management_is_tenant_scoped_and_requires_an_owner_or_admin(): void
+    {
+        [, $agent] = $this->tenant('facebook-post-owner');
+        $this->connections($agent);
+        [$otherOwner] = $this->tenant('facebook-post-other');
+        $product = $agent->products()->create($this->product('Tenant Facebook Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => now('UTC'), 'published_at' => now('UTC'),
+            'provider_post_id' => 'page-1_private-post', 'title' => $product->name,
+            'product_url' => data_get($product->metadata, 'product_url'), 'caption' => 'Tenant caption',
+        ]);
+        $viewer = User::factory()->create();
+        $agent->organization->users()->attach($viewer, ['role' => 'viewer']);
+        Http::fake(fn () => Http::response(['success' => true]));
+
+        $this->actingAs($otherOwner)->put(route('social-media.facebook-posts.update', $post), [
+            'caption' => 'Cross-tenant edit',
+        ])->assertNotFound();
+        $this->actingAs($viewer)->delete(route('social-media.facebook-posts.destroy', $post), [
+            'confirm_delete' => '1',
+        ])->assertForbidden();
+
+        $this->assertSame('Tenant caption', $post->fresh()->caption);
+        $this->assertNull($post->fresh()->provider_deleted_at);
+        Http::assertNothingSent();
+    }
+
+    public function test_facebook_post_management_failure_does_not_change_local_history(): void
+    {
+        [$user, $agent] = $this->tenant('facebook-post-failure');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Failed Facebook Management', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => now('UTC'), 'published_at' => now('UTC'),
+            'provider_post_id' => 'page-1_failed-post', 'title' => $product->name,
+            'product_url' => data_get($product->metadata, 'product_url'), 'caption' => 'Unchanged caption',
+        ]);
+        Http::fake(fn () => Http::response(['error' => ['message' => 'Denied']], 400));
+
+        $this->actingAs($user)->from(route('social-media.index'))->put(route('social-media.facebook-posts.update', $post), [
+            'caption' => 'Rejected caption',
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('facebook_post');
+        $this->actingAs($user)->from(route('social-media.index'))->delete(route('social-media.facebook-posts.destroy', $post), [
+            'confirm_delete' => '1',
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasErrors('facebook_post');
+
+        $this->assertSame('Unchanged caption', $post->fresh()->caption);
+        $this->assertNull($post->fresh()->provider_updated_at);
+        $this->assertNull($post->fresh()->provider_deleted_at);
+    }
+
+    public function test_social_media_page_shows_published_facebook_management_controls(): void
+    {
+        [$user, $agent] = $this->tenant('facebook-post-ui');
+        $product = $agent->products()->create($this->product('Visible Published Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => now('UTC'), 'published_at' => now('UTC'),
+            'provider_post_id' => 'page-1_visible-post', 'title' => $product->name,
+            'product_url' => data_get($product->metadata, 'product_url'), 'caption' => 'Visible Facebook caption',
+        ]);
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('Published Facebook Page posts')
+            ->assertSee('Visible Published Product')
+            ->assertSee('Edit Facebook post text')
+            ->assertSee('Open live post on Facebook')
+            ->assertSee('https://www.facebook.com/page-1/posts/visible-post')
+            ->assertSee('Update live Facebook post')
+            ->assertSee('Delete live Facebook post')
+            ->assertSee('Confirm Facebook post deletion')
+            ->assertSee('pages_manage_posts');
     }
 
     public function test_invalid_template_snapshot_fails_without_calling_meta_or_retrying(): void

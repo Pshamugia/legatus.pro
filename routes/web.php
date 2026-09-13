@@ -195,6 +195,10 @@ Route::middleware('auth')->group(function () {
             ->name('social-media.pause');
         Route::delete('/app/social-media/schedules/{schedule}', [SocialMediaController::class, 'destroy'])
             ->name('social-media.destroy');
+        Route::put('/app/social-media/facebook-posts/{post}', [SocialMediaController::class, 'updateFacebookPost'])
+            ->middleware('throttle:20,1')->name('social-media.facebook-posts.update');
+        Route::delete('/app/social-media/facebook-posts/{post}', [SocialMediaController::class, 'deleteFacebookPost'])
+            ->middleware('throttle:10,1')->name('social-media.facebook-posts.destroy');
         Route::get('/app/ai-reels', [AiReelController::class, 'index'])->name('ai-reels.index');
         Route::post('/app/ai-reels/schedules', [AiReelController::class, 'storeSchedule'])
             ->middleware('throttle:10,1')->name('ai-reels.schedules.store');
