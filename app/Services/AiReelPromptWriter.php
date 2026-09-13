@@ -33,7 +33,7 @@ class AiReelPromptWriter
         $duration = in_array((int) $reel->duration_seconds, [5, 10, 15], true) ? (int) $reel->duration_seconds : 5;
         $prompt = "Write a Runway video prompt and a social Reel caption for {$reel->agent->business_name}. {$instruction}\n"
             ."The Runway prompt must be in English, 45 to 100 words, affirmative, direct, and describe a cohesive {$duration}-second vertical multi-shot story with varied framing, purposeful subject motion, camera movement, lighting, and background activity. Keep the same subject and visual identity consistent across every shot. Describe preservation positively: the reference product remains stable, recognizable, sharply focused, and visually unchanged. Keep the Runway prompt free of negative instructions, command-like wording, generated text, people, hands, and unsupported factual details. "
-            ."The requested copy style is {$tone}. Only the caption must use the same language as the supplied brief or product and must not invent claims. "
+            ."The requested copy style is {$tone}. Write the caption as polished social-media marketing copy in the same language as the supplied brief or product. Use short readable paragraphs, 2 to 5 relevant emojis placed naturally, a concise call to action, and 2 to 5 relevant hashtags. Do not use generic catalog boilerplate, do not overuse emojis, and do not invent claims. "
             .'Business brief: '.($reel->user_prompt ?: 'Automatic product Reel')
             ."\nOptional reference URL supplied by the business (context only; do not infer claims from it): ".($reel->reference_url ?: 'none')
             ."\nVerified facts: ".json_encode($facts, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

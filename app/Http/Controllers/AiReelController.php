@@ -156,12 +156,24 @@ class AiReelController extends Controller
         ]);
     }
 
-    public function approve(AiReel $reel, TenantContext $tenant)
+    public function approve(Request $request, AiReel $reel, TenantContext $tenant)
     {
         $tenant->authorize(['owner', 'admin']);
         abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
         abort_unless($reel->status === 'awaiting_approval' && $reel->video_path, 422);
-        $reel->update(['status' => 'ready', 'approved_at' => now(), 'scheduled_for' => now()]);
+        $data = $request->validate([
+            'caption' => ['required', 'string', 'max:2200'],
+        ]);
+        $caption = trim(strip_tags($data['caption']));
+        if ($caption === '') {
+            throw ValidationException::withMessages(['caption' => 'The Reel caption is required.']);
+        }
+        $reel->update([
+            'caption' => $caption,
+            'status' => 'ready',
+            'approved_at' => now(),
+            'scheduled_for' => now(),
+        ]);
 
         return back()->with('reel_success', 'Reel approved. It is queued for Facebook and Instagram publishing.');
     }

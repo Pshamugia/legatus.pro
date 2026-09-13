@@ -4,11 +4,13 @@ namespace Tests\Feature;
 
 use App\Jobs\GenerateAiReel;
 use App\Jobs\PollAiReelGeneration;
+use App\Jobs\PublishAiReelDelivery;
 use App\Models\AiReel;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\AiReelPromptWriter;
 use App\Services\AiReelSourceImageStorage;
+use App\Services\MetaGraphClient;
 use App\Services\ReelCreditService;
 use App\Services\RunwayClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -205,14 +207,82 @@ class AiReelsTest extends TestCase
         Queue::assertPushed(GenerateAiReel::class, 1);
 
         Storage::disk('local')->put('reels/test.mp4', 'video');
-        $reel->update(['status' => 'awaiting_approval', 'video_path' => 'reels/test.mp4']);
+        $reel->update([
+            'status' => 'awaiting_approval', 'video_path' => 'reels/test.mp4',
+            'caption' => 'Original generated caption ✨ #Original',
+        ]);
         $this->artisan('legatus:dispatch-ai-reels')->assertSuccessful();
         $this->assertDatabaseHas('ai_reel_deliveries', ['ai_reel_id' => $reel->id, 'status' => 'scheduled']);
 
-        $this->actingAs($user)->post(route('ai-reels.approve', $reel))->assertRedirect();
+        $this->actingAs($user)->post(route('ai-reels.approve', $reel), [
+            'caption' => 'Edited business caption 📚✨ Shop now! #Books #Legatus',
+        ])->assertRedirect();
         $this->assertSame('ready', $reel->fresh()->status);
+        $this->assertSame('Edited business caption 📚✨ Shop now! #Books #Legatus', $reel->fresh()->caption);
         $this->artisan('legatus:dispatch-ai-reels')->assertSuccessful();
         $this->assertDatabaseMissing('ai_reel_deliveries', ['ai_reel_id' => $reel->id, 'status' => 'scheduled']);
+    }
+
+    public function test_reel_caption_is_sent_to_facebook_and_instagram(): void
+    {
+        Storage::fake('local');
+        [, $agent] = $this->tenant('reel-caption-delivery');
+        $this->connections($agent);
+        Storage::disk('local')->put('reels/caption.mp4', 'video');
+        $caption = 'Discover something special today 📚✨ Learn more! #Books #Reading';
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook', 'instagram'], 'status' => 'ready',
+            'video_path' => 'reels/caption.mp4', 'caption' => $caption, 'scheduled_for' => now(),
+        ]);
+        $facebook = $reel->deliveries()->create(['provider' => 'facebook', 'status' => 'queued']);
+        $instagram = $reel->deliveries()->create(['provider' => 'instagram', 'status' => 'queued']);
+        $meta = \Mockery::mock(MetaGraphClient::class);
+        $meta->shouldReceive('startFacebookReel')->once()->andReturn('facebook-video');
+        $meta->shouldReceive('uploadFacebookReel')->once()->with(\Mockery::type('object'), 'facebook-video', \Mockery::type('string'));
+        $meta->shouldReceive('finishFacebookReel')->once()->with(\Mockery::type('object'), 'facebook-video', $caption)->andReturn(['id' => 'facebook-post']);
+        $meta->shouldReceive('createInstagramReelContainer')->once()->with(\Mockery::type('object'), \Mockery::type('string'), $caption)->andReturn('instagram-container');
+        $meta->shouldReceive('instagramReelContainerStatus')->once()->with(\Mockery::type('object'), 'instagram-container')->andReturn('FINISHED');
+        $meta->shouldReceive('publishInstagramReelContainer')->once()->with(\Mockery::type('object'), 'instagram-container')->andReturn(['id' => 'instagram-post']);
+
+        (new PublishAiReelDelivery($facebook->id))->handle($meta);
+        (new PublishAiReelDelivery($instagram->id))->handle($meta);
+        (new PublishAiReelDelivery($instagram->id))->handle($meta);
+
+        $this->assertDatabaseHas('ai_reel_deliveries', ['id' => $facebook->id, 'provider_post_id' => 'facebook-post', 'status' => 'published']);
+        $this->assertDatabaseHas('ai_reel_deliveries', ['id' => $instagram->id, 'provider_post_id' => 'instagram-post', 'status' => 'published']);
+    }
+
+    public function test_luna_is_instructed_to_write_an_emoji_rich_grounded_reel_caption(): void
+    {
+        config()->set('services.openai.key', 'openai-test-key');
+        [, $agent] = $this->tenant('reel-caption-copy');
+        $product = $agent->products()->create($this->product('Caption Product'));
+        $reel = $agent->aiReels()->create([
+            'product_id' => $product->id, 'mode' => 'scheduled', 'providers' => ['facebook'],
+            'status' => 'queued', 'language' => 'English',
+        ]);
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response([
+                'output' => [[
+                    'content' => [[
+                        'type' => 'output_text',
+                        'text' => json_encode([
+                            'prompt' => 'A cohesive vertical multi-shot product story in warm cinematic light.',
+                            'caption' => "Meet Caption Product 📚✨\n\nDiscover it today!\n\n#Books #Reading",
+                        ], JSON_UNESCAPED_UNICODE),
+                    ]],
+                ]],
+            ]),
+        ]);
+
+        $copy = app(AiReelPromptWriter::class)->write($reel);
+
+        $this->assertStringContainsString('📚✨', $copy['caption']);
+        $this->assertStringContainsString('#Books #Reading', $copy['caption']);
+        $this->assertStringContainsString('https://shop.example/products/caption-product', $copy['caption']);
+        Http::assertSent(fn ($request): bool => str_contains((string) $request['input'], '2 to 5 relevant emojis')
+            && str_contains((string) $request['input'], '2 to 5 relevant hashtags')
+            && str_contains((string) $request['input'], 'do not invent claims'));
     }
 
     public function test_ten_second_custom_reel_costs_two_credits(): void
@@ -538,11 +608,15 @@ class AiReelsTest extends TestCase
         app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-next-preview');
         $agent->aiReels()->create([
             'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'caption' => 'Ready caption 📚✨ #Books',
         ]);
 
         $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
             ->assertOk()
             ->assertSee('Generate another preview')
+            ->assertSee('Facebook & Instagram caption', false)
+            ->assertSee('Ready caption 📚✨ #Books')
+            ->assertSee('Approve caption & publish', false)
             ->assertSee('data-can-manage="1"', false)
             ->assertSee('data-pending="0"', false);
     }
