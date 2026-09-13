@@ -228,6 +228,52 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseMissing('ai_reel_deliveries', ['ai_reel_id' => $reel->id, 'status' => 'scheduled']);
     }
 
+    public function test_business_can_save_a_reel_draft_and_publish_it_later(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [$user, $agent] = $this->tenant('saved-custom-reel');
+        $this->connections($agent);
+        Storage::disk('local')->put('reels/saved.mp4', 'video');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook', 'instagram'],
+            'status' => 'awaiting_approval', 'video_path' => 'reels/saved.mp4',
+            'caption' => 'Generated caption',
+        ]);
+        foreach (['facebook', 'instagram'] as $provider) {
+            $reel->deliveries()->create(['provider' => $provider, 'status' => 'scheduled']);
+        }
+
+        $this->actingAs($user)->post(route('ai-reels.save', $reel), [
+            'caption' => 'Saved business caption ✨ #Later',
+        ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHas('reel_success', 'Reel saved for later. Nothing was published.');
+
+        $reel->refresh();
+        $this->assertSame('saved', $reel->status);
+        $this->assertSame('Saved business caption ✨ #Later', $reel->caption);
+        $this->assertNull($reel->approved_at);
+        $this->assertNull($reel->scheduled_for);
+        $this->artisan('legatus:dispatch-ai-reels')->assertSuccessful();
+        Queue::assertNotPushed(PublishAiReelDelivery::class);
+
+        $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertOk()
+            ->assertSee('Saved draft. Edit the caption or publish whenever you are ready.')
+            ->assertSee('Publish saved Reel')
+            ->assertSee('Save changes');
+
+        $this->actingAs($user)->post(route('ai-reels.approve', $reel), [
+            'caption' => 'Final saved caption 🚀 #Publish',
+        ])->assertRedirect();
+
+        $reel->refresh();
+        $this->assertSame('ready', $reel->status);
+        $this->assertSame('Final saved caption 🚀 #Publish', $reel->caption);
+        $this->assertNotNull($reel->approved_at);
+        $this->assertNotNull($reel->scheduled_for);
+    }
+
     public function test_reel_caption_is_sent_to_facebook_and_instagram(): void
     {
         Storage::fake('local');
@@ -643,7 +689,7 @@ class AiReelsTest extends TestCase
             ->assertSee('Generate another preview')
             ->assertSee('Facebook & Instagram caption', false)
             ->assertSee('Ready caption 📚✨ #Books')
-            ->assertSee('Approve caption & publish', false)
+            ->assertSee('Approve caption & publish')
             ->assertSee('data-can-manage="1"', false)
             ->assertSee('data-pending="0"', false);
     }

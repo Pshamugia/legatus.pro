@@ -168,14 +168,8 @@ class AiReelController extends Controller
     {
         $tenant->authorize(['owner', 'admin']);
         abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
-        abort_unless($reel->status === 'awaiting_approval' && $reel->video_path, 422);
-        $data = $request->validate([
-            'caption' => ['required', 'string', 'max:2200'],
-        ]);
-        $caption = trim(strip_tags($data['caption']));
-        if ($caption === '') {
-            throw ValidationException::withMessages(['caption' => 'The Reel caption is required.']);
-        }
+        abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && $reel->video_path, 422);
+        $caption = $this->validatedCaption($request);
         $reel->update([
             'caption' => $caption,
             'status' => 'ready',
@@ -184,6 +178,22 @@ class AiReelController extends Controller
         ]);
 
         return back()->with('reel_success', 'Reel approved. It is queued for Facebook and Instagram publishing.');
+    }
+
+    public function save(Request $request, AiReel $reel, TenantContext $tenant)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
+        abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && $reel->video_path && ! $reel->approved_at, 422);
+
+        $reel->update([
+            'caption' => $this->validatedCaption($request),
+            'status' => 'saved',
+            'scheduled_for' => null,
+        ]);
+
+        return redirect()->route('ai-reels.index', ['tab' => 'custom'])
+            ->with('reel_success', 'Reel saved for later. Nothing was published.');
     }
 
     public function cancel(AiReel $reel, TenantContext $tenant, RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images)
@@ -232,7 +242,7 @@ class AiReelController extends Controller
     {
         $tenant->authorize(['owner', 'admin']);
         abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
-        abort_unless($reel->status === 'awaiting_approval' && ! $reel->approved_at, 422);
+        abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && ! $reel->approved_at, 422);
 
         $videoPath = $reel->video_path;
         $images->delete($reel);
@@ -253,5 +263,18 @@ class AiReelController extends Controller
         $schedule->update(['status' => $paused ? 'paused' : 'active', 'paused_at' => $paused ? now() : null]);
 
         return back()->with('reel_success', $paused ? 'Reel schedule paused.' : 'Reel schedule resumed.');
+    }
+
+    private function validatedCaption(Request $request): string
+    {
+        $data = $request->validate([
+            'caption' => ['required', 'string', 'max:2200'],
+        ]);
+        $caption = trim(strip_tags($data['caption']));
+        if ($caption === '') {
+            throw ValidationException::withMessages(['caption' => 'The Reel caption is required.']);
+        }
+
+        return $caption;
     }
 }
