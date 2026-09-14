@@ -1116,6 +1116,7 @@ class SocialMediaSchedulerTest extends TestCase
                 ->push([
                     'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                         'supported' => true, 'unsupported_fragments' => [],
+                        'distinct_from_recent' => true, 'similarity_reason' => '',
                     ])]]]],
                     'usage' => ['input_tokens' => 50, 'output_tokens' => 8],
                 ]),
@@ -1209,6 +1210,7 @@ class SocialMediaSchedulerTest extends TestCase
                 ->push([
                     'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                         'supported' => true, 'unsupported_fragments' => [],
+                        'distinct_from_recent' => true, 'similarity_reason' => '',
                     ])]]]],
                     'usage' => ['input_tokens' => 40, 'output_tokens' => 8],
                 ]),
@@ -1249,10 +1251,12 @@ class SocialMediaSchedulerTest extends TestCase
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $rejected], JSON_UNESCAPED_UNICODE)]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => false, 'unsupported_fragments' => [$rejected],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
                 ], JSON_UNESCAPED_UNICODE)]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $safe], JSON_UNESCAPED_UNICODE)]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => true, 'unsupported_fragments' => [],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
                 ], JSON_UNESCAPED_UNICODE)]]]]]),
         ]);
 
@@ -1267,6 +1271,117 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request): bool => str_contains(
             (string) data_get($request->data(), 'input.0.content.0.text'),
             'The previous draft lost its meaningful copy during factual review.',
+        ));
+    }
+
+    public function test_ai_copywriter_retries_copy_that_reuses_a_recent_post_opening_and_structure(): void
+    {
+        [, $agent] = $this->tenant('ai-copy-diversity');
+        config()->set('services.openai.key', 'test-openai-key');
+        $previousProduct = $agent->products()->create($this->product('Previous Book', 'Books', 7));
+        $product = $agent->products()->create($this->product('Distinct Book', 'Books', 8));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 2,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $previousProduct->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => now()->subHour(), 'published_at' => now()->subHour(),
+            'title' => $previousProduct->name, 'description' => $previousProduct->description,
+            'product_url' => data_get($previousProduct->metadata, 'product_url'),
+            'image_url' => $previousProduct->publicImageUrl(), 'language' => 'English',
+            'caption' => "Some books invite a slower look at the world.\n\nhttps://shop.example/products/previous-book\n\n#Reading",
+            'ai_generated_at' => now()->subHour(), 'ai_model' => 'gpt-5.6-luna',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
+        ]);
+        $repetitive = 'Some books open a different way of seeing the world. Read this story and discover its atmosphere.';
+        $distinct = 'Enter the story through its most unexpected detail. The verified description gives this title a character of its own, worth meeting without a borrowed formula.';
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $repetitive])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => true, 'unsupported_fragments' => [],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
+                ])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $distinct])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => true, 'unsupported_fragments' => [],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
+                ])]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringStartsWith($distinct, $caption);
+        $this->assertStringNotContainsString($repetitive, $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'Some books invite a slower look at the world.',
+        ));
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'The previous draft was too similar to earlier posts',
+        ));
+    }
+
+    public function test_ai_copywriter_retries_when_semantic_audit_finds_a_recycled_structure(): void
+    {
+        [, $agent] = $this->tenant('ai-copy-semantic-diversity');
+        config()->set('services.openai.key', 'test-openai-key');
+        $previousProduct = $agent->products()->create($this->product('Earlier Product', 'Objects', 9));
+        $product = $agent->products()->create($this->product('Current Product', 'Objects', 10));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 2,
+            'categories' => [], 'providers' => ['instagram'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $previousProduct->id, 'provider' => 'instagram',
+            'status' => 'published', 'scheduled_for' => now()->subHour(), 'published_at' => now()->subHour(),
+            'title' => $previousProduct->name, 'description' => $previousProduct->description,
+            'product_url' => data_get($previousProduct->metadata, 'product_url'),
+            'image_url' => $previousProduct->publicImageUrl(), 'language' => 'English',
+            'caption' => "Begin with a surprising question. Move into the product mood. End by inviting the reader closer.\n\nhttps://shop.example/earlier",
+            'ai_generated_at' => now()->subHour(), 'ai_model' => 'gpt-5.6-luna',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'instagram',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
+        ]);
+        $recycledStructure = 'What might this object reveal? Step into its particular mood. Come closer and explore it.';
+        $distinct = 'A single verified detail becomes the centre of this caption, leaving the product to speak without the familiar question-and-invitation sequence.';
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $recycledStructure])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => true, 'unsupported_fragments' => [],
+                    'distinct_from_recent' => false,
+                    'similarity_reason' => 'It repeats the question, mood, and invitation progression.',
+                ])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $distinct])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => true, 'unsupported_fragments' => [],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
+                ])]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringStartsWith($distinct, $caption);
+        $this->assertStringNotContainsString($recycledStructure, $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'It repeats the question, mood, and invitation progression.',
         ));
     }
 
