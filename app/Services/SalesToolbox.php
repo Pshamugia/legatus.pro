@@ -364,7 +364,6 @@ class SalesToolbox
             ->all();
     }
 
-
     private function applyProductSearchFilters($query, array $arguments): void
     {
         if ($arguments['category']) {
@@ -383,8 +382,7 @@ class SalesToolbox
         array $termGroups = [],
         bool $identityMatch = false,
         int $limit = 6,
-    )
-    {
+    ) {
         $presented = $candidates
             ->map(function ($product) use ($conversation, $termGroups): array {
                 $available = $this->availableStock($product, $conversation);
@@ -1637,6 +1635,8 @@ class SalesToolbox
             $score += $best;
         }
 
+        $score += count($this->compoundMatchedGroupIndexes(implode(' ', $fields), $termGroups)) * 100;
+
         return $score;
     }
 
@@ -1646,7 +1646,7 @@ class SalesToolbox
      * a one-token identity or the final token of a multi-token identity, which
      * avoids treating a shared first name as an exact person/product match.
      *
-     * @param list<list<string>> $termGroups
+     * @param  list<list<string>>  $termGroups
      * @return list<list<string>>
      */
     private function strongCatalogIdentityProjection(Agent $agent, array $termGroups): array
@@ -1734,8 +1734,49 @@ class SalesToolbox
             $product->search_text,
         ]));
 
-        return collect($termGroups)->filter(fn (array $variants): bool => collect($variants)
-            ->contains(fn (string $variant): bool => $this->textMatchesVariant($haystack, $variant)))->count();
+        $matchedIndexes = collect($termGroups)
+            ->keys()
+            ->filter(fn (int $index): bool => collect($termGroups[$index])
+                ->contains(fn (string $variant): bool => $this->textMatchesVariant($haystack, $variant)));
+
+        return $matchedIndexes
+            ->merge($this->compoundMatchedGroupIndexes($haystack, $termGroups))
+            ->unique()
+            ->count();
+    }
+
+    /**
+     * Treat adjacent customer words as the same identity when the verified
+     * catalog writes them as one token (for example "some thing" versus
+     * "something"). The exact catalog token is still required, so this does
+     * not relax an identity lookup to an unrelated partial word match.
+     *
+     * @param  list<list<string>>  $termGroups
+     * @return list<int>
+     */
+    private function compoundMatchedGroupIndexes(string $haystack, array $termGroups): array
+    {
+        if (count($termGroups) < 2) {
+            return [];
+        }
+
+        $tokens = preg_split('/[^\p{L}\p{N}%_+\-.]+/u', Str::lower($haystack), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $matched = [];
+
+        for ($index = 0; $index < count($termGroups) - 1; $index++) {
+            foreach ($termGroups[$index] as $left) {
+                foreach ($termGroups[$index + 1] as $right) {
+                    if (in_array($left.$right, $tokens, true)) {
+                        $matched[] = $index;
+                        $matched[] = $index + 1;
+
+                        continue 3;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique($matched));
     }
 
     private function productMatchesTermGroup($product, array $variants): bool

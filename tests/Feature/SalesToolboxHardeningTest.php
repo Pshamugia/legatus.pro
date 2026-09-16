@@ -2,9 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\CrawlPublicWebsite;
 use App\Models\Agent;
 use App\Models\Reservation;
-use App\Jobs\CrawlPublicWebsite;
+use App\Services\KnowledgeIngestionService;
 use App\Services\SalesToolbox;
 use App\Support\PrivacyRedactor;
 use Carbon\CarbonImmutable;
@@ -742,6 +743,27 @@ class SalesToolboxHardeningTest extends TestCase
         ], $agent, $conversation);
 
         $this->assertSame([$musketeers->id], collect($found['products'])->pluck('id')->all());
+    }
+
+    public function test_exact_lookup_matches_a_catalog_compound_when_the_customer_writes_it_as_separate_words(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'შიშველი მოველ ამქვეყნად',
+            'search_text' => 'შიშველი მოველ ამქვეყნად დევიდ უეისი',
+            'stock' => 0,
+            'metadata' => ['author' => 'დევიდ უეისი', 'stock_precision' => 'availability_only'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'დევიდ უეისის შიშველი მოველ ამ ქვეყნად',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame([$product->id], collect($result['unavailable_products'])->pluck('id')->all());
     }
 
     public function test_exact_identity_keeps_its_text_constraints_when_a_category_is_also_resolved(): void
@@ -1560,7 +1582,7 @@ class SalesToolboxHardeningTest extends TestCase
                   <button class="toggle-cart-btn">Add to cart</button>
                 </div>
                 HTML;
-        $this->assertCount(2, app(\App\Services\KnowledgeIngestionService::class)
+        $this->assertCount(2, app(KnowledgeIngestionService::class)
             ->storefrontProductsFromHtml($categoryHtml, 'https://bukinistebi.ge', true));
         Http::fake([
             'https://bukinistebi.ge/categories/curated-occasion' => Http::response($categoryHtml, 200, ['Content-Type' => 'text/html']),

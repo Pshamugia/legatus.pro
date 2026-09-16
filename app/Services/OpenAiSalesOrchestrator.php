@@ -619,6 +619,13 @@ class OpenAiSalesOrchestrator
             data_forget($context, 'pending_budget_request');
             data_forget($context, 'pending_catalog_suggestion');
             $conversation->update(['context' => $context]);
+
+            // A reaction, acknowledgement, gratitude, or farewell cannot be a
+            // product presentation. Even if the model searched unnecessarily
+            // and carried a verified ID into its draft, do not let channel
+            // delivery append that stale product's link to social dialogue.
+            $data['product_ids'] = [];
+            $data['factual_claims'] = [];
         }
         if (($verifiedDelivery['ok'] ?? false) === true) {
             $data['text'] = $verifiedDelivery['customer_message'];

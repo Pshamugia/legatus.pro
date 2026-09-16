@@ -647,6 +647,52 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([], $reply['tools_used']);
     }
 
+    public function test_conversation_reply_never_carries_a_stale_product_link(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'catalog-reaction-customer',
+            'status' => 'ai',
+            'channel' => 'facebook',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'reaction-search', 'output' => [[
+                'type' => 'function_call',
+                'name' => 'search_products',
+                'call_id' => 'reaction-search-call',
+                'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null]),
+            ]]])
+            ->push(['id' => 'reaction-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'არაფრის! თუ სხვა რამ დაგჭირდებათ, სიამოვნებით დაგეხმარებით.',
+                    'intent' => 'conversation',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [$product->id],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product',
+                        'product_id' => $product->id,
+                        'amount' => null,
+                        'quantity' => null,
+                        'reference' => null,
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'სამწუხაროა, მადლობა', $conversation);
+
+        $this->assertSame('conversation', $reply['intent']);
+        $this->assertSame([], $reply['products']->all());
+        $this->assertSame('არაფრის! თუ სხვა რამ დაგჭირდებათ, სიამოვნებით დაგეხმარებით.', $reply['text']);
+    }
+
     public function test_empty_business_catalog_recommendation_cannot_be_replaced_with_general_model_knowledge(): void
     {
         $this->seed();
