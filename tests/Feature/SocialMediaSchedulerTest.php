@@ -390,6 +390,67 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame($replacement->id, $post->fresh()->product_id);
     }
 
+    public function test_visible_zero_inventory_overrides_stale_in_stock_structured_data(): void
+    {
+        [$user, $agent] = $this->tenant('stale-structured-stock-replacement');
+        $this->connections($agent);
+        $soldOut = $agent->products()->create($this->product('Stale Structured Stock', 'General', 2));
+        $soldOutUrl = 'https://example.com/products/stale-structured-stock';
+        $soldOut->update(['metadata' => array_replace($soldOut->metadata, [
+            'product_url' => $soldOutUrl,
+        ])]);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $post = $schedule->posts()->firstOrFail();
+        $replacement = $agent->products()->create($this->product('Actually Available Replacement', 'General', 2));
+        $replacementUrl = 'https://example.com/products/actually-available-replacement';
+        $replacement->update(['metadata' => array_replace($replacement->metadata, [
+            'product_url' => $replacementUrl,
+        ])]);
+
+        Http::fake(function ($request) use ($soldOut, $soldOutUrl, $replacement, $replacementUrl) {
+            if ($request->url() === $soldOutUrl) {
+                return Http::response(
+                    '<html><body>'
+                    .'<script type="application/ld+json">'.json_encode([
+                        '@context' => 'https://schema.org',
+                        '@type' => 'Product',
+                        'name' => $soldOut->name,
+                        'sku' => $soldOut->sku,
+                        'offers' => [
+                            '@type' => 'Offer',
+                            'url' => $soldOutUrl,
+                            'availability' => 'https://schema.org/InStock',
+                        ],
+                    ], JSON_THROW_ON_ERROR).'</script>'
+                    .'<input type="hidden" id="max-quantity" value="0">'
+                    .'</body></html>',
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+            if ($request->url() === $replacementUrl) {
+                return Http::response($this->storefrontCard($replacement->name, $replacementUrl, true), 200, ['Content-Type' => 'text/html']);
+            }
+
+            return Http::response('image', 200, ['Content-Type' => 'image/jpeg']);
+        });
+
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $post->scheduled_for);
+
+        $this->assertSame([$post->id], $safeIds);
+        $this->assertSame(0, $soldOut->fresh()->stock);
+        $this->assertSame($replacement->id, $post->fresh()->product_id);
+    }
+
     public function test_new_schedules_do_not_reuse_products_that_are_reserved_by_another_schedule(): void
     {
         [$user, $agent] = $this->tenant('cross-schedule-product-rotation');

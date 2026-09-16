@@ -27,12 +27,16 @@ class PublicProductAvailabilityVerifier
             $response = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html'], 6, 1);
             $body = $response->body();
             $origin = (parse_url($url, PHP_URL_SCHEME) ?: 'https').'://'.parse_url($url, PHP_URL_HOST);
-            $storefront = $this->matchingRecord(
-                $this->ingestion->storefrontProductsFromHtml($body, $origin),
-                $product,
-                $url,
-            );
-            $available = $storefront ? $this->availability($storefront) : null;
+            $available = $this->explicitPageAvailability($body);
+
+            if ($available === null) {
+                $storefront = $this->matchingRecord(
+                    $this->ingestion->storefrontProductsFromHtml($body, $origin),
+                    $product,
+                    $url,
+                );
+                $available = $storefront ? $this->availability($storefront) : null;
+            }
 
             if ($available === null) {
                 $structured = $this->matchingRecord(
@@ -60,6 +64,42 @@ class PublicProductAvailabilityVerifier
 
             return $this->results[$product->id] = null;
         }
+    }
+
+    /**
+     * Prefer an explicit zero-inventory control from the rendered product page
+     * over stale structured data. Storefronts commonly expose the maximum
+     * purchasable quantity in a language-neutral input even when their JSON-LD
+     * still incorrectly advertises InStock.
+     */
+    private function explicitPageAvailability(string $body): ?bool
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$body);
+        $xpath = new \DOMXPath($dom);
+        $inventoryFields = [
+            'maxquantity',
+            'maximumquantity',
+            'maxstock',
+            'stockquantity',
+            'availablequantity',
+            'inventoryquantity',
+        ];
+
+        foreach ($xpath->query('//*[@id or @name]') as $node) {
+            $identifier = Str::lower($node->getAttribute('id') ?: $node->getAttribute('name'));
+            $identifier = preg_replace('/[^a-z0-9]+/', '', $identifier) ?? '';
+            if (! in_array($identifier, $inventoryFields, true)) {
+                continue;
+            }
+
+            $value = trim($node->getAttribute('value'));
+            if ($value !== '' && is_numeric($value) && (float) $value <= 0) {
+                return false;
+            }
+        }
+
+        return null;
     }
 
     private function matchingRecord(array $records, Product $product, string $url): ?array
