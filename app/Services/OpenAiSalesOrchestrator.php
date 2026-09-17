@@ -77,6 +77,22 @@ class OpenAiSalesOrchestrator
             $modelUsage,
         );
         $catalogContext = $this->mergeActiveCatalogScope($conversation, $catalogContext);
+        $explicitNameIdentity = $this->explicitQuotedCatalogIdentity($message);
+        if (is_array($catalogContext)
+            && ($catalogContext['is_catalog_follow_up'] ?? false) === true
+            && $explicitNameIdentity !== null) {
+            // Quotation marks are an explicit customer boundary around a
+            // product title/name. Preserve that identity even when a model
+            // tries to broaden an empty exact lookup to a thematically similar
+            // catalogue item.
+            $resolvedIdentity = trim((string) ($catalogContext['resolved_query'] ?? ''));
+            if ($resolvedIdentity === '') {
+                $resolvedIdentity = $explicitNameIdentity;
+            }
+            $catalogContext['resolved_query'] = $resolvedIdentity;
+            $catalogContext['resolved_queries'] = [$resolvedIdentity];
+            $catalogContext['catalog_match_scope'] = 'exact_identity';
+        }
         if (($catalogContext['is_human_request'] ?? false) === true && $agent->humanHandoffEnabled()) {
             $reason = 'Customer requested a human operator.';
             $this->forceHandoff(
@@ -140,6 +156,8 @@ class OpenAiSalesOrchestrator
                     'exclude_product_ids' => $excludedIds->all(),
                     '_identity_match' => $matchScope === 'exact_identity',
                     '_return_all_matches' => $expectsCompleteSet,
+                    '_preserve_exact_identity' => $explicitNameIdentity !== null,
+                    '_required_name_identity' => $explicitNameIdentity,
                 ];
                 $individualSearches = $resolvedQueries->map(function (string $query) use ($arguments, $agent, $conversation): array {
                     $queryArguments = array_replace($arguments, ['query' => $query]);
@@ -162,6 +180,7 @@ class OpenAiSalesOrchestrator
                         ])->all(),
                     ];
                 if ($matchScope === 'exact_identity'
+                    && $explicitNameIdentity === null
                     && $resolvedQueries->count() === 1
                     && ($result['products'] ?? []) === []
                     && ($result['unavailable_products'] ?? []) === []
@@ -226,6 +245,7 @@ class OpenAiSalesOrchestrator
                     'resolved_query' => $resolvedQuery,
                     'resolved_category' => $resolvedCategory,
                     'catalog_match_scope' => $matchScope,
+                    'explicit_name_identity' => $explicitNameIdentity,
                     'exclude_product_ids' => $excludedIds->all(),
                     'expects_complete_set' => $expectsCompleteSet,
                 ]];
@@ -432,7 +452,17 @@ class OpenAiSalesOrchestrator
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
                         $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
                         $args['_return_all_matches'] = (bool) data_get($semanticResolution, 'result.expects_complete_set', false);
+                        $args['_preserve_exact_identity'] = filled(data_get($semanticResolution, 'result.explicit_name_identity'));
+                        $args['_required_name_identity'] = data_get($semanticResolution, 'result.explicit_name_identity');
                     }
+                }
+                if ($call['name'] === 'search_products' && $explicitNameIdentity !== null) {
+                    if (blank($args['query'] ?? null)) {
+                        $args['query'] = $explicitNameIdentity;
+                    }
+                    $args['_identity_match'] = true;
+                    $args['_preserve_exact_identity'] = true;
+                    $args['_required_name_identity'] = $explicitNameIdentity;
                 }
                 if ($call['name'] === 'recommend_products') {
                     // The model owns the conversational interpretation, but a
@@ -1592,6 +1622,17 @@ class OpenAiSalesOrchestrator
         }
 
         return $resolved;
+    }
+
+    private function explicitQuotedCatalogIdentity(string $message): ?string
+    {
+        if (! preg_match('/(?:["\x{201C}\x{201E}\x{00AB}])\s*([^"\x{201C}\x{201D}\x{201E}\x{00AB}\x{00BB}]{2,160}?)\s*(?:["\x{201C}\x{201D}\x{00BB}])/u', $message, $matches)) {
+            return null;
+        }
+
+        $identity = preg_replace('/\s+/u', ' ', trim((string) ($matches[1] ?? ''))) ?? '';
+
+        return $identity !== '' ? $identity : null;
     }
 
     private function activeCatalogProductIds(Conversation $conversation): Collection

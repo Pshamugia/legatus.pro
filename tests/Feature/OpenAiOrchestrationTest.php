@@ -1816,6 +1816,88 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
     }
 
+    public function test_a_quoted_exact_title_is_not_broadened_to_another_product_after_an_empty_lookup(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_replace($agent->settings ?? [], [
+            'catalog_search_url' => 'https://shop.example/search?q={query}',
+        ])]);
+        $agent->products()->update(['is_active' => false]);
+        $wrongProduct = $agent->products()->create([
+            'name' => 'Independent Republic Before Revolution',
+            'description' => 'A study of state power and political change.',
+            'search_text' => 'Independent Republic Before Revolution state power political change',
+            'price' => 25,
+            'stock' => 0,
+            'is_active' => true,
+        ]);
+        config([
+            'services.openai.key' => 'test-key',
+            'legatus.semantic_orchestration_enabled' => true,
+        ]);
+        $resolverCalls = 0;
+
+        Http::fake(function ($request) use (&$resolverCalls) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    $resolverCalls++;
+
+                    return Http::response(['id' => 'quoted-title-resolution', 'output' => [[
+                        'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                            'is_delivery_request' => false,
+                            'delivery_request_type' => 'none',
+                            'is_human_request' => false,
+                            'is_catalog_follow_up' => true,
+                            'catalog_scope_action' => 'replace',
+                            'recommendation_scope' => 'none',
+                            'recommendation_query' => null,
+                            'recommendation_category' => null,
+                            'recommendation_occasion' => null,
+                            'resolved_query' => 'Lenin State and Revolution',
+                            'resolved_queries' => ['Lenin State and Revolution'],
+                            'resolved_category' => null,
+                            'catalog_match_scope' => 'exact_identity',
+                            'exclude_product_ids' => [],
+                            'expects_complete_set' => false,
+                        ])]],
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'quoted-title-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'I could not find the exact requested product in the catalog.',
+                        'intent' => 'discovery',
+                        'confidence' => 1,
+                        'handoff' => false,
+                        'escalation_reason' => null,
+                        'product_ids' => [],
+                        'sources' => [],
+                        'factual_claims' => [],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have Lenin\'s "State and Revolution"?',
+        ])->assertOk()->assertJsonPath('products', []);
+
+        $this->assertSame(1, $resolverCalls);
+        $this->assertStringNotContainsString($wrongProduct->name, $response->json('text'));
+        $run = AgentRun::where('agent_id', $agent->id)->latest('id')->firstOrFail();
+        $searchCall = collect($run->tools_used)->firstWhere('name', 'search_products');
+        $this->assertSame('Lenin State and Revolution', data_get($searchCall, 'arguments.query'));
+        $this->assertTrue(data_get($searchCall, 'arguments._preserve_exact_identity'));
+        $this->assertSame('State and Revolution', data_get($searchCall, 'arguments._required_name_identity'));
+        $this->assertSame([], data_get($searchCall, 'result.unavailable_products'));
+    }
+
     public function test_a_verified_available_product_is_never_hidden_by_a_generic_model_answer(): void
     {
         $this->seed();

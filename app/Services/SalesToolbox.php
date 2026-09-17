@@ -68,6 +68,8 @@ class SalesToolbox
     {
         $termGroups = $this->searchTermGroups((string) $a['query']);
         $identityMatch = (bool) ($a['_identity_match'] ?? false);
+        $preserveExactIdentity = (bool) ($a['_preserve_exact_identity'] ?? false);
+        $requiredNameTermGroups = $this->searchTermGroups((string) ($a['_required_name_identity'] ?? ''));
         if ($termGroups === []) {
             return [
                 'ok' => true,
@@ -88,7 +90,7 @@ class SalesToolbox
         );
         $categoryIndexPending = $taxonomyProductIds === [];
         $presentationLimit = (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6;
-        $localSearch = function () use ($agent, $conversation, $a, &$termGroups, $identityMatch, $presentationLimit, &$taxonomyProductIds) {
+        $localSearch = function () use ($agent, $conversation, $a, &$termGroups, $identityMatch, $presentationLimit, &$taxonomyProductIds, $requiredNameTermGroups) {
             if ($termGroups === []) {
                 return collect();
             }
@@ -144,10 +146,11 @@ class SalesToolbox
                 // Fetch one extra candidate for an honest has_more signal.
                 // The extra record is never exposed to the customer.
                 min(50, $presentationLimit + ((bool) ($a['_return_all_matches'] ?? false) ? 0 : 1)),
+                $requiredNameTermGroups,
             );
         };
         $matches = $localSearch();
-        if ($identityMatch && $matches->isEmpty() && count($termGroups) > 1) {
+        if ($identityMatch && ! $preserveExactIdentity && $matches->isEmpty() && count($termGroups) > 1) {
             // Semantic resolution can occasionally leave conversational action
             // words around an otherwise exact tenant entity (for example an
             // author/brand plus "I want to buy"). Project the failed query onto
@@ -216,7 +219,7 @@ class SalesToolbox
             // local query after importing so category/genre membership remains
             // authoritative for candidate selection.
             $matches = $localSearch();
-            if ($identityMatch && $matches->isEmpty() && count($termGroups) > 1) {
+            if ($identityMatch && ! $preserveExactIdentity && $matches->isEmpty() && count($termGroups) > 1) {
                 // The first live lookup may have introduced the very catalog
                 // identity needed to discard conversational/format words.
                 // Retry projection in this same customer turn instead of
@@ -240,6 +243,7 @@ class SalesToolbox
                 $remoteSearch,
                 $identityMatch ? $termGroups : [],
                 $identityMatch,
+                $requiredNameTermGroups,
             );
             $products = $remoteMatches->where('available', true)->values();
             $unavailableProducts = $remoteMatches->where('available', false)->values();
@@ -382,9 +386,10 @@ class SalesToolbox
         array $termGroups = [],
         bool $identityMatch = false,
         int $limit = 6,
+        array $requiredNameTermGroups = [],
     ) {
         $presented = $candidates
-            ->map(function ($product) use ($conversation, $termGroups): array {
+            ->map(function ($product) use ($conversation, $termGroups, $requiredNameTermGroups): array {
                 $available = $this->availableStock($product, $conversation);
                 $precision = $this->stockPrecision($product);
 
@@ -404,6 +409,7 @@ class SalesToolbox
                     '_available_stock' => $available,
                     '_search_score' => $this->productSearchScore($product, $termGroups),
                     '_matched_groups' => $this->productMatchedGroupCount($product, $termGroups),
+                    '_matched_name_groups' => $this->textMatchedGroupCount((string) $product->name, $requiredNameTermGroups),
                 ];
 
                 if ($precision === 'exact') {
@@ -428,6 +434,11 @@ class SalesToolbox
                 && $product['_matched_groups'] === $maximumMatches
                 && $product['_matched_groups'] >= $requiredMatches);
         }
+        if ($requiredNameTermGroups !== []) {
+            $presented = $presented->filter(
+                fn (array $product): bool => $product['_matched_name_groups'] === count($requiredNameTermGroups),
+            );
+        }
 
         return $presented
             // Availability is a commercial constraint, not merely display
@@ -442,7 +453,7 @@ class SalesToolbox
             ])
             ->take(max(1, min($limit, 50)))
             ->map(function (array $product): array {
-                unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups']);
+                unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups'], $product['_matched_name_groups']);
 
                 return $product;
             })
@@ -1404,6 +1415,7 @@ class SalesToolbox
         ?array $response,
         array $termGroups = [],
         bool $identityMatch = false,
+        array $requiredNameTermGroups = [],
     ) {
         if (! is_array($response) || ! is_array($response['data'] ?? null) || ! array_is_list($response['data'])) {
             return collect();
@@ -1439,7 +1451,14 @@ class SalesToolbox
 
         // The remote endpoint determines semantic ordering, while every returned
         // row remains bound to the tenant's last authoritative signed snapshot.
-        return $this->presentSearchProducts($products, $conversation, $termGroups, $identityMatch);
+        return $this->presentSearchProducts(
+            $products,
+            $conversation,
+            $termGroups,
+            $identityMatch,
+            6,
+            $requiredNameTermGroups,
+        );
     }
 
     private function validatedSearchSuggestion(string $query, mixed $suggestion): ?string
@@ -1720,10 +1739,6 @@ class SalesToolbox
 
     private function productMatchedGroupCount($product, array $termGroups): int
     {
-        if ($termGroups === []) {
-            return 0;
-        }
-
         $haystack = Str::lower(implode(' ', [
             $product->sku,
             $product->name,
@@ -1733,6 +1748,17 @@ class SalesToolbox
             $product->description,
             $product->search_text,
         ]));
+
+        return $this->textMatchedGroupCount($haystack, $termGroups);
+    }
+
+    private function textMatchedGroupCount(string $haystack, array $termGroups): int
+    {
+        if ($termGroups === []) {
+            return 0;
+        }
+
+        $haystack = Str::lower($haystack);
 
         $matchedIndexes = collect($termGroups)
             ->keys()

@@ -745,6 +745,28 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([$musketeers->id], collect($found['products'])->pluck('id')->all());
     }
 
+    public function test_an_explicit_quoted_title_cannot_match_words_spread_across_another_products_text(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 0);
+        $product->update([
+            'name' => 'Independent Republic Before Revolution',
+            'description' => 'A study of state power and political change.',
+            'search_text' => 'Independent Republic Before Revolution state power political change',
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'State and Revolution',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+            '_preserve_exact_identity' => true,
+            '_required_name_identity' => 'State and Revolution',
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame([], $result['unavailable_products']);
+    }
+
     public function test_exact_lookup_matches_a_catalog_compound_when_the_customer_writes_it_as_separate_words(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
