@@ -384,6 +384,44 @@ class MetaTransportTest extends TestCase
         Queue::assertNotPushed(SendMetaMessage::class);
     }
 
+    public function test_plain_thanks_after_an_operator_reply_and_ai_release_never_triggers_an_ai_introduction(): void
+    {
+        Queue::fake();
+        config()->set('services.openai.key', 'test-key');
+        Http::preventStrayRequests();
+        $connection = $this->connection('facebook', 'page-operator-thanks');
+        $senderId = 'operator-thanks-customer';
+        $conversation = $connection->agent->conversations()->create([
+            'visitor_id' => "meta:facebook:{$connection->id}:{$senderId}",
+            'channel' => 'facebook',
+            'status' => 'ai',
+        ]);
+        $conversation->messages()->create(['role' => 'human', 'content' => 'არა, ეს წიგნი ამჟამად არ გვაქვს.']);
+        $conversation->messages()->create(['role' => 'system', 'content' => 'Conversation returned to Legatus.']);
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'operator-thanks-mid-1',
+            'provider_sender_id' => $senderId,
+            'provider_recipient_id' => 'page-operator-thanks',
+            'message_type' => 'text',
+            'status' => 'received',
+            'payload' => ['text' => 'მადლობა'],
+            'received_at' => now(),
+        ]);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+
+        $this->assertSame('processed', $inbound->fresh()->status);
+        $this->assertDatabaseHas('messages', ['conversation_id' => $conversation->id, 'role' => 'customer', 'content' => 'მადლობა']);
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
+        Queue::assertNotPushed(SendMetaMessage::class);
+        Http::assertNothingSent();
+    }
+
     public function test_expired_connection_inbound_is_redacted_without_falsely_pausing_ai(): void
     {
         Queue::fake();

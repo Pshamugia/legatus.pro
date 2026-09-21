@@ -161,6 +161,23 @@ class SalesAgentService
             data_forget($context, 'pending_budget_request');
             data_forget($context, 'pending_catalog_suggestion');
             $conversation->update(['context' => $context]);
+
+            // A plain thank-you or farewell ends a social-channel exchange.
+            // This deterministic gate must run before any generated reply or
+            // first-AI-message disclosure can be queued for Meta delivery.
+            if (in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)) {
+                return [
+                    'text' => null,
+                    'silent' => true,
+                    'intent' => 'conversation',
+                    'confidence' => 1.0,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'products' => [],
+                    'sources' => [],
+                    'tools_used' => ['social_closure'],
+                ];
+            }
         }
 
         $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
