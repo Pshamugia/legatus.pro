@@ -68,6 +68,7 @@ class SalesToolbox
     {
         $termGroups = $this->searchTermGroups((string) $a['query']);
         $identityMatch = (bool) ($a['_identity_match'] ?? false);
+        $entityFamilyMatch = (bool) ($a['_entity_family_match'] ?? false);
         $preserveExactIdentity = (bool) ($a['_preserve_exact_identity'] ?? false);
         $requiredNameTermGroups = $this->searchTermGroups((string) ($a['_required_name_identity'] ?? ''));
         if ($termGroups === []) {
@@ -90,7 +91,7 @@ class SalesToolbox
         );
         $categoryIndexPending = $taxonomyProductIds === [];
         $presentationLimit = (bool) ($a['_return_all_matches'] ?? false) ? 50 : 6;
-        $localSearch = function () use ($agent, $conversation, $a, &$termGroups, $identityMatch, $presentationLimit, &$taxonomyProductIds, $requiredNameTermGroups) {
+        $localSearch = function () use ($agent, $conversation, $a, &$termGroups, $identityMatch, $entityFamilyMatch, $presentationLimit, &$taxonomyProductIds, $requiredNameTermGroups) {
             if ($termGroups === []) {
                 return collect();
             }
@@ -109,17 +110,23 @@ class SalesToolbox
                 && $taxonomyProductIds !== null
                 && (filled($a['category'] ?? null) || count($termGroups) === 1);
             if (! $authoritativeCategoryBrowse) {
-                $q->where(function ($termQuery) use ($termGroups): void {
+                $q->where(function ($termQuery) use ($termGroups, $entityFamilyMatch): void {
                     foreach ($termGroups as $variants) {
                         $patterns = collect($variants)
                             ->map(fn (string $variant): string => $this->literalContainsPattern($variant));
                         foreach ($patterns as $pattern) {
-                            $termQuery->orWhere(fn ($candidate) => $candidate
-                                ->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
-                                ->orWhereRaw("LOWER(products.sku) LIKE ? ESCAPE '!'", [$pattern])
-                                ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern])
-                                ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
-                                ->orWhereRaw("LOWER(products.search_text) LIKE ? ESCAPE '!'", [$pattern]));
+                            $termQuery->orWhere(function ($candidate) use ($pattern, $entityFamilyMatch): void {
+                                $candidate->whereRaw("LOWER(products.name) LIKE ? ESCAPE '!'", [$pattern])
+                                    ->orWhereRaw("LOWER(products.sku) LIKE ? ESCAPE '!'", [$pattern])
+                                    ->orWhereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [$pattern])
+                                    ->orWhereRaw("LOWER(products.description) LIKE ? ESCAPE '!'", [$pattern])
+                                    ->orWhereRaw("LOWER(products.search_text) LIKE ? ESCAPE '!'", [$pattern]);
+                                if ($entityFamilyMatch) {
+                                    foreach (['series', 'author', 'brand', 'creator', 'manufacturer'] as $field) {
+                                        $candidate->orWhere('products.metadata->'.$field, 'like', $pattern);
+                                    }
+                                }
+                            });
                         }
                     }
                 });
@@ -147,6 +154,7 @@ class SalesToolbox
                 // The extra record is never exposed to the customer.
                 min(50, $presentationLimit + ((bool) ($a['_return_all_matches'] ?? false) ? 0 : 1)),
                 $requiredNameTermGroups,
+                $entityFamilyMatch && $taxonomyProductIds === null,
             );
         };
         $matches = $localSearch();
@@ -244,6 +252,7 @@ class SalesToolbox
                 $identityMatch ? $termGroups : [],
                 $identityMatch,
                 $requiredNameTermGroups,
+                $entityFamilyMatch && $taxonomyProductIds === null,
             );
             $products = $remoteMatches->where('available', true)->values();
             $unavailableProducts = $remoteMatches->where('available', false)->values();
@@ -425,9 +434,10 @@ class SalesToolbox
         bool $identityMatch = false,
         int $limit = 6,
         array $requiredNameTermGroups = [],
+        bool $entityFamilyMatch = false,
     ) {
         $presented = $candidates
-            ->map(function ($product) use ($conversation, $termGroups, $requiredNameTermGroups): array {
+            ->map(function ($product) use ($conversation, $termGroups, $requiredNameTermGroups, $entityFamilyMatch, $identityMatch): array {
                 $available = $this->availableStock($product, $conversation);
                 $precision = $this->stockPrecision($product);
 
@@ -448,6 +458,9 @@ class SalesToolbox
                     '_search_score' => $this->productSearchScore($product, $termGroups),
                     '_matched_groups' => $this->productMatchedGroupCount($product, $termGroups),
                     '_matched_name_groups' => $this->textMatchedGroupCount((string) $product->name, $requiredNameTermGroups),
+                    '_matched_entity_groups' => $entityFamilyMatch ? $this->entityIdentityMatchCount($product, $termGroups) : 0,
+                    '_matched_identity_groups' => $identityMatch && count($termGroups) <= 2
+                        ? $this->productIdentityMatchCount($product, $termGroups) : 0,
                 ];
 
                 if ($precision === 'exact') {
@@ -477,6 +490,21 @@ class SalesToolbox
                 fn (array $product): bool => $product['_matched_name_groups'] === count($requiredNameTermGroups),
             );
         }
+        if ($entityFamilyMatch && $termGroups !== []) {
+            // Entity-family requests (series, author, brand, etc.) need the
+            // complete named identity in a verified identity field. A word
+            // appearing only in a description is not evidence of membership.
+            $presented = $presented->filter(
+                fn (array $product): bool => $product['_matched_entity_groups'] === count($termGroups),
+            );
+        }
+        if ($identityMatch && count($termGroups) <= 2) {
+            // A short named lookup cannot be established by borrowing one
+            // word from a title and the other from descriptive prose.
+            $presented = $presented->filter(
+                fn (array $product): bool => $product['_matched_identity_groups'] === count($termGroups),
+            );
+        }
 
         return $presented
             // Availability is a commercial constraint, not merely display
@@ -491,7 +519,7 @@ class SalesToolbox
             ])
             ->take(max(1, min($limit, 50)))
             ->map(function (array $product): array {
-                unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups'], $product['_matched_name_groups']);
+                unset($product['_available_stock'], $product['_search_score'], $product['_matched_groups'], $product['_matched_name_groups'], $product['_matched_entity_groups'], $product['_matched_identity_groups']);
 
                 return $product;
             })
@@ -1454,6 +1482,7 @@ class SalesToolbox
         array $termGroups = [],
         bool $identityMatch = false,
         array $requiredNameTermGroups = [],
+        bool $entityFamilyMatch = false,
     ) {
         if (! is_array($response) || ! is_array($response['data'] ?? null) || ! array_is_list($response['data'])) {
             return collect();
@@ -1496,6 +1525,7 @@ class SalesToolbox
             $identityMatch,
             6,
             $requiredNameTermGroups,
+            $entityFamilyMatch,
         );
     }
 
@@ -1661,6 +1691,10 @@ class SalesToolbox
             'sku' => Str::lower((string) $product->sku),
             'name' => Str::lower((string) $product->name),
             'author' => Str::lower((string) data_get($product->metadata, 'author', '')),
+            'series' => Str::lower((string) data_get($product->metadata, 'series', '')),
+            'brand' => Str::lower((string) data_get($product->metadata, 'brand', '')),
+            'creator' => Str::lower((string) data_get($product->metadata, 'creator', '')),
+            'manufacturer' => Str::lower((string) data_get($product->metadata, 'manufacturer', '')),
             'category' => Str::lower((string) $product->category),
             'genres' => Str::lower(implode(' ', array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar'))),
             'themes' => Str::lower(implode(' ', array_filter((array) data_get($product->metadata, 'themes', []), 'is_scalar'))),
@@ -1669,7 +1703,7 @@ class SalesToolbox
             'search_text' => Str::lower((string) $product->search_text),
         ];
         $tokens = collect($fields)->map(fn (string $field): array => preg_split('/[^\p{L}\p{N}%_+\-.]+/u', $field, -1, PREG_SPLIT_NO_EMPTY) ?: []);
-        $weights = ['sku' => 220, 'name' => 180, 'author' => 200, 'category' => 120, 'genres' => 120, 'themes' => 120, 'mood' => 110, 'description' => 70, 'search_text' => 40];
+        $weights = ['sku' => 220, 'name' => 180, 'author' => 200, 'series' => 200, 'brand' => 200, 'creator' => 200, 'manufacturer' => 200, 'category' => 120, 'genres' => 120, 'themes' => 120, 'mood' => 110, 'description' => 70, 'search_text' => 40];
         $score = 0;
 
         foreach ($termGroups as $variants) {
@@ -1781,6 +1815,10 @@ class SalesToolbox
             $product->sku,
             $product->name,
             data_get($product->metadata, 'author', ''),
+            data_get($product->metadata, 'series', ''),
+            data_get($product->metadata, 'brand', ''),
+            data_get($product->metadata, 'creator', ''),
+            data_get($product->metadata, 'manufacturer', ''),
             $product->category,
             implode(' ', array_filter((array) data_get($product->metadata, 'genres', []), 'is_scalar')),
             $product->description,
@@ -1788,6 +1826,34 @@ class SalesToolbox
         ]));
 
         return $this->textMatchedGroupCount($haystack, $termGroups);
+    }
+
+    private function entityIdentityMatchCount($product, array $termGroups): int
+    {
+        return collect($this->productIdentityFields($product))
+            ->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
+            ->map(fn ($value): int => $this->textMatchedGroupCount((string) $value, $termGroups))
+            ->max() ?? 0;
+    }
+
+    private function productIdentityMatchCount($product, array $termGroups): int
+    {
+        return $this->textMatchedGroupCount(implode(' ', array_filter(
+            $this->productIdentityFields($product),
+            fn ($value): bool => is_scalar($value) && trim((string) $value) !== '',
+        )), $termGroups);
+    }
+
+    private function productIdentityFields($product): array
+    {
+        $metadata = (array) $product->metadata;
+
+        return [
+            $product->name, $product->sku, $product->category,
+            data_get($metadata, 'author'), data_get($metadata, 'brand'),
+            data_get($metadata, 'creator'), data_get($metadata, 'manufacturer'),
+            data_get($metadata, 'series'),
+        ];
     }
 
     private function textMatchedGroupCount(string $haystack, array $termGroups): int

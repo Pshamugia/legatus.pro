@@ -422,6 +422,7 @@ class OpenAiOrchestrationTest extends TestCase
             ->firstOrFail();
         $searchCall = collect($searchRun->tools_used)->firstWhere('name', 'search_products');
         $this->assertSame('Acme', data_get($searchCall, 'arguments.query'));
+        $this->assertTrue(data_get($searchCall, 'arguments._entity_family_match'));
         $this->assertSame([$previous->id], data_get($searchCall, 'arguments.exclude_product_ids'));
         $this->assertSame('Acme', data_get($conversation->fresh()->context, 'active_catalog_scope.query'));
         $contextRequest = Http::recorded()

@@ -853,6 +853,45 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertCount(15, $entityFamily['products']);
     }
 
+    public function test_named_series_lookup_requires_verified_series_identity_not_a_shared_word(): void
+    {
+        [$agent, $unrelated, $conversation] = $this->context(stock: 4);
+        $unrelated->update([
+            'name' => 'დიდი სახეები პატარა ჩარჩოებში',
+            'description' => 'წიგნი მხატვრების შესახებ',
+            'search_text' => 'დიდი სახეები პატარა ჩარჩოებში მხატვრები',
+            'metadata' => [],
+        ]);
+        $seriesVolume = $agent->products()->create([
+            'name' => 'ვან გოგი',
+            'search_text' => 'ვან გოგი',
+            'price' => 12,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['series' => 'დიდი მხატვრები'],
+        ]);
+        Http::fake();
+
+        $search = fn () => app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'დიდი მხატვრები',
+            'category' => null,
+            'max_price' => null,
+            '_entity_family_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([$seriesVolume->id], collect($search()['products'])->pluck('id')->all());
+
+        $seriesVolume->delete();
+        $this->assertSame([], $search()['products']);
+        $exact = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'დიდი მხატვრები',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+        $this->assertSame([], $exact['products']);
+    }
+
     public function test_exact_set_lookup_reports_a_verified_individual_title_only_as_related(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

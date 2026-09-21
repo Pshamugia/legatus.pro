@@ -155,6 +155,7 @@ class OpenAiSalesOrchestrator
                         : null,
                     'exclude_product_ids' => $excludedIds->all(),
                     '_identity_match' => $matchScope === 'exact_identity',
+                    '_entity_family_match' => $matchScope === 'entity_family',
                     '_return_all_matches' => $expectsCompleteSet,
                     '_preserve_exact_identity' => $explicitNameIdentity !== null,
                     '_required_name_identity' => $explicitNameIdentity,
@@ -224,6 +225,7 @@ class OpenAiSalesOrchestrator
                             'max_price' => null,
                             'exclude_product_ids' => $excludedIds->all(),
                             '_identity_match' => $matchScope === 'exact_identity',
+                            '_entity_family_match' => $matchScope === 'entity_family',
                             '_return_all_matches' => $expectsCompleteSet,
                         ];
                         $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
@@ -452,6 +454,7 @@ class OpenAiSalesOrchestrator
                     if ($call['name'] === 'search_products') {
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
                         $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
+                        $args['_entity_family_match'] = data_get($semanticResolution, 'result.catalog_match_scope') === 'entity_family';
                         $args['_return_all_matches'] = (bool) data_get($semanticResolution, 'result.expects_complete_set', false);
                         $args['_preserve_exact_identity'] = filled(data_get($semanticResolution, 'result.explicit_name_identity'));
                         $args['_required_name_identity'] = data_get($semanticResolution, 'result.explicit_name_identity');
@@ -462,6 +465,7 @@ class OpenAiSalesOrchestrator
                         $args['query'] = $explicitNameIdentity;
                     }
                     $args['_identity_match'] = true;
+                    $args['_entity_family_match'] = false;
                     $args['_preserve_exact_identity'] = true;
                     $args['_required_name_identity'] = $explicitNameIdentity;
                 }
