@@ -266,6 +266,9 @@ class SalesToolbox
                 $publicSearch['did_you_mean'] ?? data_get($remoteSearch, 'meta.did_you_mean'),
             );
         }
+        $relatedProducts = $identityMatch && $products->isEmpty() && $unavailableProducts->isEmpty() && $didYouMean === null
+            ? $this->relatedTitleMatches($agent, $conversation, (string) $a['query'], $this->searchTermGroups((string) $a['query']), $excludedProductIds->all())
+            : collect();
 
         $returnAllMatches = (bool) ($a['_return_all_matches'] ?? false);
         $hasMore = ! $returnAllMatches
@@ -285,10 +288,45 @@ class SalesToolbox
             'has_more' => $hasMore,
             'products' => $products->all(),
             'unavailable_products' => $unavailableProducts->all(),
+            'related_products' => $relatedProducts->all(),
             'did_you_mean' => $didYouMean,
             'suggestion_requires_confirmation' => $didYouMean !== null,
             'category_index_pending' => $categoryIndexPending && $products->isEmpty() && $unavailableProducts->isEmpty(),
         ];
+    }
+
+    /**
+     * Keep a verified title-level near match separate from exact products.
+     * Format, edition and bundle words in the request must never turn an
+     * individual catalog listing into a claimed exact match.
+     */
+    private function relatedTitleMatches(Agent $agent, Conversation $conversation, string $query, array $queryGroups, array $excludedIds)
+    {
+        if (count($queryGroups) < 3) {
+            return collect();
+        }
+
+        $candidates = $agent->customerProducts()
+            ->where('is_active', true)
+            ->when($excludedIds !== [], fn ($builder) => $builder->whereNotIn('products.id', $excludedIds))
+            ->limit(5000)
+            ->get(['id', 'name', 'sku', 'category', 'description', 'search_text', 'metadata', 'price', 'stock', 'updated_at'])
+            ->map(function ($product) use ($query, $queryGroups): ?array {
+                $titleGroups = $this->searchTermGroups((string) $product->name);
+                if (count($titleGroups) < 2
+                    || count($titleGroups) >= count($queryGroups)
+                    || $this->textMatchedGroupCount($query, $titleGroups) !== count($titleGroups)) {
+                    return null;
+                }
+
+                return ['product' => $product, 'strength' => count($titleGroups)];
+            })
+            ->filter()
+            ->sortByDesc('strength')
+            ->take(3)
+            ->pluck('product');
+
+        return $this->presentSearchProducts($candidates, $conversation, [], false, 3);
     }
 
     private function authoritativeTaxonomyProductIds(Agent $agent, array $termGroups, ?string $category, string $rawQuery): ?array

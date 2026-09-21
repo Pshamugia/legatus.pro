@@ -174,6 +174,7 @@ class OpenAiSalesOrchestrator
                         'result_scope' => 'complete',
                         'products' => $individualSearches->pluck('result.products')->flatten(1)->unique('id')->values()->all(),
                         'unavailable_products' => $individualSearches->pluck('result.unavailable_products')->flatten(1)->unique('id')->values()->all(),
+                        'related_products' => $individualSearches->pluck('result.related_products')->flatten(1)->unique('id')->values()->all(),
                         'queries' => $individualSearches->map(fn (array $search): array => [
                             'query' => $search['arguments']['query'],
                             'found' => count(data_get($search, 'result.products', [])) + count(data_get($search, 'result.unavailable_products', [])),
@@ -737,26 +738,48 @@ class OpenAiSalesOrchestrator
                 'reference' => null,
             ])->all();
         }
+        $successfulCatalogSearches = $usedCollection->where('name', 'search_products')
+            ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false));
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
             && $budgetConstraint === null
             && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
-            && $usedCollection->where('name', 'search_products')
-                ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
-                ->contains(fn (array $call): bool => collect(array_merge(
-                    data_get($call, 'result.products', []),
-                    data_get($call, 'result.unavailable_products', []),
-                ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
+            && $successfulCatalogSearches->isNotEmpty()
+            && $successfulCatalogSearches->every(fn (array $call): bool => collect(array_merge(
+                data_get($call, 'result.products', []),
+                data_get($call, 'result.unavailable_products', []),
+            ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
         if ($exactLookupMiss) {
+            $relatedProducts = $usedCollection->where('name', 'search_products')
+                ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
+                ->flatMap(fn (array $call) => data_get($call, 'result.related_products', []))
+                ->filter(fn ($product): bool => is_array($product) && trim((string) ($product['name'] ?? '')) !== '')
+                ->unique('id')
+                ->take(3)
+                ->values();
             $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
-            $data['text'] = $georgian
-                ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე.'
-                : 'I could not find the exact requested product in the catalog.';
+            if ($relatedProducts->isNotEmpty()) {
+                $names = $relatedProducts->pluck('name')->map(fn (string $name): string => '„'.$name.'“')->implode(', ');
+                $listing = $relatedProducts->count() === 1 ? 'ეს ჩანაწერი' : 'ეს ჩანაწერები';
+                $data['text'] = $georgian
+                    ? "კატალოგში ვიპოვე {$names}, მაგრამ {$listing} ზუსტად მოთხოვნილ ვარიანტს არ ადასტურებს. მითითებული მონაცემებით ვერ ვადასტურებ, რომ ეს თქვენ მიერ ნახსენები გამოცემა ან სრული კომპლექტია."
+                    : "I found {$relatedProducts->pluck('name')->implode(', ')} in the catalog, but the listing does not confirm the exact version or complete set you requested.";
+            } else {
+                $data['text'] = $georgian
+                    ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე.'
+                    : 'I could not find the exact requested product in the catalog.';
+            }
             $data['intent'] = 'discovery';
             $data['confidence'] = 1;
             $data['handoff'] = false;
             $data['escalation_reason'] = null;
             $data['product_ids'] = [];
-            $data['factual_claims'] = [];
+            $data['factual_claims'] = $relatedProducts->map(fn (array $product): array => [
+                'type' => 'product',
+                'product_id' => (int) $product['id'],
+                'amount' => null,
+                'quantity' => null,
+                'reference' => null,
+            ])->all();
         }
         $verifiedSuggestion = $usedCollection
             ->filter(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true))
@@ -1920,6 +1943,17 @@ class OpenAiSalesOrchestrator
             return 'Required verification tool was not called for the '.$data['intent'].' intent.';
         }
         $claimedProductIds = collect($data['product_ids'] ?? [])->map(fn ($id) => (int) $id)->unique();
+        $relatedOnlyIds = $successful->where('name', 'search_products')
+            ->flatMap(fn (array $call) => data_get($call, 'result.related_products', []))
+            ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique()
+            ->diff($successful->where('name', 'search_products')
+                ->flatMap(fn (array $call) => array_merge(
+                    data_get($call, 'result.products', []),
+                    data_get($call, 'result.unavailable_products', []),
+                ))->pluck('id')->map(fn ($id): int => (int) $id));
+        if ($claimedProductIds->intersect($relatedOnlyIds)->isNotEmpty()) {
+            return 'A related title listing was presented as the exact requested product.';
+        }
         $semanticExcludedIds = $successful
             ->where('name', 'resolve_catalog_context')
             ->flatMap(fn (array $call) => data_get($call, 'result.exclude_product_ids', []))
@@ -2642,7 +2676,10 @@ class OpenAiSalesOrchestrator
             $result = $call['result'] ?? [];
 
             return match ($call['name'] ?? null) {
-                'search_products' => collect($result['products'] ?? [])->pluck('id')->all(),
+                'search_products' => collect(array_merge(
+                    $result['products'] ?? [],
+                    $result['related_products'] ?? [],
+                ))->pluck('id')->all(),
                 'recommend_products' => collect($result['recommendations'] ?? [])->pluck('id')->all(),
                 'compare_products' => collect($result['products'] ?? [])->pluck('id')->all(),
                 'check_stock', 'reserve_product' => array_filter([$result['product_id'] ?? null]),

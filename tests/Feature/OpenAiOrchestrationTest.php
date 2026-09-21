@@ -1816,6 +1816,51 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
     }
 
+    public function test_an_exact_set_miss_mentions_only_the_verified_related_volume(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $volume = $agent->products()->create([
+            'name' => 'ქართველი ერის ისტორია (I წიგნი)',
+            'description' => 'პირველი წიგნი.',
+            'price' => 20,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['author' => 'ივანე ჯავახიშვილი'],
+        ]);
+        config([
+            'services.openai.key' => 'test-key',
+            'legatus.semantic_orchestration_enabled' => true,
+        ]);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'set-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'set-search-call',
+                'arguments' => json_encode([
+                    'query' => 'ჯავახიშვილის ქართველი ერის ისტორია ახალი გამოცემული 5 ტომეული',
+                    'category' => null, 'max_price' => null, '_identity_match' => true,
+                ]),
+            ]]])
+            ->push(['id' => 'set-final', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე.',
+                    'intent' => 'discovery', 'confidence' => .99, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [], 'sources' => [],
+                    'factual_claims' => [],
+                ])]],
+            ]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'ჯავახიშვილის ქართველი ერის ისტორია ხომ არ გაქვთ? ახალ გამოცემულ 5 ტომეულს ვგულისხმობ',
+        ])->assertOk();
+
+        $this->assertStringContainsString($volume->name, $response->json('text'));
+        $this->assertStringContainsString('ვერ ვადასტურებ', $response->json('text'));
+        $this->assertSame([], $response->json('products'));
+    }
+
     public function test_a_quoted_exact_title_is_not_broadened_to_another_product_after_an_empty_lookup(): void
     {
         $this->seed();

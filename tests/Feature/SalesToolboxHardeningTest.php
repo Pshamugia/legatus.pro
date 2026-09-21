@@ -853,6 +853,44 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertCount(15, $entityFamily['products']);
     }
 
+    public function test_exact_set_lookup_reports_a_verified_individual_title_only_as_related(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'ქართველი ერის ისტორია (I წიგნი)',
+            'metadata' => ['author' => 'ივანე ჯავახიშვილი'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ჯავახიშვილის ქართველი ერის ისტორია ახალი გამოცემული 5 ტომეული',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame([], $result['unavailable_products']);
+        $this->assertNull($result['did_you_mean']);
+        $this->assertSame([$product->id], collect($result['related_products'])->pluck('id')->all());
+    }
+
+    public function test_related_title_lookup_does_not_offer_a_partially_overlapping_title(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update(['name' => 'Independent Republic Before Revolution']);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'Lenin State and Revolution new edition',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+            '_preserve_exact_identity' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame([], $result['related_products']);
+    }
+
     public function test_product_search_treats_wildcards_as_literal_text(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
