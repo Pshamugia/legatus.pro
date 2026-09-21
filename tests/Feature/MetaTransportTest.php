@@ -388,7 +388,10 @@ class MetaTransportTest extends TestCase
     {
         Queue::fake();
         config()->set('services.openai.key', 'test-key');
-        Http::preventStrayRequests();
+        Http::fake(['api.openai.com/*' => Http::response(['output' => [[
+            'type' => 'message',
+            'content' => [['type' => 'output_text', 'text' => '{"silent":true}']],
+        ]]])]);
         $connection = $this->connection('facebook', 'page-operator-thanks');
         $senderId = 'operator-thanks-customer';
         $conversation = $connection->agent->conversations()->create([
@@ -419,7 +422,7 @@ class MetaTransportTest extends TestCase
         $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
         $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
         Queue::assertNotPushed(SendMetaMessage::class);
-        Http::assertNothingSent();
+        Http::assertSentCount(1);
     }
 
     public function test_expired_connection_inbound_is_redacted_without_falsely_pausing_ai(): void

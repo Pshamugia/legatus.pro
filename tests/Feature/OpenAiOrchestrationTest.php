@@ -264,6 +264,7 @@ class OpenAiOrchestrationTest extends TestCase
         ])]);
         config(['services.openai.key' => 'test-key']);
         Http::fakeSequence()
+            ->push(['output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => '{"silent":false}']]]]])
             ->push(['results' => [['flagged' => false]]])
             ->push(['id' => 'human-request-intent', 'output' => [[
                 'type' => 'message',
@@ -308,7 +309,7 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame(['human_queue'], $confirmation['tools_used']);
         $this->assertNull($confirmation['text']);
         $this->assertSame('human', $conversation->fresh()->status);
-        Http::assertSentCount(2);
+        Http::assertSentCount(3);
     }
 
     public function test_recent_product_attributes_are_supplied_for_relational_follow_ups(): void
@@ -452,6 +453,7 @@ class OpenAiOrchestrationTest extends TestCase
         config(['services.openai.key' => 'test-key']);
 
         Http::fakeSequence()
+            ->push(['output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => '{"silent":false}']]]]])
             ->push(['results' => [['flagged' => false]]])
             ->push(['id' => 'multi-product-resolution', 'output' => [[
                 'type' => 'message',

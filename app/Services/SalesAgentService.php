@@ -19,10 +19,6 @@ class SalesAgentService
 
     public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
     {
-        if ($socialReply = $this->socialReply($message, $conversation)) {
-            return $socialReply;
-        }
-
         if ($conversation && $this->socialTurnGate->shouldStaySilent($message, $conversation)) {
             return [
                 'text' => null,
@@ -35,6 +31,10 @@ class SalesAgentService
                 'sources' => [],
                 'tools_used' => ['social_turn_gate'],
             ];
+        }
+
+        if ($socialReply = $this->socialReply($message, $conversation)) {
+            return $socialReply;
         }
 
         $semanticOrchestration = $conversation
