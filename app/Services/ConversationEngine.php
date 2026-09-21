@@ -128,6 +128,17 @@ class ConversationEngine
             ));
         }
 
+        if (($reply['silent'] ?? false) === true) {
+            $conversation->update(['intent' => 'conversation', 'last_message_at' => now()]);
+
+            return $this->rememberResponse($customerMessage, $reply + [
+                'customer_message_id' => $customerMessage->public_id,
+                'cursor' => $customerMessage->id,
+                'request_id' => $requestId,
+                'conversation_id' => $conversation->id,
+            ]);
+        }
+
         $reply['text'] = PrivacyRedactor::text($reply['text']);
         $reply['products'] = $this->publicProducts($reply['products'] ?? [], $conversation);
         if ($reply['products'] !== []) {

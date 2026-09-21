@@ -345,6 +345,45 @@ class MetaTransportTest extends TestCase
         Queue::assertPushed(SendMetaMessage::class, 1);
     }
 
+    public function test_completed_customer_exchange_is_recorded_without_a_meta_reply(): void
+    {
+        Queue::fake();
+        config()->set('services.openai.key', 'test-key');
+        Http::fake(['api.openai.com/*' => Http::response(['output' => [[
+            'type' => 'message',
+            'content' => [['type' => 'output_text', 'text' => '{"silent":true}']],
+        ]]])]);
+        $connection = $this->connection('facebook', 'page-closure');
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'closure-mid-1',
+            'provider_sender_id' => 'closure-customer',
+            'provider_recipient_id' => 'page-closure',
+            'message_type' => 'text',
+            'status' => 'received',
+            'payload' => ['text' => 'მადლობა ყურადღებისთვის. ❤️ წიგნი აიღეს.'],
+            'received_at' => now(),
+        ]);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+
+        $inbound->refresh();
+        $this->assertSame('processed', $inbound->status);
+        $this->assertNotNull($inbound->message_id);
+        $this->assertDatabaseMissing('messages', [
+            'conversation_id' => $inbound->conversation_id,
+            'role' => 'assistant',
+        ]);
+        $this->assertDatabaseMissing('channel_messages', [
+            'conversation_id' => $inbound->conversation_id,
+            'direction' => 'outbound',
+        ]);
+        Queue::assertNotPushed(SendMetaMessage::class);
+    }
+
     public function test_expired_connection_inbound_is_redacted_without_falsely_pausing_ai(): void
     {
         Queue::fake();

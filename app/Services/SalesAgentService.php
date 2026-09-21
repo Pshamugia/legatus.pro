@@ -14,12 +14,27 @@ class SalesAgentService
         private OpenAiSalesOrchestrator $orchestrator,
         private SalesToolbox $tools,
         private VerifiedCatalogResponder $catalog,
+        private SocialTurnGate $socialTurnGate,
     ) {}
 
     public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
     {
         if ($socialReply = $this->socialReply($message, $conversation)) {
             return $socialReply;
+        }
+
+        if ($conversation && $this->socialTurnGate->shouldStaySilent($message, $conversation)) {
+            return [
+                'text' => null,
+                'silent' => true,
+                'intent' => 'conversation',
+                'confidence' => 1,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'products' => [],
+                'sources' => [],
+                'tools_used' => ['social_turn_gate'],
+            ];
         }
 
         $semanticOrchestration = $conversation
