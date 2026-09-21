@@ -1178,6 +1178,7 @@ class SocialMediaSchedulerTest extends TestCase
                     'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                         'supported' => true, 'unsupported_fragments' => [],
                         'distinct_from_recent' => true, 'similarity_reason' => '',
+                        'core_identity_preserved' => true, 'identity_reason' => '',
                     ])]]]],
                     'usage' => ['input_tokens' => 50, 'output_tokens' => 8],
                 ]),
@@ -1272,6 +1273,7 @@ class SocialMediaSchedulerTest extends TestCase
                     'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                         'supported' => true, 'unsupported_fragments' => [],
                         'distinct_from_recent' => true, 'similarity_reason' => '',
+                        'core_identity_preserved' => true, 'identity_reason' => '',
                     ])]]]],
                     'usage' => ['input_tokens' => 40, 'output_tokens' => 8],
                 ]),
@@ -1286,6 +1288,90 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request): bool => data_get($request->data(), 'text.format.schema.properties.caption.type') === 'string'
             && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Never output database-style labels')
             && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Verified evidence:'));
+    }
+
+    public function test_ai_copywriter_rewrites_a_caption_that_obscures_a_verified_product_type(): void
+    {
+        [, $agent] = $this->tenant('poetry-identity-copy');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('მოხსენებითი ბარათი', 'პოეზია', 2);
+        $details['description'] = 'სალომე ბენიძის პოეტური კრებული';
+        $details['metadata']['author'] = 'სალომე ბენიძე';
+        $product = $agent->products()->create($details);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+        $misleading = '„მოხსენებითი ბარათი“ აზრებისა და ტექსტების კვლევით სამყაროში გეპატიჟებათ.';
+        $poetry = 'სალომე ბენიძის „მოხსენებითი ბარათი“ პოეტური კრებულია. გაეცანით ამ ლექსების წიგნს. 📖';
+        Http::fake(['https://api.openai.com/v1/responses' => Http::sequence()
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $misleading], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                'supported' => true, 'unsupported_fragments' => [],
+                'distinct_from_recent' => true, 'similarity_reason' => '',
+                'core_identity_preserved' => false,
+                'identity_reason' => 'The verified poetry collection is presented as analytical writing.',
+            ])]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $poetry], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                'supported' => true, 'unsupported_fragments' => [],
+                'distinct_from_recent' => true, 'similarity_reason' => '',
+                'core_identity_preserved' => true, 'identity_reason' => '',
+            ])]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringContainsString($poetry, $caption);
+        $this->assertStringNotContainsString($misleading, $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'სალომე ბენიძის პოეტური კრებული')
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'keep the copy concise'));
+        Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'The previous draft obscured or misrepresented the product'));
+    }
+
+    public function test_ai_copywriter_rejects_a_second_draft_that_still_misrepresents_product_type(): void
+    {
+        [, $agent] = $this->tenant('identity-failure-copy');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('მოხსენებითი ბარათი', 'პოეზია', 2);
+        $details['description'] = 'სალომე ბენიძის პოეტური კრებული';
+        $product = $agent->products()->create($details);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+        $bad = 'ეს კრებული ახალი იდეების კვლევას ეძღვნება. გაეცანით ტექსტების სამყაროს.';
+        $audit = [
+            'supported' => true, 'unsupported_fragments' => [],
+            'distinct_from_recent' => true, 'similarity_reason' => '',
+            'core_identity_preserved' => false,
+            'identity_reason' => 'The verified product is a poetry collection, not analytical essays.',
+        ];
+        Http::fake(['https://api.openai.com/v1/responses' => Http::sequence()
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $bad], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($audit)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $bad], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($audit)]]]]]),
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('could not produce grounded');
+        app(SocialMediaAiCopywriter::class)->generate($post);
     }
 
     public function test_ai_copywriter_retries_a_fully_rejected_draft_instead_of_publishing_a_generic_template(): void
@@ -1313,11 +1399,13 @@ class SocialMediaSchedulerTest extends TestCase
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => false, 'unsupported_fragments' => [$rejected],
                     'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
                 ], JSON_UNESCAPED_UNICODE)]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $safe], JSON_UNESCAPED_UNICODE)]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => true, 'unsupported_fragments' => [],
                     'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
                 ], JSON_UNESCAPED_UNICODE)]]]]]),
         ]);
 
@@ -1369,11 +1457,13 @@ class SocialMediaSchedulerTest extends TestCase
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => true, 'unsupported_fragments' => [],
                     'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
                 ])]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $distinct])]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => true, 'unsupported_fragments' => [],
                     'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
                 ])]]]]]),
         ]);
 
@@ -1427,11 +1517,13 @@ class SocialMediaSchedulerTest extends TestCase
                     'supported' => true, 'unsupported_fragments' => [],
                     'distinct_from_recent' => false,
                     'similarity_reason' => 'It repeats the question, mood, and invitation progression.',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
                 ])]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $distinct])]]]]])
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
                     'supported' => true, 'unsupported_fragments' => [],
                     'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
                 ])]]]]]),
         ]);
 
