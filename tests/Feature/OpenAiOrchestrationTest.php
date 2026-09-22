@@ -6,13 +6,16 @@ use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\RecommendationEvent;
 use App\Models\Reservation;
+use App\Notifications\OpenAiCreditAlert;
 use App\Services\ConversationEngine;
 use App\Services\OpenAiSalesOrchestrator;
 use App\Services\SalesAgentService;
 use App\Services\SalesToolbox;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -2116,13 +2119,18 @@ class OpenAiOrchestrationTest extends TestCase
         $this->seed();
         $agent = Agent::firstOrFail();
         $product = $agent->products()->firstOrFail();
-        config(['services.openai.key' => 'test-key']);
+        config([
+            'services.openai.key' => 'test-key',
+            'legatus.super_admin_email' => 'operator@example.com',
+        ]);
+        Cache::forget('openai-credit-exhausted-alert');
+        Notification::fake();
         Http::fake(function ($request) {
             if (str_ends_with($request->url(), '/moderations')) {
                 return Http::response(['results' => [['flagged' => false]]]);
             }
             if (str_ends_with($request->url(), '/responses')) {
-                return Http::response(['error' => ['message' => 'billing unavailable']], 429);
+                return Http::response(['error' => ['message' => 'You have no credits remaining.']], 429);
             }
 
             return Http::response('', 503);
@@ -2139,6 +2147,7 @@ class OpenAiOrchestrationTest extends TestCase
             'model' => 'verified-catalog-provider-fallback',
             'status' => 'fallback',
         ]);
+        Notification::assertSentOnDemand(OpenAiCreditAlert::class);
     }
 
     public function test_raw_contact_is_only_ephemeral_while_the_persisted_transcript_is_immediately_redacted(): void

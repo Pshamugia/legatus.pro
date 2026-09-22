@@ -15,6 +15,7 @@ class SalesAgentService
         private SalesToolbox $tools,
         private VerifiedCatalogResponder $catalog,
         private SocialTurnGate $socialTurnGate,
+        private OpenAiCreditNotifier $creditNotifier,
     ) {}
 
     public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
@@ -65,6 +66,7 @@ class SalesAgentService
                 return $this->orchestrator->respond($agent, $conversation, $message);
             } catch (\Throwable $e) {
                 report($e);
+                $this->creditNotifier->report($e);
 
                 // The language-model provider may be rate-limited or have a
                 // billing outage while the tenant's verified catalog and live
