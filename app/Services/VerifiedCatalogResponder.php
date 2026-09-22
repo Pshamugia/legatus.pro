@@ -132,10 +132,10 @@ class VerifiedCatalogResponder
             if ($suggestion === '') {
                 return [
                     'text' => $georgian
-                        ? 'ზუსტი დამთხვევა ვერ ვიპოვე. მომწერეთ პროდუქტის სახელი, ბრენდი, კატეგორია ან თქვენთვის მნიშვნელოვანი მახასიათებელი.'
-                        : 'I could not find an exact match. Send the product name, brand, category, or another feature that matters to you.',
+                        ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე.'
+                        : 'I could not find the exact requested product in the catalog.',
                     'intent' => 'discovery',
-                    'confidence' => .99,
+                    'confidence' => .8,
                     'handoff' => false,
                     'escalation_reason' => null,
                     'products' => [],
@@ -145,13 +145,9 @@ class VerifiedCatalogResponder
             }
 
             return [
-                'text' => $suggestion !== ''
-                    ? ($georgian
-                        ? "ამას ხომ არ გულისხმობდით: {$suggestion}? დამიდასტურეთ და ზუსტად ამ სახელით მოვძებნი."
-                        : "Did you mean {$suggestion}? Confirm the spelling and I will search for that exact name.")
-                    : ($georgian
-                        ? 'ამ ფორმულირებით ზუსტი დამთხვევა ვერ ვიპოვე. სცადეთ ავტორის, სათაურის, ჟანრის, ISBN-ის ან სხვა საკვანძო სიტყვის მითითება.'
-                        : 'I could not find an exact match for that wording. Try an author, title, genre, ISBN, or another product keyword.'),
+                'text' => $georgian
+                    ? "ამას ხომ არ გულისხმობდით: {$suggestion}? დამიდასტურეთ და ზუსტად ამ სახელით მოვძებნი."
+                    : "Did you mean {$suggestion}? Confirm the spelling and I will search for that exact name.",
                 'intent' => 'discovery',
                 'confidence' => .99,
                 'handoff' => false,
@@ -238,14 +234,17 @@ class VerifiedCatalogResponder
             }
         }
 
-        $nextStep = $models->count() === 1
-            ? ($georgian ? 'გაინტერესებთ შეძენა?' : 'Would you like to purchase it?')
-            : ($georgian ? 'რომელი გაინტერესებთ?' : 'Which one interests you?');
+        $allSoldOut = $verified->every(fn (array $check): bool => ! $this->checkIsAvailable($check));
+        $nextStep = $allSoldOut
+            ? ''
+            : ($models->count() === 1
+                ? ($georgian ? 'გაინტერესებთ შეძენა?' : 'Would you like to purchase it?')
+                : ($georgian ? 'რომელი გაინტერესებთ?' : 'Which one interests you?'));
 
         return [
             'text' => $georgian
-                ? "ვიპოვე {$models->count()} შესაბამისი ვარიანტი:\n{$lines->implode("\n")}\n{$nextStep}"
-                : "I found {$models->count()} matching option".($models->count() === 1 ? '' : 's').":\n{$lines->implode("\n")}\n{$nextStep}",
+                ? "ვიპოვე {$models->count()} შესაბამისი ვარიანტი:\n{$lines->implode("\n")}".($nextStep !== '' ? "\n{$nextStep}" : '')
+                : "I found {$models->count()} matching option".($models->count() === 1 ? '' : 's').":\n{$lines->implode("\n")}".($nextStep !== '' ? "\n{$nextStep}" : ''),
             'intent' => $this->intent($message),
             'confidence' => .99,
             'handoff' => false,

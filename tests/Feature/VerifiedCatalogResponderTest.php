@@ -69,9 +69,35 @@ class VerifiedCatalogResponderTest extends TestCase
         $reply = app(VerifiedCatalogResponder::class)->respond($agent, $conversation, 'ლურჯი პიჯაკი გაქვთ?');
 
         $this->assertNotNull($reply);
-        $this->assertStringContainsString('პროდუქტის სახელი, ბრენდი, კატეგორია', $reply['text']);
+        $this->assertStringContainsString('ვერ მოვძებნე', $reply['text']);
+        $this->assertStringNotContainsString('მომწერეთ პროდუქტის სახელი', $reply['text']);
         $this->assertStringNotContainsString('ISBN', $reply['text']);
         $this->assertStringNotContainsString('ავტორ', $reply['text']);
+    }
+
+    public function test_named_product_stock_question_with_greeting_uses_verified_catalog(): void
+    {
+        [$agent, $conversation] = $this->context();
+        $product = $agent->products()->create([
+            'name' => 'ვიღაცამ გუგულის ბუდეს გადაუფრინა',
+            'search_text' => 'ვიღაცამ გუგულის ბუდეს გადაუფრინა კენ კიზი',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['author' => 'კენ კიზი', 'language' => 'ქართული'],
+        ]);
+        config(['services.openai.key' => 'must-not-be-called']);
+        Http::preventStrayRequests();
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'სალამი 👋 ვიღაცამ გუგულის ბუდეს გადაუფრინა, თუ გაქვთ?',
+            $conversation,
+        );
+
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertSame(['search_products', 'check_stock'], $reply['tools_used']);
+        $this->assertStringContainsString('ვიღაცამ გუგულის ბუდეს გადაუფრინა', $reply['text']);
     }
 
     public function test_plain_georgian_author_lookup_is_answered_from_verified_catalog_without_openai(): void
@@ -210,6 +236,8 @@ class VerifiedCatalogResponderTest extends TestCase
 
         $this->assertSame([$soldOut->id], collect($reply['products'])->pluck('id')->all());
         $this->assertStringContainsString('12.00 ₾', $reply['text']);
+        $this->assertStringContainsString('მარაგში არ არის', $reply['text']);
+        $this->assertStringNotContainsString('გაინტერესებთ შეძენა?', $reply['text']);
     }
 
     public function test_sold_out_product_offers_only_available_alternatives_from_its_taxonomy(): void
@@ -509,7 +537,8 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertFalse($suggestion['handoff']);
         $this->assertStringContainsString('ჯავახიშვილი', $suggestion['text']);
         $this->assertFalse($missing['handoff']);
-        $this->assertStringContainsString('ზუსტი დამთხვევა ვერ ვიპოვე', $missing['text']);
+        $this->assertStringContainsString('ვერ მოვძებნე', $missing['text']);
+        $this->assertStringNotContainsString('მომწერეთ პროდუქტის სახელი', $missing['text']);
         $this->assertSame('ai', $conversation->fresh()->status);
     }
 
