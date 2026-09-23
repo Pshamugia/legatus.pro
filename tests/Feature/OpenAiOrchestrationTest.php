@@ -23,6 +23,181 @@ class OpenAiOrchestrationTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_business_location_question_uses_verified_knowledge_instead_of_asking_an_unanswerable_city_question(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text',
+            'source_scope' => 'business',
+            'name' => 'Physical store information',
+            'status' => 'ready',
+            'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'business',
+            'title' => 'Physical store information',
+            'content' => 'ბიზნესს ფიზიკური მაღაზია არ აქვს და მომხმარებლებს მხოლოდ ონლაინ ემსახურება.',
+            'embedding' => [1.0, 0.0],
+            'content_hash' => hash('sha256', 'online-only-business'),
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'business-knowledge-context', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_human_request' => false,
+                    'is_business_knowledge_request' => true,
+                    'knowledge_query' => 'აქვს თუ არა ბიზნესს ფიზიკური მაღაზია და სად მდებარეობს?',
+                    'knowledge_scope' => 'business',
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_queries' => [],
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['data' => [['index' => 0, 'embedding' => [1.0, 0.0]]]])
+            ->push(['id' => 'unhelpful-city-question', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'რომელ ქალაქში ეძებთ?',
+                    'intent' => 'clarification',
+                    'confidence' => .97,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => 'search_knowledge',
+                    'clarification_missing_input' => 'query',
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['id' => 'grounded-business-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'ფიზიკური მაღაზია არ გვაქვს — მომსახურება მხოლოდ ონლაინ ხდება.',
+                    'intent' => 'conversation',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'policy',
+                        'product_id' => null,
+                        'amount' => null,
+                        'quantity' => null,
+                        'reference' => 'Physical store information',
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'მაღაზია სად არის ტერიტორიულად?',
+        ])->assertOk()->assertJsonPath('handoff', false);
+
+        $this->assertSame('ფიზიკური მაღაზია არ გვაქვს — მომსახურება მხოლოდ ონლაინ ხდება.', $response->json('text'));
+        $this->assertStringNotContainsString('რომელ ქალაქში', $response->json('text'));
+        $this->assertContains('search_knowledge', $response->json('tools_used'));
+        $this->assertContains('guardrail_repair', $response->json('tools_used'));
+
+        $run = AgentRun::where('agent_id', $agent->id)->latest('id')->firstOrFail();
+        $knowledgeCall = collect($run->tools_used)->firstWhere('name', 'search_knowledge');
+        $this->assertSame('business', data_get($knowledgeCall, 'arguments._source_scope'));
+        $this->assertNotEmpty(data_get($knowledgeCall, 'result.results'));
+    }
+
+    public function test_clarification_cannot_request_input_that_no_available_tool_can_use(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://example.com/search?q={query}',
+        ])]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'ordinary-context', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_human_request' => false,
+                    'is_business_knowledge_request' => false,
+                    'knowledge_query' => null,
+                    'knowledge_scope' => null,
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_queries' => [],
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'unsupported-clarification', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'Which branch should I check?',
+                    'intent' => 'clarification',
+                    'confidence' => .95,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => 'lookup_branches',
+                    'clarification_missing_input' => 'city',
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'unsupported-clarification-repair', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I cannot verify branch locations from the available business information.',
+                    'intent' => 'conversation',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Where is the nearest branch?',
+        ])->assertOk();
+
+        $this->assertFalse($response->json('handoff'), json_encode($response->json(), JSON_UNESCAPED_UNICODE));
+
+        $this->assertSame('I cannot verify branch locations from the available business information.', $response->json('text'));
+        $this->assertStringNotContainsString('Which branch', $response->json('text'));
+        $this->assertContains('guardrail_repair', $response->json('tools_used'));
+    }
+
     public function test_delivery_question_is_answered_from_manual_knowledge_even_when_model_skips_tools(): void
     {
         $this->seed();

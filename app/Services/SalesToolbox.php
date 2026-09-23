@@ -546,6 +546,16 @@ class SalesToolbox
                 ->pluck('id')
             : collect();
 
+        if ($requestedScope !== null && $targetSourceIds->isEmpty()) {
+            return [
+                'ok' => true,
+                'method' => 'verified_empty',
+                'source_scope' => $requestedScope,
+                'results' => [],
+                'verified_empty' => true,
+            ];
+        }
+
         try {
             $semantic = $this->embeddings->semanticSearch(
                 $agent,
@@ -605,7 +615,13 @@ class SalesToolbox
             ->all();
 
         if ($results === []) {
-            return ['ok' => false, 'error' => 'No relevant verified knowledge was found for this question.'];
+            return [
+                'ok' => true,
+                'method' => 'verified_empty',
+                'source_scope' => $requestedScope,
+                'results' => [],
+                'verified_empty' => true,
+            ];
         }
 
         return ['ok' => true, 'method' => 'lexical', 'results' => $results];

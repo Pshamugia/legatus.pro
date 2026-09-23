@@ -270,7 +270,7 @@ class GuardrailsAndOutcomesTest extends TestCase
         $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'What is your refund policy?'])
             ->assertOk()
             ->assertJsonPath('handoff', true)
-            ->assertJsonPath('escalation_reason', 'Verification tool search_knowledge did not complete successfully.');
+            ->assertJsonPath('escalation_reason', 'A policy factual claim was not backed by a relevant verified knowledge result.');
 
         $response->assertJsonMissing(['text' => 'Our return policy allows refunds for 30 days.']);
     }
