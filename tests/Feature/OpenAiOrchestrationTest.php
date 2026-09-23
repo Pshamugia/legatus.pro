@@ -2399,4 +2399,192 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('authoritative statements made by the business', $providerInstructions);
         $this->assertStringContainsString('operator.private@example.com', $operator->fresh()->content);
     }
+
+    public function test_exact_identity_guard_rejects_incidental_verified_recommendation_cards_and_keeps_exact_scope(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $exact = $agent->products()->firstOrFail();
+        $unrelated = $agent->products()->whereKeyNot($exact->id)->firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'exact-card-guard',
+            'status' => 'ai',
+            'channel' => 'widget',
+        ]);
+        $used = collect([
+            ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
+                'ok' => true,
+                'catalog_match_scope' => 'exact_identity',
+                'exclude_product_ids' => [],
+            ]],
+            ['name' => 'search_products', 'arguments' => [
+                'query' => $exact->name,
+                '_identity_match' => true,
+            ], 'result' => [
+                'ok' => true,
+                'products' => [['id' => $exact->id, 'name' => $exact->name]],
+                'unavailable_products' => [],
+            ]],
+            ['name' => 'recommend_products', 'arguments' => [
+                'query' => $unrelated->name,
+            ], 'result' => [
+                'ok' => true,
+                'recommendations' => [['id' => $unrelated->id, 'name' => $unrelated->name]],
+            ]],
+        ]);
+        $draft = [
+            'text' => "{$exact->name} is available. You may also consider {$unrelated->name}.",
+            'intent' => 'discovery',
+            'confidence' => .99,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'clarification_next_tool' => null,
+            'clarification_missing_input' => null,
+            'product_ids' => [$exact->id, $unrelated->id],
+            'sources' => [],
+            'factual_claims' => [],
+        ];
+
+        $guard = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $reason = $guard->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, $draft, $used);
+
+        $this->assertSame(
+            'An exact product request included products outside the verified exact-identity search result.',
+            $reason,
+        );
+
+        $remember = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'rememberActiveCatalogScope');
+        $remember->invoke(app(OpenAiSalesOrchestrator::class), $conversation, $used, [
+            'is_catalog_follow_up' => true,
+            'resolved_query' => $exact->name,
+            'resolved_queries' => [$exact->name],
+            'catalog_match_scope' => 'exact_identity',
+        ]);
+
+        $this->assertSame($exact->name, data_get($conversation->fresh()->context, 'active_catalog_scope.query'));
+        $this->assertSame('search_products', data_get($conversation->fresh()->context, 'active_catalog_scope.tool'));
+    }
+
+    public function test_singular_purchase_reference_uses_the_product_named_in_the_prior_reply_not_incidental_cards(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $exact = $agent->products()->create([
+            'name' => 'არტისტული ყვავილები',
+            'description' => 'გალაკტიონ ტაბიძის პოეზიის კრებული.',
+            'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე',
+            'price' => 14,
+            'stock' => 350,
+            'is_active' => true,
+            'metadata' => ['author' => 'გალაკტიონ ტაბიძე'],
+        ]);
+        $incidental = collect(['კასანდრა', 'ეტიუდები', 'ორტომეული', 'ერთჯერადობის ეპოქა'])
+            ->map(fn (string $name) => $agent->products()->create([
+                'name' => $name,
+                'search_text' => $name,
+                'price' => 12,
+                'stock' => 10,
+                'is_active' => true,
+            ]));
+        $shownIds = $incidental->pluck('id')->push($exact->id)->all();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'singular-purchase-reference',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => [
+                'last_catalog_product_ids' => $shownIds,
+                'active_catalog_scope' => [
+                    'tool' => 'recommend_products',
+                    'query' => 'ტაბიძე',
+                    'shown_product_ids' => $shownIds,
+                ],
+            ],
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'გალაკტიონ ტაბიძე არტისტული ყვავილები',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => '„არტისტული ყვავილები“ — გალაკტიონ ტაბიძის პოეზიის წიგნი, 14 ლარად.',
+            'metadata' => ['products' => $shownIds],
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'არა']);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'გასაგებია. თუ სხვა პროდუქტის მოძებნა დაგჭირდებათ, დაგეხმარებით.',
+            'metadata' => ['products' => []],
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'ეს წიგნი მინდა შევიძინო']);
+        config([
+            'services.openai.key' => 'test-key',
+            'services.openai.fallback_model' => config('services.openai.primary_model'),
+            'legatus.semantic_orchestration_enabled' => true,
+        ]);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'reference-resolution', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_human_request' => false,
+                    'is_business_knowledge_request' => false,
+                    'knowledge_query' => null,
+                    'knowledge_scope' => null,
+                    'is_catalog_follow_up' => true,
+                    'catalog_scope_action' => 'continue',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => 'ტაბიძე',
+                    'resolved_queries' => ['ტაბიძე'],
+                    'referenced_product_id' => $exact->id,
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'entity_family',
+                    'exclude_product_ids' => $shownIds,
+                    'expects_complete_set' => true,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'purchase-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => '„არტისტული ყვავილები“ ვიპოვე. შესაძენად გახსენით პროდუქტის ბარათი და გააგრძელეთ შეკვეთა საიტზე.',
+                    'intent' => 'discovery',
+                    'confidence' => 1,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [$exact->id],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $exact->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null,
+                    ]],
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'ეს წიგნი მინდა შევიძინო', $conversation);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([$exact->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertStringContainsString($exact->name, $reply['text']);
+        foreach ($incidental as $product) {
+            $this->assertStringNotContainsString($product->name, $reply['text']);
+        }
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $searchCall = collect($run->tools_used)->firstWhere('name', 'search_products');
+        $this->assertSame($exact->name, data_get($searchCall, 'arguments.query'));
+        $this->assertTrue(data_get($searchCall, 'arguments._identity_match'));
+        $this->assertSame([], data_get($searchCall, 'arguments.exclude_product_ids'));
+        $resolverRequest = Http::recorded()->map(fn ($pair) => $pair[0])->first(
+            fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up',
+        );
+        $this->assertStringContainsString(
+            '"explicitly_mentioned_in_recent_assistant_reply":true',
+            (string) $resolverRequest->data()['instructions'],
+        );
+    }
 }
