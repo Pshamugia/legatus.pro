@@ -2453,6 +2453,20 @@ class OpenAiOrchestrationTest extends TestCase
             $reason,
         );
 
+        $ignoredExactMatch = $guard->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => 'Did you mean an unrelated author?',
+            'intent' => 'clarification',
+            'confidence' => 1,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'clarification_next_tool' => 'search_products',
+            'clarification_missing_input' => 'query',
+            'product_ids' => [],
+            'sources' => [],
+            'factual_claims' => [],
+        ], $used->take(2));
+        $this->assertSame('The response ignored products returned by the verified catalog search.', $ignoredExactMatch);
+
         $remember = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'rememberActiveCatalogScope');
         $remember->invoke(app(OpenAiSalesOrchestrator::class), $conversation, $used, [
             'is_catalog_follow_up' => true,

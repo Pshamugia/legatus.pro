@@ -2108,7 +2108,7 @@ class OpenAiSalesOrchestrator
             ->filter(fn ($product): bool => is_array($product) && (int) ($product['id'] ?? 0) > 0);
         if ($verifiedSearchMatches->isNotEmpty()
             && $claimedProductIds->isEmpty()
-            && in_array($data['intent'] ?? null, ['discovery', 'price', 'stock', 'recommendation'], true)) {
+            && in_array($data['intent'] ?? null, ['clarification', 'discovery', 'price', 'stock', 'recommendation'], true)) {
             return 'The response ignored products returned by the verified catalog search.';
         }
         $expectsCompleteSet = $successful

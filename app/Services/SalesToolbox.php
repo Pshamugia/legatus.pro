@@ -1364,10 +1364,57 @@ class SalesToolbox
 
         return collect($tokens)
             ->filter(fn (string $token): bool => ! in_array($token, $stopWords, true))
-            ->filter(fn (string $token): bool => mb_strlen($token) >= 2)
-            ->map(fn (string $token): array => $this->georgianSearchVariants($token))
+            ->filter(fn (string $token): bool => mb_strlen($token) >= 2 || preg_match('/^\d{1,2}$/', $token) === 1)
+            ->map(fn (string $token): array => $this->searchTokenVariants($token))
             ->values()
             ->all();
+    }
+
+    /** @return list<string> */
+    private function searchTokenVariants(string $token): array
+    {
+        $variants = $this->georgianSearchVariants($token);
+        $number = null;
+
+        if (ctype_digit($token)) {
+            $numeric = (int) $token;
+            if ((string) $numeric === ltrim($token, '0') && $numeric >= 1 && $numeric <= 50) {
+                $number = $numeric;
+            }
+        } elseif (preg_match('/^[ivxlc]+$/i', $token) === 1) {
+            $roman = Str::lower($token);
+            $values = ['i' => 1, 'v' => 5, 'x' => 10, 'l' => 50, 'c' => 100];
+            $numeric = 0;
+            $previous = 0;
+            foreach (array_reverse(mb_str_split($roman)) as $character) {
+                $value = $values[$character];
+                $numeric += $value < $previous ? -$value : $value;
+                $previous = max($previous, $value);
+            }
+            if ($numeric >= 1 && $numeric <= 50 && Str::lower($this->integerToRoman($numeric)) === $roman) {
+                $number = $numeric;
+            }
+        }
+
+        if ($number !== null) {
+            $variants[] = (string) $number;
+            $variants[] = Str::lower($this->integerToRoman($number));
+        }
+
+        return array_values(array_unique($variants));
+    }
+
+    private function integerToRoman(int $number): string
+    {
+        $result = '';
+        foreach ([50 => 'L', 40 => 'XL', 10 => 'X', 9 => 'IX', 5 => 'V', 4 => 'IV', 1 => 'I'] as $value => $numeral) {
+            while ($number >= $value) {
+                $result .= $numeral;
+                $number -= $value;
+            }
+        }
+
+        return $result;
     }
 
     /** @return list<string> */
@@ -1560,9 +1607,15 @@ class SalesToolbox
             return null;
         }
 
-        $queryTokens = collect($this->searchTermGroups($query))
+        $queryGroups = collect($this->searchTermGroups($query))
+            ->map(fn (array $variants): array => collect($variants)
+                ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+                ->values()
+                ->all())
+            ->filter()
+            ->values();
+        $queryTokens = $queryGroups
             ->flatten()
-            ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
             ->unique()
             ->values();
         $suggestionTokens = collect(preg_split('/[^\p{L}\p{N}]+/u', $suggestion, -1, PREG_SPLIT_NO_EMPTY) ?: [])
@@ -1592,11 +1645,14 @@ class SalesToolbox
                 // still rejecting unrelated names from a noisy suggest API.
                 $maximumDistance = min(6, max(1, (int) floor($length * 0.35)));
 
+                $safeIdentityCorrection = $queryGroups->count() === 1
+                    && ($suggestionTokens->count() === 1 || $suggestionIndex === $suggestionTokens->count() - 1)
+                    || ($queryGroups->count() > 1
+                        && $suggestionTokens->count() >= 2
+                        && $this->alignedSuggestionTokenCount($queryTokens, $suggestionTokens) >= 2);
                 if ($distance <= $maximumDistance
                     && $this->sameSuggestionPrefix($queryToken, $suggestionToken)
-                    && ($suggestionTokens->count() === 1
-                        || $suggestionIndex === $suggestionTokens->count() - 1
-                        || $this->alignedSuggestionTokenCount($queryTokens, $suggestionTokens) >= 2)) {
+                    && $safeIdentityCorrection) {
                     return $suggestion;
                 }
             }

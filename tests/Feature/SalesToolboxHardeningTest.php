@@ -419,6 +419,40 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertNull($result['did_you_mean']);
     }
 
+    public function test_exact_title_search_treats_arabic_and_roman_volume_numbers_as_the_same_identity(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 240);
+        $product->update([
+            'name' => 'მესხური ფოლკლორი (II)',
+            'description' => 'მეორე ტომი',
+            'search_text' => 'მესხური ფოლკლორი II მეორე ტომი',
+            'metadata' => ['author' => 'ავტორთა ჯგუფი'],
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'მესხური ფოლკლორი 2',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+        $this->assertSame([], $result['unavailable_products']);
+        $this->assertNull($result['did_you_mean']);
+
+        $product->update(['stock' => 0]);
+        $soldOutResult = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'მესხური ფოლკლორი 2',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $soldOutResult['products']);
+        $this->assertSame([$product->id], collect($soldOutResult['unavailable_products'])->pluck('id')->all());
+        $this->assertNull($soldOutResult['did_you_mean']);
+    }
+
     public function test_product_search_suggests_the_nearest_tenant_catalog_author_for_a_real_typo(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
@@ -1715,6 +1749,7 @@ class SalesToolboxHardeningTest extends TestCase
         );
         $this->assertNull($method->invoke($toolbox, 'ჭნტურიასი', 'არტურ მილნი'));
         $this->assertNull($method->invoke($toolbox, 'ჭანტურიასი', 'ფანტომასი'));
+        $this->assertNull($method->invoke($toolbox, 'მესხური ფოლკლორი 2', 'უილიამ ფოლკნერი'));
     }
 
     private function context(int $stock = 10): array
