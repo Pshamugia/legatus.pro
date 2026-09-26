@@ -1806,8 +1806,9 @@ class SalesToolbox
     /**
      * Keep only query groups that form a strong identity already verified in
      * this tenant's catalogue. A single-token projection is accepted only for
-     * a one-token identity or the final token of a multi-token identity, which
-     * avoids treating a shared first name as an exact person/product match.
+     * a one-token product name/SKU or the final token of a verified entity
+     * identity. A generic final word from a multi-token product title is not
+     * enough to replace the exact identity supplied by the customer.
      *
      * @param  list<list<string>>  $termGroups
      * @return list<list<string>>
@@ -1856,11 +1857,13 @@ class SalesToolbox
                 // groups already match an entity, remaining words may describe
                 // a meaningful edition/bundle/format and exact lookup must keep
                 // them instead of silently broadening to the whole family.
+                $matchedVariantIsFinalToken = collect($termGroups[$matchedIndexes[0]])
+                    ->contains(fn (string $variant): bool => mb_strlen($variant) >= 4
+                        && ($variant === $lastToken || (mb_strlen($variant) >= 5 && str_contains($lastToken, $variant))));
                 $strong = count($matchedIndexes) === 1
                     && (($identity['kind'] === 'sku' && count($tokens) === 1)
-                    || collect($termGroups[$matchedIndexes[0]])
-                        ->contains(fn (string $variant): bool => mb_strlen($variant) >= 4
-                            && ($variant === $lastToken || (mb_strlen($variant) >= 5 && str_contains($lastToken, $variant)))));
+                    || ($identity['kind'] === 'name' && count($tokens) === 1 && $matchedVariantIsFinalToken)
+                    || ($identity['kind'] === 'entity' && $matchedVariantIsFinalToken));
                 if (! $strong) {
                     continue;
                 }

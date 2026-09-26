@@ -419,6 +419,34 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertNull($result['did_you_mean']);
     }
 
+    public function test_exact_lookup_never_projects_to_a_generic_final_word_from_an_unrelated_title(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'წმინდა წიგნი ყურანი და მისი შინაარსობრივი თარგმანი',
+            'search_text' => 'წმინდა წიგნი ყურანი და მისი შინაარსობრივი თარგმანი',
+        ]);
+        $agent->products()->create([
+            'name' => 'თარგმანის თეორია და პრაქტიკა',
+            'search_text' => 'თარგმანის თეორია და პრაქტიკა',
+            'price' => 20,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'პინდაროსის ოდები — ნანა ტონიას თარგმანი',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertSame([], $result['unavailable_products']);
+        $this->assertSame([], $result['related_products']);
+        $this->assertNull($result['did_you_mean']);
+    }
+
     public function test_exact_title_search_treats_arabic_and_roman_volume_numbers_as_the_same_identity(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 240);
