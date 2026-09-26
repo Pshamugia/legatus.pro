@@ -87,10 +87,30 @@ class PublicWebsiteCrawler
                     $response = $this->ingestion->fetchPublicUrl($url, [
                         'Accept' => 'text/html,application/xhtml+xml,application/xml,application/json',
                     ]);
-                } catch (\Throwable) {
+                } catch (\Throwable $exception) {
+                    if (! $listingOnly) {
+                        // General website sources may discover optional pages or
+                        // conventional sitemap URLs that legitimately do not
+                        // exist. Keep their long-standing best-effort behavior.
+                        $this->checkpoint($source, $startUrl, $crawlStartedAt, $queue, $queued, $visited, $created, $updated, $productCount, $contentHash);
+
+                        continue;
+                    }
+
+                    // A failed page is still part of the crawl. Keep it at the
+                    // front of the saved queue and fail this batch without
+                    // retiring last-known-good category membership. Treating
+                    // an exhausted local queue as a complete crawl after a
+                    // timeout/429 produced false `ready / 100%` sources with
+                    // only the handful of pages that happened to succeed.
+                    unset($visited[$url]);
+                    array_unshift($queue, $url);
                     $this->checkpoint($source, $startUrl, $crawlStartedAt, $queue, $queued, $visited, $created, $updated, $productCount, $contentHash);
 
-                    continue;
+                    throw new \RuntimeException(
+                        'Website synchronization paused before every discovered page could be fetched. Existing synchronized data was preserved.',
+                        previous: $exception,
+                    );
                 }
 
                 $body = $response->body();

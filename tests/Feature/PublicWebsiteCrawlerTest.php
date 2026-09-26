@@ -390,6 +390,77 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertSame([0.1, 0.2, 0.3], $source->chunks()->firstOrFail()->embedding);
     }
 
+    public function test_failed_pagination_never_publishes_a_partial_category_as_fully_synchronized(): void
+    {
+        Queue::fake();
+        $this->seed();
+        config([
+            'services.openai.key' => null,
+            'legatus.public_crawl_max_pages' => 20,
+            'legatus.public_crawl_batch_pages' => 20,
+        ]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Children',
+            'name' => 'Category: Children',
+            'url' => 'https://bukinistebi.ge/genres/children',
+            'status' => 'ready',
+            'progress' => 100,
+            'items_found' => 40,
+            'last_synced_at' => now()->subDay(),
+        ]);
+        $existing = $agent->products()->create([
+            'name' => 'Previously synchronized book',
+            'price' => 10,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['source_id' => $agent->knowledgeSources()->where('source_scope', 'catalog')->value('id')],
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'product',
+            'title' => $existing->name,
+            'content' => json_encode($existing->only(['id', 'name', 'price', 'stock'])),
+            'content_hash' => hash('sha256', 'previous-category-membership'),
+            'metadata' => ['product_id' => $existing->id],
+        ]);
+
+        Http::fake(function ($request) {
+            if ($request->url() === 'https://bukinistebi.ge/genres/children') {
+                return Http::response(
+                    $this->catalogPage('New book', 'NEW-1', 12, '/books/new/1', null, 2),
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+
+            return Http::response('Temporarily unavailable', 503, ['Content-Type' => 'text/html']);
+        });
+
+        try {
+            app(PublicWebsiteCrawler::class)->crawl($source);
+            $this->fail('The incomplete category crawl should pause.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('Existing synchronized data was preserved', $exception->getMessage());
+        }
+
+        $source->refresh();
+        $this->assertSame('ready', $source->status);
+        $this->assertLessThan(100, $source->progress);
+        $this->assertSame(40, $source->items_found);
+        $this->assertTrue($source->chunks()->where('metadata->product_id', $existing->id)->exists());
+        $this->assertSame(
+            'https://bukinistebi.ge/genres/children?page=2',
+            data_get($source->crawl_state, 'queue.0'),
+        );
+        $this->assertNotContains(
+            'https://bukinistebi.ge/genres/children?page=2',
+            (array) data_get($source->crawl_state, 'visited', []),
+        );
+    }
+
     private function catalogPage(
         string $name,
         string $sku,
