@@ -9,6 +9,7 @@ use App\Models\Agent;
 use App\Services\KnowledgeIngestionService;
 use App\Services\PublicWebsiteCrawler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -383,6 +384,10 @@ class PublicWebsiteCrawlerTest extends TestCase
         $crawler->crawl($source);
         $chunk = $source->chunks()->firstOrFail();
         $chunk->update(['embedding' => [0.1, 0.2, 0.3]]);
+        DB::table('knowledge_chunks')->where('id', $chunk->id)->update([
+            'created_at' => now()->subDay(),
+            'updated_at' => now()->subDay(),
+        ]);
 
         $crawler->crawl($source->fresh());
 
@@ -459,6 +464,61 @@ class PublicWebsiteCrawlerTest extends TestCase
             'https://bukinistebi.ge/genres/children?page=2',
             (array) data_get($source->crawl_state, 'visited', []),
         );
+    }
+
+    public function test_unchanged_category_memberships_are_marked_as_seen_during_a_later_sync(): void
+    {
+        Queue::fake();
+        $this->seed();
+        config(['services.openai.key' => null]);
+        $agent = Agent::firstOrFail();
+        $catalog = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'catalog',
+            'name' => 'Main catalog',
+            'url' => 'https://bukinistebi.ge/books',
+            'status' => 'ready',
+            'progress' => 100,
+        ]);
+        $agent->products()->create([
+            'name' => 'Stable category book',
+            'sku' => 'STABLE-1',
+            'price' => 12,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['source_id' => $catalog->id],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Children',
+            'name' => 'Category: Children',
+            'url' => 'https://bukinistebi.ge/genres/children',
+        ]);
+        Http::fake([
+            'https://bukinistebi.ge/genres/children' => Http::response(
+                $this->catalogPage('Stable category book', 'STABLE-1', 12, '/books/stable/1'),
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+        ]);
+
+        $crawler = app(PublicWebsiteCrawler::class);
+        $crawler->crawl($source);
+        $chunk = $source->chunks()->where('kind', 'product')->firstOrFail();
+        $chunk->update(['embedding' => [0.1, 0.2, 0.3]]);
+        DB::table('knowledge_chunks')->where('id', $chunk->id)->update([
+            'created_at' => now()->subDay(),
+            'updated_at' => now()->subDay(),
+        ]);
+
+        $crawler->crawl($source->fresh());
+
+        $source->refresh();
+        $this->assertSame(100, $source->progress);
+        $this->assertSame(1, $source->items_found);
+        $this->assertSame($chunk->id, $source->chunks()->where('kind', 'product')->firstOrFail()->id);
+        $this->assertSame([0.1, 0.2, 0.3], $source->chunks()->where('kind', 'product')->firstOrFail()->embedding);
     }
 
     private function catalogPage(

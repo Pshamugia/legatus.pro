@@ -252,7 +252,7 @@ class PublicWebsiteCrawler
 
         foreach ($this->split($text) as $index => $content) {
             $hash = hash('sha256', $url.'|'.$index.'|'.$content);
-            $source->chunks()->updateOrCreate(
+            $chunk = $source->chunks()->updateOrCreate(
                 ['content_hash' => $hash],
                 [
                     'agent_id' => $source->agent_id,
@@ -262,6 +262,9 @@ class PublicWebsiteCrawler
                     'metadata' => ['url' => $url, 'page_chunk' => $index + 1],
                 ],
             );
+            if (! $chunk->wasRecentlyCreated) {
+                $chunk->touch();
+            }
         }
     }
 

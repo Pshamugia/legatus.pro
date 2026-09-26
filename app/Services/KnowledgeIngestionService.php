@@ -1183,7 +1183,15 @@ class KnowledgeIngestionService
     private function chunk(KnowledgeSource $s, string $kind, ?string $title, string $content, array $metadata = []): void
     {
         $hash = hash('sha256', Str::lower(trim($content)));
-        $s->chunks()->updateOrCreate(['content_hash' => $hash], ['agent_id' => $s->agent_id, 'kind' => $kind, 'title' => $title, 'content' => $content, 'metadata' => $metadata]);
+        $chunk = $s->chunks()->updateOrCreate(['content_hash' => $hash], ['agent_id' => $s->agent_id, 'kind' => $kind, 'title' => $title, 'content' => $content, 'metadata' => $metadata]);
+
+        // Incremental crawls retire rows that were not seen during the current
+        // run. Eloquent does not update `updated_at` when every value is
+        // unchanged, so an unchanged product would otherwise look stale and
+        // be deleted after a successful category crawl.
+        if (! $chunk->wasRecentlyCreated) {
+            $chunk->touch();
+        }
     }
 
     private function number(mixed $v): float
