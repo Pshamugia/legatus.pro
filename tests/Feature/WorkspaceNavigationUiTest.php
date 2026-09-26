@@ -155,6 +155,21 @@ class WorkspaceNavigationUiTest extends TestCase
             ->assertSee('@media(max-width:380px)', false);
     }
 
+    public function test_workspace_navigation_contains_shared_mobile_overflow_guards(): void
+    {
+        $user = User::factory()->create(['name' => 'Mobile Workspace Owner']);
+        $organization = $this->workspace($user, 'A business name that must shrink on mobile');
+
+        $this->actingAs($user)
+            ->withSession([TenantContext::SESSION_KEY => $organization->id])
+            ->get(route('analytics.index'))
+            ->assertOk()
+            ->assertSee('max-width:100vw;min-width:0;overflow-x:clip', false)
+            ->assertSee('grid-template-columns:auto minmax(0,1fr) auto auto auto', false)
+            ->assertSee('.grid{grid-template-columns:minmax(0,1fr)}', false)
+            ->assertSee('.topline{align-items:flex-start;flex-direction:column', false);
+    }
+
     private function workspace(User $user, string $name): Organization
     {
         $organization = Organization::create([
