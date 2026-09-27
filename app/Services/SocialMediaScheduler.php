@@ -68,6 +68,7 @@ class SocialMediaScheduler
                 'template_snapshots' => $templateSnapshots,
                 'copy_mode' => $data['copy_mode'] ?? 'original',
                 'ai_tone' => ($data['copy_mode'] ?? 'original') === 'ai' ? $data['ai_tone'] : null,
+                'ai_photo_editor' => (bool) ($data['ai_photo_editor'] ?? false),
                 'status' => 'active',
             ]);
 
@@ -343,6 +344,10 @@ class SocialMediaScheduler
                 'ai_generation_attempted_at' => null,
                 'ai_generated_at' => null,
                 'ai_model' => null,
+                'ai_image_generation_attempted_at' => null,
+                'ai_image_generated_at' => null,
+                'ai_image_model' => null,
+                'ai_image_source_url' => null,
             ]);
         }
 

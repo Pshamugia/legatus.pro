@@ -126,6 +126,7 @@ class SocialMediaController extends Controller
         $tenant->authorize(['owner', 'admin']);
         $request->merge(['timing_mode' => $request->input('timing_mode', 'auto')]);
         $request->merge(['copy_mode' => $request->input('copy_mode', 'original')]);
+        $request->merge(['ai_photo_editor' => $request->boolean('ai_photo_editor')]);
         $data = $request->validate([
             'starts_on' => ['required', 'date', 'after_or_equal:today'],
             'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
@@ -142,6 +143,7 @@ class SocialMediaController extends Controller
             'posting_times.*' => ['required', 'date_format:H:i'],
             'copy_mode' => ['required', Rule::in(['original', 'ai'])],
             'ai_tone' => ['nullable', Rule::requiredIf($request->input('copy_mode') === 'ai'), Rule::in(['simple', 'creative', 'academic'])],
+            'ai_photo_editor' => ['required', 'boolean'],
         ]);
 
         $configuredLanguages = $tenant->agent()->knowledgeSources()->where('source_scope', 'language')

@@ -10,6 +10,7 @@ return [
         'model' => env('OPENAI_MODEL', 'gpt-5.6-sol'),
         'primary_model' => env('OPENAI_PRIMARY_MODEL', 'gpt-5.6-luna'),
         'social_media_model' => env('OPENAI_SOCIAL_MEDIA_MODEL', 'gpt-5.6-luna'),
+        'social_media_image_model' => env('OPENAI_SOCIAL_MEDIA_IMAGE_MODEL', 'gpt-image-2.5-sunburst'),
         'fallback_model' => env('OPENAI_FALLBACK_MODEL', 'gpt-5.6-sol'),
         'hybrid_enabled' => filter_var(env('OPENAI_HYBRID_ENABLED', false), FILTER_VALIDATE_BOOL),
         'hybrid_rollout_percent' => min(100, max(0, (int) env('OPENAI_HYBRID_ROLLOUT_PERCENT', 5))),

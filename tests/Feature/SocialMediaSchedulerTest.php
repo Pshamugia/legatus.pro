@@ -12,6 +12,7 @@ use App\Services\KnowledgeIngestionService;
 use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
 use App\Services\SocialMediaAiCopywriter;
+use App\Services\SocialMediaAiPhotoEditor;
 use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateRenderer;
@@ -65,6 +66,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertTrue($schedule->posts->every(fn ($post) => str_contains($post->caption, 'Verified public description.')));
         $this->assertSame(1, $schedule->posts->where('provider', 'facebook')->count());
         $this->assertSame(1, $schedule->posts->where('provider', 'instagram')->count());
+        $this->assertFalse($schedule->ai_photo_editor);
 
         $this->actingAs($user)->get(route('social-media.index'))
             ->assertOk()
@@ -74,6 +76,8 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('Verified public description.')
             ->assertSee('Classic frame')
             ->assertSee('AI Copywriter')
+            ->assertSee('AI Photo Editor')
+            ->assertSee('places the original product photo on it unchanged')
             ->assertSee('Original content')
             ->assertSee('Save schedule')
             ->assertSee('Creating schedule…')
@@ -1785,6 +1789,138 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
     }
 
+    public function test_schedule_can_enable_ai_photo_editor_without_enabling_ai_copywriter(): void
+    {
+        [$user, $agent] = $this->tenant('ai-photo-setting');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Photo Setting Product', 'General', 2));
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+            'copy_mode' => 'original',
+            'ai_photo_editor' => '1',
+        ])->assertSessionHasNoErrors();
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->assertTrue($schedule->ai_photo_editor);
+        $this->assertSame('original', $schedule->copy_mode);
+        $this->assertTrue($schedule->posts->every(
+            fn (SocialMediaPost $post): bool => $post->image_url === 'https://shop.example/images/product.jpg'
+                && $post->ai_image_generated_at === null,
+        ));
+    }
+
+    public function test_ai_photo_editor_generates_one_background_and_reuses_the_exact_composite_for_every_channel_in_a_slot(): void
+    {
+        Queue::fake();
+        Storage::fake('public');
+        config()->set('services.openai.key', 'test-openai-key');
+        config()->set('services.openai.social_media_model', 'gpt-5.6-luna');
+        config()->set('services.openai.social_media_image_model', 'gpt-image-2.5-sunburst');
+        [, $agent] = $this->tenant('ai-photo-slot');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Preserved Red Product', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram']);
+        $schedule->update(['ai_photo_editor' => true]);
+        $dueAt = now('UTC')->subMinute()->startOfSecond();
+        foreach (['facebook', 'instagram'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => $provider,
+                'status' => 'preparing', 'scheduled_for' => $dueAt, 'title' => $product->name,
+                'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+                'image_url' => $product->publicImageUrl(), 'caption' => 'Verified caption',
+            ]);
+        }
+        $source = $this->solidPng(400, 600, 230, 20, 20);
+        $background = $this->solidPng(1024, 1024, 15, 45, 220);
+        Http::fake(function ($request) use ($product, $source, $background) {
+            if ($request->url() === 'https://api.openai.com/v1/responses') {
+                return Http::response(['output' => [[
+                    'type' => 'image_generation_call',
+                    'result' => base64_encode($background),
+                ]]]);
+            }
+            if ($request->url() === $product->publicImageUrl()) {
+                return Http::response($source, 200, ['Content-Type' => 'image/png']);
+            }
+
+            return Http::response('<html><body>Verified product page</body></html>');
+        });
+
+        $job = new PrepareSocialMediaSlot($schedule->id, $dueAt->format('Y-m-d H:i:s'));
+        $job->handle(app(SocialMediaScheduler::class), app(SocialMediaAiPhotoEditor::class));
+
+        $posts = $schedule->posts()->orderBy('id')->get();
+        $this->assertTrue($posts->every(fn (SocialMediaPost $post): bool => $post->status === 'queued'));
+        $this->assertCount(1, $posts->pluck('image_url')->unique());
+        $this->assertStringContainsString('/media/social/', $posts->first()->image_url);
+        $this->assertTrue($posts->every(fn (SocialMediaPost $post): bool => $post->ai_image_generated_at !== null
+            && $post->ai_image_model === 'gpt-5.6-luna + gpt-image-2.5-sunburst'
+            && $post->ai_image_source_url === $product->publicImageUrl()));
+        Queue::assertPushed(PublishSocialMediaPost::class, 2);
+        $this->assertCount(1, Http::recorded(fn ($request) => $request->url() === 'https://api.openai.com/v1/responses'));
+        Http::assertSent(fn ($request): bool => $request->url() === $product->publicImageUrl());
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://api.openai.com/v1/responses'
+            && $request['model'] === 'gpt-5.6-luna'
+            && data_get($request->data(), 'tools.0.type') === 'image_generation'
+            && data_get($request->data(), 'tools.0.model') === 'gpt-image-2.5-sunburst'
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Preserved Red Product')
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Do not draw, recreate'));
+
+        $filename = basename((string) parse_url($posts->first()->image_url, PHP_URL_PATH));
+        Storage::disk('public')->assertExists('social-media/'.$filename);
+        $final = imagecreatefromstring(Storage::disk('public')->get('social-media/'.$filename));
+        $center = imagecolorsforindex($final, imagecolorat($final, 540, 540));
+        $corner = imagecolorsforindex($final, imagecolorat($final, 20, 20));
+        imagedestroy($final);
+        $this->assertGreaterThan(180, $center['red']);
+        $this->assertLessThan(70, $center['green']);
+        $this->assertGreaterThan(170, $corner['blue']);
+    }
+
+    public function test_ai_photo_editor_failure_never_falls_back_to_publishing_the_original_image(): void
+    {
+        Queue::fake();
+        config()->set('services.openai.key', 'test-openai-key');
+        [, $agent] = $this->tenant('ai-photo-failure');
+        $product = $agent->products()->create($this->product('Failed Photo Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $schedule->update(['ai_photo_editor' => true]);
+        $dueAt = now('UTC')->subMinute()->startOfSecond();
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'preparing', 'scheduled_for' => $dueAt, 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Verified caption',
+        ]);
+        Http::fake(function ($request) {
+            if ($request->url() === 'https://api.openai.com/v1/responses') {
+                return Http::response(['error' => ['message' => 'Temporary image outage']], 503);
+            }
+
+            return Http::response('<html><body>Verified product page</body></html>');
+        });
+
+        $job = new PrepareSocialMediaSlot($schedule->id, $dueAt->format('Y-m-d H:i:s'));
+        try {
+            $job->handle(app(SocialMediaScheduler::class), app(SocialMediaAiPhotoEditor::class));
+            $this->fail('AI Photo Editor was expected to throw.');
+        } catch (\Throwable $exception) {
+            $job->failed($exception);
+        }
+
+        $post->refresh();
+        $this->assertSame('failed', $post->status);
+        $this->assertSame($product->publicImageUrl(), $post->image_url);
+        $this->assertNull($post->ai_image_generated_at);
+        $this->assertStringContainsString('original product image was not published', (string) $post->failure_reason);
+        Queue::assertNotPushed(PublishSocialMediaPost::class);
+    }
+
     public function test_meta_feed_posts_are_published_as_facebook_and_instagram_stories(): void
     {
         [, $agent] = $this->tenant('meta-story-publisher');
@@ -2493,6 +2629,18 @@ class SocialMediaSchedulerTest extends TestCase
             .'<span>₾ 20.00</span>'
             .($available ? '<button class="toggle-cart-btn">Add to cart</button>' : '<span>Sold out</span>')
             .'</article></body></html>';
+    }
+
+    private function solidPng(int $width, int $height, int $red, int $green, int $blue): string
+    {
+        $image = imagecreatetruecolor($width, $height);
+        imagefill($image, 0, 0, imagecolorallocate($image, $red, $green, $blue));
+        ob_start();
+        imagepng($image);
+        $bytes = (string) ob_get_clean();
+        imagedestroy($image);
+
+        return $bytes;
     }
 
     private function templatePayload(string $marker): array

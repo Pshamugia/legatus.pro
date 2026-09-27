@@ -18,6 +18,7 @@ class SocialMediaSchedule extends Model
         'providers' => 'array',
         'posting_times' => 'array',
         'template_snapshots' => 'array',
+        'ai_photo_editor' => 'boolean',
         'paused_at' => 'datetime',
     ];
 

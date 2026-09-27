@@ -17,6 +17,8 @@ class SocialMediaPost extends Model
         'story_published_at' => 'datetime',
         'ai_generation_attempted_at' => 'datetime',
         'ai_generated_at' => 'datetime',
+        'ai_image_generation_attempted_at' => 'datetime',
+        'ai_image_generated_at' => 'datetime',
     ];
 
     public function schedule(): BelongsTo
