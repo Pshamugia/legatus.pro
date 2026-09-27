@@ -689,6 +689,198 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame($products->pluck('id')->all(), collect($reply['products'])->pluck('id')->all());
     }
 
+    public function test_luna_plans_multiple_subjects_semantically_without_splitting_multiword_entities(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $agent->update(['settings' => array_merge($agent->settings ?? [], ['catalog_search_url' => ''])]);
+        $physics = $agent->products()->create([
+            'name' => 'Physics fundamentals',
+            'search_text' => 'Physics fundamentals',
+            'price' => 20,
+            'stock' => 2,
+            'is_active' => true,
+        ]);
+        $mathematics = $agent->products()->create([
+            'name' => 'Mathematics guide',
+            'search_text' => 'Mathematics guide',
+            'price' => 24,
+            'stock' => 3,
+            'is_active' => true,
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'multi-subject-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => ['last_catalog_product_ids' => [$physics->id]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) use ($physics, $mathematics) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (! str_ends_with($request->url(), '/responses')) {
+                return Http::response('<html><body>No matching products</body></html>');
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response(['id' => 'multi-subject-resolution', 'output' => [[
+                    'type' => 'message',
+                    'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'is_delivery_request' => false,
+                        'delivery_request_type' => 'none',
+                        'is_human_request' => false,
+                        'is_business_knowledge_request' => false,
+                        'knowledge_query' => null,
+                        'knowledge_scope' => null,
+                        'is_catalog_follow_up' => true,
+                        'catalog_scope_action' => 'replace',
+                        'recommendation_scope' => 'none',
+                        'recommendation_query' => null,
+                        'recommendation_category' => null,
+                        'recommendation_occasion' => null,
+                        'resolved_query' => 'Physics',
+                        'resolved_queries' => ['Physics', 'Mathematics'],
+                        'referenced_product_id' => null,
+                        'resolved_category' => null,
+                        'catalog_match_scope' => 'entity_family',
+                        'exclude_product_ids' => [],
+                        'expects_complete_set' => false,
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response(['id' => 'multi-subject-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I found options for both requested subjects.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [$physics->id, $mathematics->id],
+                    'sources' => [],
+                    'factual_claims' => [
+                        ['type' => 'product', 'product_id' => $physics->id, 'amount' => null, 'quantity' => null, 'reference' => null],
+                        ['type' => 'product', 'product_id' => $mathematics->id, 'amount' => null, 'quantity' => null, 'reference' => null],
+                    ],
+                ])]],
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Show me books about physics and mathematics.',
+            $conversation,
+        );
+
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $searchCalls = collect($run->tools_used)->where('name', 'search_products')->values();
+        $this->assertSame(['Physics', 'Mathematics'], $searchCalls->pluck('arguments.query')->all());
+        $this->assertTrue($searchCalls->every(fn (array $call): bool => data_get($call, 'arguments._entity_family_match') === true));
+        $this->assertSame([$physics->id, $mathematics->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertSame(['Physics', 'Mathematics'], data_get($conversation->fresh()->context, 'active_catalog_scope.queries'));
+
+        $contextRequest = Http::recorded()->map(fn ($pair) => $pair[0])->first(
+            fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up',
+        );
+        $this->assertNotNull($contextRequest);
+        $this->assertStringContainsString('two subjects must produce two resolved_queries', (string) $contextRequest->data()['instructions']);
+        $answerRequest = Http::recorded()->map(fn ($pair) => $pair[0])->first(
+            fn ($request): bool => data_get($request->data(), 'text.format.name') === 'sales_reply',
+        );
+        $this->assertNotNull($answerRequest);
+        $this->assertStringContainsString('multiword proper name', (string) $answerRequest->data()['instructions']);
+    }
+
+    public function test_luna_keeps_a_multiword_person_name_as_one_semantic_catalog_target(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $agent->update(['settings' => array_merge($agent->settings ?? [], ['catalog_search_url' => ''])]);
+        $product = $agent->products()->create([
+            'name' => 'Leonardo da Vinci biography',
+            'search_text' => 'Leonardo da Vinci biography',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['author' => 'Leonardo da Vinci'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'multiword-identity-customer',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => ['last_catalog_product_ids' => [$product->id]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) use ($product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (! str_ends_with($request->url(), '/responses')) {
+                return Http::response('<html><body>No matching products</body></html>');
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response(['id' => 'multiword-resolution', 'output' => [[
+                    'type' => 'message',
+                    'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'is_delivery_request' => false,
+                        'delivery_request_type' => 'none',
+                        'is_human_request' => false,
+                        'is_business_knowledge_request' => false,
+                        'knowledge_query' => null,
+                        'knowledge_scope' => null,
+                        'is_catalog_follow_up' => true,
+                        'catalog_scope_action' => 'replace',
+                        'recommendation_scope' => 'none',
+                        'recommendation_query' => null,
+                        'recommendation_category' => null,
+                        'recommendation_occasion' => null,
+                        'resolved_query' => 'Leonardo da Vinci',
+                        'resolved_queries' => ['Leonardo da Vinci'],
+                        'referenced_product_id' => null,
+                        'resolved_category' => null,
+                        'catalog_match_scope' => 'entity_family',
+                        'exclude_product_ids' => [],
+                        'expects_complete_set' => false,
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response(['id' => 'multiword-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I found one matching option.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [$product->id],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $product->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null,
+                    ]],
+                ])]],
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Do you have anything about Leonardo da Vinci?',
+            $conversation,
+        );
+
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $searchCalls = collect($run->tools_used)->where('name', 'search_products')->values();
+        $this->assertCount(1, $searchCalls);
+        $this->assertSame('Leonardo da Vinci', data_get($searchCalls->first(), 'arguments.query'));
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+    }
+
     public function test_more_results_keeps_the_verified_category_scope_and_excludes_shown_products(): void
     {
         $this->seed();
