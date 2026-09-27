@@ -79,6 +79,8 @@ class SocialMediaSchedulerTest extends TestCase
             ->assertSee('AI Photo Editor')
             ->assertSee('places the original product photo on it unchanged')
             ->assertSee('Original content')
+            ->assertDontSee('Meta publishing access')
+            ->assertDontSee('Publishing for other businesses becomes public after Meta approves')
             ->assertSee('Save schedule')
             ->assertSee('Creating schedule…')
             ->assertSee('Creating your schedule. Please wait…')

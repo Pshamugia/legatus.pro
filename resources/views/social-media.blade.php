@@ -34,11 +34,6 @@
         @if($errors->any())
             <div class="social-alert error"><strong>Please check the highlighted settings:</strong><ul>@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>
         @endif
-        <div class="social-alert notice">
-            <strong>Meta publishing access</strong><br>
-            Connected app-role accounts can be tested now. Publishing for other businesses becomes public after Meta approves the requested permissions.
-        </div>
-
         <section class="panel template-panel" aria-labelledby="template-heading">
             <div class="section-heading">
                 <div><span class="step">01</span><div><h2 id="template-heading">Design post templates</h2><p>Facebook, Instagram and LinkedIn keep independent text, emojis and delivery details.</p></div></div>
