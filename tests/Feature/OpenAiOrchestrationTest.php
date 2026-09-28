@@ -1431,6 +1431,179 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('17.00', $reply['text']);
     }
 
+    public function test_broad_recommendation_cannot_be_degraded_into_an_exact_phrase_search(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://store.example/search?q={query}',
+        ])]);
+        $agent->products()->update(['is_active' => false]);
+        $product = $agent->products()->create([
+            'name' => 'A verified catalog choice',
+            'sku' => 'BROAD-CHOICE',
+            'category' => 'General',
+            'search_text' => 'A verified catalog choice',
+            'price' => 19,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'broad-search-tool-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) use ($product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response($this->catalogContextResponse([
+                        'is_catalog_follow_up' => false,
+                        'catalog_scope_action' => 'replace',
+                        'recommendation_scope' => 'broad',
+                    ], 'broad-recommendation-context'));
+                }
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'broad-wrong-search', 'output' => [[
+                        'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'broad-search-call',
+                        'arguments' => json_encode([
+                            'query' => 'Please choose a product for me', 'category' => null,
+                            'max_price' => null, 'exclude_product_ids' => [],
+                        ]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'broad-recommendation-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'Here is a verified option from the catalog.',
+                        'intent' => 'recommendation', 'confidence' => 1,
+                        'handoff' => false, 'escalation_reason' => null,
+                        'clarification_next_tool' => null, 'clarification_missing_input' => null,
+                        'product_ids' => [$product->id], 'sources' => [],
+                        'factual_claims' => [[
+                            'type' => 'product', 'product_id' => $product->id,
+                            'amount' => null, 'quantity' => null, 'reference' => null,
+                        ]],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('', 404);
+        });
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'Please choose a product for me', $conversation);
+
+        $this->assertContains('recommend_products', $reply['tools_used'], json_encode($reply));
+        $this->assertNotContains('search_products', $reply['tools_used']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+        $event = RecommendationEvent::query()->latest('id')->firstOrFail();
+        $this->assertSame('', $event->query['query']);
+    }
+
+    public function test_category_recommendation_uses_verified_taxonomy_even_when_the_model_requests_exact_search(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://store.example/search?q={query}',
+        ])]);
+        $agent->products()->update(['is_active' => false]);
+        $scienceFiction = $agent->products()->create([
+            'name' => 'The Distant Signal', 'sku' => 'SCI-FI-1', 'category' => 'General',
+            'search_text' => 'The Distant Signal space voyage', 'price' => 21,
+            'stock' => 4, 'is_active' => true, 'metadata' => [],
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'Everyday Cooking', 'sku' => 'COOKING-1', 'category' => 'General',
+            'search_text' => 'Everyday Cooking kitchen recipes', 'price' => 12,
+            'stock' => 4, 'is_active' => true, 'metadata' => [],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'taxonomy_label' => 'Science Fiction',
+            'name' => 'Category: Science Fiction', 'url' => 'https://store.example/categories/science-fiction',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 2, 'last_synced_at' => now(),
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'product', 'title' => $scienceFiction->name,
+            'content' => json_encode(['name' => $scienceFiction->name]),
+            'content_hash' => hash('sha256', 'orchestrated-science-fiction-'.$scienceFiction->id),
+            'metadata' => ['product_id' => $scienceFiction->id],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'category-search-tool-customer', 'status' => 'ai', 'channel' => 'facebook',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer', 'content' => 'Please choose a product for me.',
+        ]);
+        $conversation->messages()->create([
+            'role' => 'assistant', 'content' => 'Which kind would interest you?',
+            'confidence' => 1, 'metadata' => ['intent' => 'clarification', 'products' => []],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) use ($scienceFiction) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response($this->catalogContextResponse([
+                        'is_catalog_follow_up' => true,
+                        'catalog_scope_action' => 'refine',
+                        'recommendation_scope' => 'constrained',
+                        'recommendation_category' => 'Science Fiction',
+                        'resolved_query' => 'Science Fiction',
+                        'resolved_queries' => ['Science Fiction'],
+                        'resolved_category' => 'Science Fiction',
+                        'catalog_match_scope' => 'entity_family',
+                    ], 'category-recommendation-context'));
+                }
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'category-wrong-search', 'output' => [[
+                        'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'category-search-call',
+                        'arguments' => json_encode([
+                            'query' => 'Science Fiction books', 'category' => 'Science Fiction',
+                            'max_price' => null, 'exclude_product_ids' => [],
+                        ]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'category-recommendation-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'I found a verified science-fiction option.',
+                        'intent' => 'recommendation', 'confidence' => 1,
+                        'handoff' => false, 'escalation_reason' => null,
+                        'clarification_next_tool' => null, 'clarification_missing_input' => null,
+                        'product_ids' => [$scienceFiction->id], 'sources' => [],
+                        'factual_claims' => [[
+                            'type' => 'product', 'product_id' => $scienceFiction->id,
+                            'amount' => null, 'quantity' => null, 'reference' => null,
+                        ]],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('', 404);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'I am interested in science-fiction products.',
+            $conversation,
+        );
+
+        $this->assertContains('recommend_products', $reply['tools_used']);
+        $this->assertNotContains('search_products', $reply['tools_used']);
+        $this->assertSame([$scienceFiction->id], $reply['products']->pluck('id')->all());
+        $this->assertNotContains($unrelated->id, $reply['products']->pluck('id')->all());
+        $event = RecommendationEvent::query()->latest('id')->firstOrFail();
+        $this->assertSame('Science Fiction', $event->query['category']);
+        $this->assertSame('', $event->query['query']);
+    }
+
     public function test_a_broad_misclassification_cannot_erase_the_models_explicit_topic_and_return_unrelated_products(): void
     {
         $this->seed();
@@ -2792,5 +2965,42 @@ class OpenAiOrchestrationTest extends TestCase
             '"explicitly_mentioned_in_recent_assistant_reply":true',
             (string) $resolverRequest->data()['instructions'],
         );
+    }
+
+    private function catalogContextResponse(array $overrides, string $id): array
+    {
+        $context = array_replace([
+            'is_delivery_request' => false,
+            'delivery_request_type' => 'none',
+            'is_human_request' => false,
+            'is_business_knowledge_request' => false,
+            'knowledge_query' => null,
+            'knowledge_scope' => null,
+            'is_catalog_follow_up' => false,
+            'catalog_scope_action' => 'none',
+            'recommendation_scope' => 'none',
+            'recommendation_query' => null,
+            'recommendation_category' => null,
+            'recommendation_occasion' => null,
+            'resolved_query' => null,
+            'resolved_queries' => [],
+            'referenced_product_id' => null,
+            'resolved_category' => null,
+            'catalog_match_scope' => 'exact_identity',
+            'exclude_product_ids' => [],
+            'expects_complete_set' => false,
+        ], $overrides);
+
+        return [
+            'id' => $id,
+            'output' => [[
+                'type' => 'message',
+                'content' => [[
+                    'type' => 'output_text',
+                    'text' => json_encode($context),
+                ]],
+            ]],
+            'usage' => [],
+        ];
     }
 }

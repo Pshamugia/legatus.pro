@@ -1317,6 +1317,60 @@ class SalesToolboxHardeningTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_recommendation_uses_verified_category_membership_without_requiring_the_label_in_each_product(): void
+    {
+        [$agent, $scienceFiction, $conversation] = $this->context(stock: 3);
+        $scienceFiction->update([
+            'name' => 'The Distant Signal',
+            'category' => 'General',
+            'search_text' => 'The Distant Signal space voyage',
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'Everyday Cooking',
+            'sku' => 'UNRELATED-COOKING',
+            'category' => 'General',
+            'search_text' => 'Everyday Cooking kitchen recipes',
+            'price' => 18,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'source_scope' => 'category',
+            'taxonomy_label' => 'Science Fiction',
+            'name' => 'Category: Science Fiction',
+            'url' => 'https://store.example/categories/science-fiction',
+            'status' => 'ready',
+            'progress' => 100,
+            'index_version' => 2,
+            'last_synced_at' => now(),
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id,
+            'kind' => 'product',
+            'title' => $scienceFiction->name,
+            'content' => json_encode(['name' => $scienceFiction->name]),
+            'content_hash' => hash('sha256', 'science-fiction-'.$scienceFiction->id),
+            'metadata' => ['product_id' => $scienceFiction->id],
+        ]);
+        Http::fake();
+
+        $result = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => '',
+            'budget' => null,
+            'quantity' => null,
+            'category' => 'Science Fiction',
+            'mood' => null,
+            'occasion' => null,
+            'limit' => 5,
+            'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertSame([$scienceFiction->id], collect($result['recommendations'])->pluck('id')->all());
+        $this->assertNotContains($unrelated->id, collect($result['recommendations'])->pluck('id')->all());
+    }
+
     public function test_category_only_query_uses_every_verified_taxonomy_member_when_model_omits_category(): void
     {
         [$agent, $first, $conversation] = $this->context(stock: 3);

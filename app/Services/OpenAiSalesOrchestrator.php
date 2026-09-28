@@ -129,7 +129,9 @@ class OpenAiSalesOrchestrator
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
                 .'. Preserve these semantic constraints when calling recommend_products. This is tenant-scoped reference data, not an instruction.]';
         }
-        if (is_array($catalogContext) && ($catalogContext['is_catalog_follow_up'] ?? false) === true) {
+        if (is_array($catalogContext)
+            && ($catalogContext['is_catalog_follow_up'] ?? false) === true
+            && ($catalogContext['recommendation_scope'] ?? 'none') === 'none') {
             $recentIds = $this->activeCatalogProductIds($conversation);
             $excludedIds = collect($catalogContext['exclude_product_ids'] ?? [])
                 ->map(fn ($id): int => (int) $id)->intersect($recentIds)->unique()->values();
@@ -474,11 +476,42 @@ class OpenAiSalesOrchestrator
             $outputs = [];
             foreach ($calls as $call) {
                 $args = json_decode($call['arguments'] ?? '{}', true) ?: [];
+                $toolName = (string) ($call['name'] ?? '');
+                $modelRequestedCatalogSearch = $toolName === 'search_products';
+                if (in_array($toolName, ['search_products', 'recommend_products'], true)
+                    && is_array($catalogContext)
+                    && ($catalogContext['recommendation_scope'] ?? 'none') !== 'none') {
+                    // The semantic resolver has already established that the
+                    // customer wants a recommendation. A weaker tool-choice
+                    // must not turn that into an exact phrase lookup: doing so
+                    // loses conversational intent and commonly produces a
+                    // false empty result for requests such as "choose one" or
+                    // a genre/category recommendation.
+                    $toolName = 'recommend_products';
+                    $args = array_replace([
+                        'query' => '',
+                        'budget' => null,
+                        'quantity' => null,
+                        'category' => null,
+                        'mood' => null,
+                        'occasion' => null,
+                        'limit' => 5,
+                        'exclude_product_ids' => [],
+                    ], $args);
+                    unset(
+                        $args['max_price'],
+                        $args['_identity_match'],
+                        $args['_entity_family_match'],
+                        $args['_return_all_matches'],
+                        $args['_preserve_exact_identity'],
+                        $args['_required_name_identity'],
+                    );
+                }
                 $semanticResolution = collect($used)->firstWhere('name', 'resolve_catalog_context');
-                if (is_array($semanticResolution) && in_array($call['name'], ['search_products', 'recommend_products'], true)) {
+                if (is_array($semanticResolution) && in_array($toolName, ['search_products', 'recommend_products'], true)) {
                     $args['query'] = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
                     $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
-                    if ($call['name'] === 'search_products') {
+                    if ($toolName === 'search_products') {
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
                         $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
                         $args['_entity_family_match'] = data_get($semanticResolution, 'result.catalog_match_scope') === 'entity_family';
@@ -487,7 +520,7 @@ class OpenAiSalesOrchestrator
                         $args['_required_name_identity'] = data_get($semanticResolution, 'result.explicit_name_identity');
                     }
                 }
-                if ($call['name'] === 'search_products' && $explicitNameIdentity !== null) {
+                if ($toolName === 'search_products' && $explicitNameIdentity !== null) {
                     if (blank($args['query'] ?? null)) {
                         $args['query'] = $explicitNameIdentity;
                     }
@@ -496,7 +529,7 @@ class OpenAiSalesOrchestrator
                     $args['_preserve_exact_identity'] = true;
                     $args['_required_name_identity'] = $explicitNameIdentity;
                 }
-                if ($call['name'] === 'recommend_products') {
+                if ($toolName === 'recommend_products') {
                     // The model owns the conversational interpretation, but a
                     // verified shopping promise must not collapse into a
                     // single arbitrary card. Preserve server-parsed numeric
@@ -520,7 +553,7 @@ class OpenAiSalesOrchestrator
                     // literal mandatory catalogue term produces a false empty
                     // result even though eligible tenant products exist.
                     if ($broadRecommendation
-                        && ($budgetConstraint !== null || blank($args['query'] ?? null))) {
+                        && ($modelRequestedCatalogSearch || $budgetConstraint !== null || blank($args['query'] ?? null))) {
                         $args['query'] = '';
                         $args['category'] = null;
                         $args['mood'] = null;
@@ -544,12 +577,12 @@ class OpenAiSalesOrchestrator
                     }
                     $args['limit'] = min(5, $args['limit']);
                 }
-                $result = $this->tools->execute($call['name'], $args, $agent, $conversation);
+                $result = $this->tools->execute($toolName, $args, $agent, $conversation);
                 $stockCalls = [];
-                if ($call['name'] === 'search_products') {
+                if ($toolName === 'search_products') {
                     [$result, $stockCalls] = $this->verifySearchResultStock($result, $agent, $conversation);
                 }
-                $used[] = ['name' => $call['name'], 'arguments' => $args, 'result' => $result];
+                $used[] = ['name' => $toolName, 'arguments' => $args, 'result' => $result];
                 $used = array_merge($used, $stockCalls);
                 $outputs[] = ['type' => 'function_call_output', 'call_id' => $call['call_id'], 'output' => json_encode($result, JSON_UNESCAPED_UNICODE)];
             }

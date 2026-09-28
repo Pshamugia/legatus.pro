@@ -658,7 +658,16 @@ class SalesToolbox
         );
         $taxonomyCriteria = $criteria;
         $taxonomyTermGroups = $termGroups;
-
+        if ($taxonomyProductIds !== null && filled($a['category'] ?? null)) {
+            // Verified taxonomy membership already proves the category. Do
+            // not require every mapped product's title/description to repeat
+            // that label; only any additional query or mood constraints still
+            // need a textual match.
+            $termGroups = array_values(array_filter(
+                $this->searchTermGroups(trim(implode(' ', array_filter([$a['query'], $a['mood']])))),
+                fn (array $variants): bool => ! ctype_digit((string) ($variants[0] ?? '')),
+            ));
+        }
         // Occasion/recipient is normally a soft ranking preference. When a
         // broad request also names a verified tenant category, however, that
         // category is authoritative product membership rather than merely a
