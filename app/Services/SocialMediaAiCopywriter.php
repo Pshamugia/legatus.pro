@@ -274,6 +274,15 @@ PROMPT;
             ->where('agent_id', $post->agent_id)
             ->whereKeyNot($post->id)
             ->whereNotNull('ai_generated_at')
+            // Facebook and Instagram are two renditions of one product slot,
+            // not two independent product campaigns. Treating the first
+            // channel's freshly generated caption as a negative reference for
+            // its sibling makes the second channel systematically fail the
+            // diversity gate even though both must publish the same product.
+            ->where(function ($query) use ($post): void {
+                $query->where('social_media_schedule_id', '!=', $post->social_media_schedule_id)
+                    ->orWhere('scheduled_for', '!=', $post->scheduled_for);
+            })
             ->when($post->language, fn ($query, string $language) => $query->where('language', $language), fn ($query) => $query->whereNull('language'))
             ->latest('ai_generated_at')
             ->limit(100)

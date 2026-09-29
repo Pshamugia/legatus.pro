@@ -396,6 +396,57 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame($replacement->id, $post->fresh()->product_id);
     }
 
+    public function test_due_multi_channel_slot_replaces_a_product_already_claimed_by_an_earlier_slot(): void
+    {
+        [, $agent] = $this->tenant('earlier-slot-claim');
+        $this->connections($agent);
+        $claimed = $agent->products()->create($this->product('Already Queued Product', 'General', 2));
+        $replacement = $agent->products()->create($this->product('Unused Replacement', 'General', 2));
+        $providers = ['facebook', 'instagram'];
+        $templates = app(\App\Services\SocialMediaTemplateService::class)->snapshots($agent, $providers);
+        $earlierSchedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => $providers, 'timezone' => 'UTC',
+            'template_snapshots' => $templates, 'copy_mode' => 'original', 'status' => 'active',
+        ]);
+        $currentSchedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => $providers, 'timezone' => 'UTC',
+            'template_snapshots' => $templates, 'copy_mode' => 'original', 'status' => 'active',
+        ]);
+        $earlierSlot = now()->startOfMinute();
+        $currentSlot = $earlierSlot->copy()->addMinute();
+        foreach ($providers as $provider) {
+            $earlierSchedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $claimed->id, 'provider' => $provider,
+                'status' => 'queued', 'scheduled_for' => $earlierSlot, 'title' => $claimed->name,
+                'description' => $claimed->description, 'product_url' => data_get($claimed->metadata, 'product_url'),
+                'image_url' => $claimed->publicImageUrl(), 'caption' => 'Earlier',
+            ]);
+            $currentSchedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $claimed->id, 'provider' => $provider,
+                'status' => 'preparing', 'scheduled_for' => $currentSlot, 'title' => $claimed->name,
+                'description' => $claimed->description, 'product_url' => data_get($claimed->metadata, 'product_url'),
+                'image_url' => $claimed->publicImageUrl(), 'caption' => 'Current',
+            ]);
+        }
+        Http::fake(function ($request) use ($replacement) {
+            $url = data_get($replacement->metadata, 'product_url');
+            if ($request->url() === $url) {
+                return Http::response($this->storefrontCard($replacement->name, $url, true), 200, ['Content-Type' => 'text/html']);
+            }
+
+            return Http::response('image', 200, ['Content-Type' => 'image/jpeg']);
+        });
+
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($currentSchedule->fresh('agent'), $currentSlot);
+        $posts = $currentSchedule->posts()->get();
+
+        $this->assertCount(2, $safeIds);
+        $this->assertSame([$replacement->id], $posts->pluck('product_id')->unique()->values()->all());
+        $this->assertSame($providers, $posts->pluck('provider')->sort()->values()->all());
+    }
+
     public function test_visible_zero_inventory_overrides_stale_in_stock_structured_data(): void
     {
         [$user, $agent] = $this->tenant('stale-structured-stock-replacement');
@@ -1486,6 +1537,63 @@ class SocialMediaSchedulerTest extends TestCase
             (string) data_get($request->data(), 'input.0.content.0.text'),
             'The previous draft was too similar to earlier posts',
         ));
+    }
+
+    public function test_ai_copywriter_excludes_the_same_product_slot_sibling_from_diversity_history(): void
+    {
+        [, $agent] = $this->tenant('ai-copy-same-slot');
+        config()->set('services.openai.key', 'test-openai-key');
+        $olderProduct = $agent->products()->create($this->product('Older Product', 'Books', 7));
+        $product = $agent->products()->create($this->product('Paired Product', 'Books', 8));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook', 'instagram'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $slot = now()->startOfMinute();
+        $olderCaption = 'An older campaign opens with a genuinely different idea and structure.';
+        $sameSlotCaption = 'This is the Facebook rendition for the paired product slot.';
+        $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $olderProduct->id, 'provider' => 'facebook',
+            'status' => 'published', 'scheduled_for' => $slot->copy()->subHour(), 'published_at' => $slot->copy()->subHour(),
+            'title' => $olderProduct->name, 'description' => $olderProduct->description,
+            'product_url' => data_get($olderProduct->metadata, 'product_url'),
+            'image_url' => $olderProduct->publicImageUrl(), 'language' => 'English',
+            'caption' => $olderCaption, 'ai_generated_at' => $slot->copy()->subHour(), 'ai_model' => 'gpt-5.6-luna',
+        ]);
+        $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => $slot, 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'language' => 'English',
+            'caption' => $sameSlotCaption, 'ai_generated_at' => now(), 'ai_model' => 'gpt-5.6-luna',
+        ]);
+        $instagram = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'instagram',
+            'status' => 'queued', 'scheduled_for' => $slot, 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'language' => 'English', 'caption' => 'Pending',
+        ]);
+        $generated = 'A platform-ready view of this verified product, written with its own clear and grounded angle.';
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $generated])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => true, 'unsupported_fragments' => [],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
+                ])]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($instagram);
+
+        $this->assertStringStartsWith($generated, $caption);
+        $generationRequest = Http::recorded()->first(fn (array $record): bool =>
+            data_get($record[0]->data(), 'text.format.name') === 'social_media_caption'
+        );
+        $prompt = (string) data_get($generationRequest[0]->data(), 'input.0.content.0.text');
+        $this->assertStringContainsString($olderCaption, $prompt);
+        $this->assertStringNotContainsString($sameSlotCaption, $prompt);
     }
 
     public function test_ai_copywriter_retries_when_semantic_audit_finds_a_recycled_structure(): void

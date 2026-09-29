@@ -244,6 +244,12 @@ class SocialMediaScheduler
                 return $postLanguage === $variantLanguage;
             });
         });
+        $alreadyClaimedByEarlierSlot = $product && $schedule->agent->socialMediaPosts()
+            ->where('product_id', $product->id)
+            ->whereNotIn('id', $slotPostIds)
+            ->whereIn('status', ['scheduled', 'preparing', 'queued'])
+            ->where('scheduled_for', '<=', $scheduledFor)
+            ->exists();
         $alreadyPublished = $product && (
             $schedule->agent->socialMediaPosts()
                 ->where('product_id', $product->id)
@@ -257,7 +263,7 @@ class SocialMediaScheduler
             )
         );
 
-        if ($product && $productMatchesSchedule && ! $alreadyPublished && $pending->every(
+        if ($product && $productMatchesSchedule && ! $alreadyClaimedByEarlierSlot && ! $alreadyPublished && $pending->every(
             fn ($post): bool => $this->productIsPublishableForPost($product, $post),
         ) && $this->liveAvailabilityAllows($schedule->agent, $product)) {
             return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
