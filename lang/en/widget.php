@@ -14,7 +14,7 @@ return [
     'close' => 'Close',
     'close_chat' => 'Close chat',
     'personal_advice' => 'Personal advice',
-    'personal_advice_prompt' => 'Help me choose. Ask me a few questions first, then recommend products only from your catalog.',
+    'personal_advice_prompt' => 'Help me choose. Ask one useful clarifying question first, then recommend products only from your catalog.',
     'delivery' => 'Delivery',
     'delivery_prompt' => 'Can it be delivered tomorrow?',
     'message_placeholder' => 'Write a message...',

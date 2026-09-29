@@ -879,6 +879,7 @@ class OpenAiSalesOrchestrator
                 $conversation->update(['context' => $context]);
             }
         }
+        $data = $this->normalizeRecommendationClarification($data, $catalogContext, $usedCollection);
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
         if (($verifiedDelivery['ok'] ?? false) === true) {
@@ -2232,6 +2233,45 @@ class OpenAiSalesOrchestrator
         }
 
         return null;
+    }
+
+    private function normalizeRecommendationClarification(
+        array $data,
+        ?array $catalogContext,
+        Collection $used,
+    ): array {
+        if (! is_array($catalogContext)
+            || ($catalogContext['recommendation_scope'] ?? 'none') === 'none'
+            || ! in_array($data['intent'] ?? null, ['clarification', 'recommendation'], true)
+            || ($data['handoff'] ?? false) === true
+            || collect($data['product_ids'] ?? [])->isNotEmpty()
+            || collect($data['factual_claims'] ?? [])->isNotEmpty()
+            || $used->contains(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true)
+                && data_get($call, 'result.ok') === true)) {
+            return $data;
+        }
+
+        $text = trim((string) ($data['text'] ?? ''));
+        $isQuestion = ($data['intent'] ?? null) === 'clarification'
+            || str_contains($text, '?')
+            || str_contains($text, 'ØŸ');
+        if (! $isQuestion || $text === '') {
+            return $data;
+        }
+
+        // A broad recommendation may legitimately begin with one useful
+        // preference question. The next customer answer is a free-form query
+        // accepted by recommend_products, even when a model invents a schema
+        // field such as "genre" or labels the question as recommendation.
+        // Normalize that metadata instead of converting a healthy AI shopping
+        // dialogue into a human handoff.
+        $data['intent'] = 'clarification';
+        $data['handoff'] = false;
+        $data['escalation_reason'] = null;
+        $data['clarification_next_tool'] = 'recommend_products';
+        $data['clarification_missing_input'] = 'query';
+
+        return $data;
     }
 
     private function claimsShortlistIsComplete(string $text, Collection $successful): bool

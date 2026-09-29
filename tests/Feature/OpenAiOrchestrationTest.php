@@ -1503,6 +1503,80 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('', $event->query['query']);
     }
 
+    public function test_personal_advice_quick_action_stays_in_ai_when_fallback_asks_for_a_preference(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'catalog_search_url' => 'https://store.example/search?q={query}',
+        ])]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'personal-advice-quick-action', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config([
+            'services.openai.key' => 'test-key',
+            'services.openai.hybrid_enabled' => true,
+            'services.openai.hybrid_rollout_percent' => 100,
+            'services.openai.primary_model' => 'gpt-5.6-luna',
+            'services.openai.fallback_enabled' => true,
+            'services.openai.fallback_model' => 'gpt-5.6-sol',
+        ]);
+
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (! str_ends_with($request->url(), '/responses')) {
+                return Http::response('', 404);
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response($this->catalogContextResponse([
+                    'catalog_scope_action' => 'replace',
+                    'recommendation_scope' => 'broad',
+                ], 'personal-advice-context'));
+            }
+            if (($request->data()['model'] ?? null) === 'gpt-5.6-sol') {
+                return Http::response(['id' => 'personal-advice-sol-question', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'რომელი ჟანრი ან განწყობა გაინტერესებთ?',
+                        'intent' => 'clarification', 'confidence' => 1,
+                        'handoff' => false, 'escalation_reason' => null,
+                        'clarification_next_tool' => 'recommend_products',
+                        // `genre` is not a real tool argument. This used to
+                        // trigger the exact production guardrail handoff.
+                        'clarification_missing_input' => 'genre',
+                        'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                    ], JSON_UNESCAPED_UNICODE)]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response(['id' => 'personal-advice-luna-preferences', 'output' => [[
+                'type' => 'function_call', 'name' => 'save_shopping_preferences',
+                'call_id' => 'personal-advice-preferences-call',
+                'arguments' => json_encode([
+                    'budget' => null, 'occasion' => null, 'mood' => null,
+                    'likes' => [], 'dislikes' => [], 'recipient' => null,
+                ]),
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'დამეხმარე არჩევაში. ჯერ ერთი საჭირო დამაზუსტებელი კითხვა დამისვი, შემდეგ კი პროდუქტები მხოლოდ თქვენი კატალოგიდან მირჩიე.',
+            $conversation,
+        );
+
+        $this->assertSame('clarification', $reply['intent']);
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('რომელი ჟანრი ან განწყობა გაინტერესებთ?', $reply['text']);
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertContains('model_fallback', $reply['tools_used']);
+        $this->assertNotContains('server_guardrail', $reply['tools_used']);
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $this->assertSame('primary_to_fallback', $run->route);
+        $this->assertNull($run->error);
+    }
+
     public function test_category_recommendation_uses_verified_taxonomy_even_when_the_model_requests_exact_search(): void
     {
         $this->seed();
