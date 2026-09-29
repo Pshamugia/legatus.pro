@@ -1789,7 +1789,7 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('could not find', $result['text']);
     }
 
-    public function test_a_fallback_model_cannot_publish_product_recommendations_after_luna_fails(): void
+    public function test_a_fallback_model_preserves_verified_product_recommendations_after_luna_continuation_fails(): void
     {
         $this->seed();
         $agent = Agent::firstOrFail();
@@ -1865,9 +1865,9 @@ class OpenAiOrchestrationTest extends TestCase
             $conversation,
         );
 
-        $this->assertSame([], collect($reply['products'])->pluck('id')->all());
-        $this->assertStringNotContainsString($product->name, $reply['text']);
-        $this->assertStringContainsString('could not find', $reply['text']);
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertSame('Buy this matching title.', $reply['text']);
+        $this->assertStringNotContainsString('could not find', $reply['text']);
         $this->assertFalse($reply['handoff']);
     }
 
