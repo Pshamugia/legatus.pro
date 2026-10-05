@@ -9,6 +9,7 @@ use App\Services\PublicProductAvailabilityVerifier;
 use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaPublicationHistory;
 use App\Services\SocialMediaTemplateRenderer;
+use App\Services\ThreadsClient;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Str;
@@ -29,6 +30,7 @@ class PublishSocialMediaPost implements ShouldQueue
         ?PublicProductAvailabilityVerifier $availability = null,
     ): void {
         $linkedin = app(LinkedInClient::class);
+        $threads = app(ThreadsClient::class);
         $copywriter ??= app(SocialMediaAiCopywriter::class);
         $publicationHistory ??= app(SocialMediaPublicationHistory::class);
         $availability ??= app(PublicProductAvailabilityVerifier::class);
@@ -48,7 +50,7 @@ class PublishSocialMediaPost implements ShouldQueue
             && $product->is_active
             && $product->stock > 0
             && $this->publicHttpUrl($currentUrl)
-            && (! in_array($post->provider, ['instagram', 'linkedin'], true) || $this->publicHttpUrl($currentImage));
+            && (! in_array($post->provider, ['instagram', 'threads', 'linkedin'], true) || $this->publicHttpUrl($currentImage));
         if (! $productIsPublishable) {
             $post->update([
                 'status' => 'skipped',
@@ -176,8 +178,10 @@ class PublishSocialMediaPost implements ShouldQueue
         try {
             $result = match ($post->provider) {
                 'instagram' => $meta->publishInstagramPost($connection, $post->caption, (string) $post->image_url),
+                'threads' => $threads->publish($connection, $post->caption, (string) $post->image_url),
                 'linkedin' => $linkedin->publish($connection, $post->caption, (string) $post->image_url),
-                default => $meta->publishFacebookPost($connection, $post->caption, $post->product_url, (string) $post->image_url),
+                'facebook' => $meta->publishFacebookPost($connection, $post->caption, $post->product_url, (string) $post->image_url),
+                default => throw new \RuntimeException("Unsupported social publishing provider: {$post->provider}."),
             };
             $post->update([
                 'status' => 'published',

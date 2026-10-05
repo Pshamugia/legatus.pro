@@ -5,6 +5,7 @@
     $platforms = [
         'facebook' => ['label' => 'Facebook', 'account' => $connections->get('facebook')?->external_account_name ?: $agent->business_name, 'limit' => 6000],
         'instagram' => ['label' => 'Instagram', 'account' => $connections->get('instagram')?->external_account_name ?: $agent->business_name, 'limit' => 2200],
+        'threads' => ['label' => 'Threads', 'account' => $connections->get('threads')?->external_account_name ?: $agent->business_name, 'limit' => 500],
         'linkedin' => ['label' => 'LinkedIn', 'account' => $connections->get('linkedin')?->external_account_name ?: $agent->business_name, 'limit' => 3000],
     ];
     $tokens = [
@@ -36,7 +37,7 @@
         @endif
         <section class="panel template-panel" aria-labelledby="template-heading">
             <div class="section-heading">
-                <div><span class="step">01</span><div><h2 id="template-heading">Design post templates</h2><p>Facebook, Instagram and LinkedIn keep independent text, emojis and delivery details.</p></div></div>
+                <div><span class="step">01</span><div><h2 id="template-heading">Design post templates</h2><p>Facebook, Instagram, Threads and LinkedIn keep independent text, emojis and delivery details.</p></div></div>
                 <span class="status-pill">Saved per business</span>
             </div>
 
@@ -51,7 +52,7 @@
                     <div class="platform-tabs" role="tablist" aria-label="Post template channel">
                         @foreach($platforms as $provider => $platform)
                             <button class="platform-tab {{ $loop->first ? 'active' : '' }}" type="button" role="tab" id="{{ $provider }}-tab" aria-controls="{{ $provider }}-panel" aria-selected="{{ $loop->first ? 'true' : 'false' }}" tabindex="{{ $loop->first ? '0' : '-1' }}" data-platform-tab="{{ $provider }}">
-                                <span class="platform-mark {{ $provider }}">{{ ['facebook' => 'f', 'instagram' => '◎', 'linkedin' => 'in'][$provider] }}</span>
+                                <span class="platform-mark {{ $provider }}">{{ ['facebook' => 'f', 'instagram' => '◎', 'threads' => '@', 'linkedin' => 'in'][$provider] }}</span>
                                 {{ $platform['label'] }}
                             </button>
                         @endforeach
@@ -64,7 +65,7 @@
                     <div class="template-workspace" id="{{ $provider }}-panel" role="tabpanel" aria-labelledby="{{ $provider }}-tab" data-platform-panel="{{ $provider }}" @if(!$loop->first) hidden @endif>
                         <div class="template-editor">
                             <label for="{{ $provider }}-body"><strong>{{ $platform['label'] }} post text</strong><small>Edit every word and emoji. Product facts are inserted from the verified public catalog.</small></label>
-                            <textarea id="{{ $provider }}-body" name="templates[{{ $provider }}][body_template]" rows="12" maxlength="{{ $provider === 'instagram' ? 1800 : ($provider === 'linkedin' ? 2800 : 5000) }}" data-template-body="{{ $provider }}" @disabled(!$canManage)>{{ old("templates.{$provider}.body_template", $configuration['body_template']) }}</textarea>
+                            <textarea id="{{ $provider }}-body" name="templates[{{ $provider }}][body_template]" rows="12" maxlength="{{ $provider === 'threads' ? 420 : ($provider === 'instagram' ? 1800 : ($provider === 'linkedin' ? 2800 : 5000)) }}" data-template-body="{{ $provider }}" @disabled(!$canManage)>{{ old("templates.{$provider}.body_template", $configuration['body_template']) }}</textarea>
                             <div class="token-tools" aria-label="Insert verified product field">
                                 <span>Insert field:</span>
                                 @foreach($tokens as $token => $label)
@@ -110,12 +111,12 @@
                                     <span class="preview-avatar">{{ mb_strtoupper(mb_substr($previewProduct['business_name'], 0, 1)) }}</span>
                                     <div><strong>{{ $platform['account'] }}</strong><small>Sponsored by your schedule · 🌐</small></div>
                                 </header>
-                                @if($provider === 'instagram')
+                                @if(in_array($provider, ['instagram', 'threads'], true))
                                     <div class="preview-image square image-style-{{ $configuration['image_style'] }}" data-preview-image="{{ $provider }}">
                                         @if($previewProduct['image'])<img src="{{ $previewProduct['style_images'][$configuration['image_style']] ?: $previewProduct['image'] }}" alt="Preview of {{ $previewProduct['title'] }}">@else<span>Public product image</span>@endif
                                     </div>
                                     <p class="preview-copy" data-preview-copy="{{ $provider }}"></p>
-                                    <small class="instagram-note">Instagram caption URLs appear as text and may not be clickable.</small>
+                                    @if($provider === 'instagram')<small class="instagram-note">Instagram caption URLs appear as text and may not be clickable.</small>@endif
                                 @else
                                     <p class="preview-copy" data-preview-copy="{{ $provider }}"></p>
                                     <div class="preview-image wide image-style-{{ $configuration['image_style'] }}" data-preview-image="{{ $provider }}">
@@ -179,12 +180,12 @@
                     <div class="posting-times" data-posting-times @if(old('timing_mode', 'auto') !== 'custom') hidden @endif></div>
                 </fieldset>
 
-                <fieldset><legend>Publish to</legend><p class="field-help">Choose Facebook, Instagram, or both connected channels. Every Legatus-published Facebook and Instagram post is also published automatically as a Story. LinkedIn can be selected independently or together with them.</p><div class="choice-grid">
-                    @foreach(['facebook' => 'Facebook Page', 'instagram' => 'Instagram', 'linkedin' => 'LinkedIn Page'] as $provider => $label)
+                <fieldset><legend>Publish to</legend><p class="field-help">Choose any connected channels. Facebook and Instagram posts also publish as Stories; Threads and LinkedIn publish as feed posts.</p><div class="choice-grid">
+                    @foreach(['facebook' => 'Facebook Page', 'instagram' => 'Instagram', 'threads' => 'Threads profile', 'linkedin' => 'LinkedIn Page'] as $provider => $label)
                         @php($connection = $connections->get($provider))
                         <label class="choice-card @if(!$connection?->isActive()) disabled @endif">
                             <input type="checkbox" name="providers[]" value="{{ $provider }}" @checked(in_array($provider, old('providers', []), true)) @disabled(!$canManage || !$connection?->isActive())>
-                            <span class="platform-mark {{ $provider }}">{{ ['facebook' => 'f', 'instagram' => '◎', 'linkedin' => 'in'][$provider] }}</span>
+                            <span class="platform-mark {{ $provider }}">{{ ['facebook' => 'f', 'instagram' => '◎', 'threads' => '@', 'linkedin' => 'in'][$provider] }}</span>
                             <span><strong>{{ $label }}</strong><small>{{ $connection?->isActive() ? ($connection->external_account_name ?: 'Connected') : 'Connect this channel first' }}</small></span>
                         </label>
                     @endforeach
@@ -207,7 +208,7 @@
 
             <aside class="panel connection-panel">
                 <h3>Publishing readiness</h3>
-                @foreach(['facebook' => 'Facebook', 'instagram' => 'Instagram', 'linkedin' => 'LinkedIn'] as $provider => $label)
+                @foreach(['facebook' => 'Facebook', 'instagram' => 'Instagram', 'threads' => 'Threads', 'linkedin' => 'LinkedIn'] as $provider => $label)
                     @php($connection = $connections->get($provider))
                     <div class="readiness"><span class="readiness-dot {{ $connection?->isActive() ? 'ready' : '' }}"></span><div><strong>{{ $label }}</strong><small>{{ $connection?->isActive() ? 'Connected · publishing access requested' : 'Not connected' }}</small></div></div>
                 @endforeach
@@ -304,6 +305,7 @@
 </div>
 
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">
+.platform-mark.threads{background:#111;color:#fff}
 .preview-product-setting{display:grid;grid-template-columns:minmax(190px,.45fr) minmax(0,1fr);align-items:center;gap:16px;padding:14px 16px;margin:0 0 18px;border:1px solid var(--line);border-radius:14px;background:#f7faf7}.preview-product-setting span,.preview-product-setting small{display:block}.preview-product-setting small{margin-top:4px;color:var(--muted);font-size:10px;line-height:1.45}.preview-product-setting input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:#fff;padding:11px 12px;color:var(--ink)}
 @media(max-width:650px){.preview-product-setting{grid-template-columns:1fr}}
 .social-main{max-width:1400px}.topline p,.section-heading p{margin:7px 0 0;color:var(--muted)}.social-alert{margin:18px 0;padding:15px 18px;border-radius:14px;font-size:13px;line-height:1.55}.social-alert.success{background:#eaf7df;color:#315f20}.social-alert.error{background:#fff0ed;color:#923827}.social-alert.notice{background:#fff8df;border:1px solid #eedc96;color:#675414}.social-alert ul{margin:8px 0 0;padding-left:20px}.section-heading,.section-heading>div{display:flex;align-items:center;gap:10px}.section-heading{justify-content:space-between;margin-bottom:22px}.section-heading h2{margin:0;font-size:20px}.section-heading p{font-size:12px}.step{display:grid;place-items:center;width:31px;height:31px;border-radius:10px;background:var(--lime);font-size:11px;font-weight:900}.status-pill{display:inline-flex;padding:6px 9px;border-radius:999px;background:#edf1ee;color:#596760;font-size:10px;font-weight:800}.status-pill.active{background:#e8f7dc;color:#3e702b}.status-pill.paused{background:#fff1d8;color:#8a621d}.template-panel{padding:28px;margin-top:24px}.template-actions-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}.platform-tabs{display:flex;gap:7px;padding:5px;border:1px solid var(--line);border-radius:14px;background:#f6f8f5}.platform-tab,.copy-template,.token-tools button{min-height:40px;border:0;border-radius:10px;background:transparent;color:var(--ink);font:inherit;font-size:12px;font-weight:800;cursor:pointer}.platform-tab{display:flex;align-items:center;gap:8px;padding:8px 14px}.platform-tab.active{background:#fff;box-shadow:0 4px 14px rgba(18,47,38,.09)}.platform-mark{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;font-weight:900}.platform-mark.facebook{background:#e7efff;color:#1769e0}.platform-mark.instagram{background:linear-gradient(135deg,#8b4dca,#f47b3e);color:#fff}.copy-template{padding:8px 13px;border:1px solid var(--line);background:#fff}.template-workspace{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,430px);gap:20px}.template-workspace[hidden]{display:none!important}.template-editor>label,.delivery-editor>label:not(.switch-row){display:block;margin-bottom:8px}.template-editor label small{display:block;margin-top:5px;color:var(--muted);font-size:11px;line-height:1.5}.template-editor textarea{width:100%;box-sizing:border-box;padding:14px;border:1px solid var(--line);border-radius:13px;background:#fff;color:var(--ink);font:inherit;font-size:13px;line-height:1.6;resize:vertical}.token-tools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:10px 0 20px}.token-tools span{margin-right:2px;color:var(--muted);font-size:11px}.token-tools button{min-height:34px;padding:6px 9px;border:1px solid var(--line);background:#f7faf6;font-size:10px}.delivery-editor{padding:16px;border:1px solid var(--line);border-radius:14px;background:#f8faf7}.switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:15px}.switch-row span{min-width:0}.switch-row input{width:44px;height:24px;accent-color:var(--green)}.template-preview{position:sticky;top:24px;align-self:start}.preview-label{display:flex;justify-content:space-between;margin-bottom:8px;color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.08em}.social-preview{overflow:hidden;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:0 13px 30px rgba(20,48,39,.08)}.social-preview header{display:flex;align-items:center;gap:10px;padding:13px}.preview-avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:var(--green);color:white;font-weight:900}.social-preview header div{display:flex;flex-direction:column;min-width:0}.social-preview header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.social-preview header small{margin-top:3px;color:var(--muted);font-size:9px}.preview-copy{margin:0;padding:4px 14px 14px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.55}.preview-image{display:grid;place-items:center;overflow:hidden;background:#edf2ec;color:var(--muted);font-size:11px}.preview-image img{width:100%;height:100%;object-fit:cover}.preview-image.square{aspect-ratio:1/1}.preview-image.wide{aspect-ratio:1.6/1}.facebook-link-card{display:flex;flex-direction:column;padding:12px;background:#f1f3f5;color:var(--ink);text-decoration:none}.facebook-link-card small{color:var(--muted);text-transform:uppercase}.facebook-link-card strong{margin:3px 0}.facebook-link-card span{font-size:10px;color:var(--muted)}.instagram-note{display:block;padding:10px 14px;border-top:1px solid var(--line);color:var(--muted);font-size:9px}.template-save-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}.template-save-row p{margin:0;color:var(--muted);font-size:11px}.social-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;margin:24px 0}.schedule-form{padding:28px}.form-grid{display:grid;gap:14px}.form-grid.two{grid-template-columns:1fr 1fr}.schedule-form label{margin:0}.schedule-form input,.schedule-form select{width:100%;box-sizing:border-box;margin-top:7px;padding:12px;border:1px solid var(--line);border-radius:11px;background:white}.schedule-form label small,.field-help{display:block;margin-top:6px;color:var(--muted);font-size:11px}.schedule-form fieldset{margin:24px 0;padding:0;border:0}.schedule-form legend{margin-bottom:10px;font-size:13px;font-weight:800}.choice-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.choice-card{display:flex;align-items:center;gap:10px;padding:13px;border:1px solid var(--line);border-radius:12px;cursor:pointer}.choice-card input,.category-choice input{width:auto;margin:0}.choice-card>span:last-child{display:flex;flex-direction:column;min-width:0}.choice-card small{margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.choice-card.disabled{opacity:.55}.category-grid{display:flex;flex-wrap:wrap;gap:7px;max-height:220px;overflow:auto}.category-choice{display:flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid var(--line);border-radius:999px;font-size:11px;cursor:pointer}.connection-panel{align-self:start;position:sticky;top:24px}.readiness{display:flex;gap:10px;padding:13px 0;border-top:1px solid var(--line)}.readiness-dot{flex:0 0 9px;height:9px;margin-top:5px;border-radius:50%;background:#c9cfcb}.readiness-dot.ready{background:#54b877;box-shadow:0 0 0 4px #e2f5e7}.readiness div{display:flex;flex-direction:column}.readiness small{margin-top:4px;color:var(--muted);font-size:10px;line-height:1.4}.connection-panel .btn{width:100%;margin-top:13px}.schedule-list{margin:18px 0}.schedule-row,.upcoming-row{display:flex;align-items:center;gap:12px;padding:14px 0;border-top:1px solid var(--line)}.schedule-row>div:first-child,.upcoming-row>div{min-width:0;flex:1}.schedule-row p,.upcoming-row p{margin:4px 0;color:var(--muted);font-size:12px}.schedule-row small{color:var(--muted)}.text-button{border:0;background:none;color:var(--green);font-weight:800;cursor:pointer}.text-button.danger{color:#a74a3a}.upcoming-row img{width:54px;height:54px;border-radius:10px;object-fit:cover}.upcoming-row a{color:var(--green);font-size:11px;font-weight:800}.upcoming-row details{margin-top:7px}.upcoming-row summary{cursor:pointer;color:var(--muted);font-size:10px}.prepared-caption{white-space:pre-wrap;padding:10px;border-radius:10px;background:#f5f7f4;color:var(--ink)!important}.empty-state{color:var(--muted)}
@@ -348,7 +350,7 @@
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 (() => {
     const product = {{ \Illuminate\Support\Js::from($previewProduct) }};
-    const limits = {facebook: 6000, instagram: 2200, linkedin: 3000};
+    const limits = {facebook: 6000, instagram: 2200, threads: 500, linkedin: 3000};
     const tabs = [...document.querySelectorAll('[data-platform-tab]')];
     const panels = [...document.querySelectorAll('[data-platform-panel]')];
     const postsPerDay = document.querySelector('[name="posts_per_day"]');
@@ -528,6 +530,7 @@
     }
     render('facebook');
     render('instagram');
+    render('threads');
     render('linkedin');
 })();
 </script>

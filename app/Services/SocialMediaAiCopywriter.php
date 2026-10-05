@@ -123,6 +123,7 @@ class SocialMediaAiCopywriter
         };
         $platform = match ($post->provider) {
             'instagram' => 'Instagram caption with natural line breaks and 3-6 relevant hashtags.',
+            'threads' => 'Threads post under 500 characters with a conversational opening and at most 2 relevant hashtags.',
             'linkedin' => 'LinkedIn company Page post with a professional opening, readable short paragraphs, and 2-4 relevant hashtags.',
             default => 'Facebook post with a conversational opening and no hashtag stuffing.',
         };

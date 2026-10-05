@@ -22,6 +22,7 @@ class SocialMediaTemplateRenderer
     public const CHARACTER_LIMITS = [
         'facebook' => 6000,
         'instagram' => 2200,
+        'threads' => 500,
         'linkedin' => 3000,
     ];
 
@@ -32,6 +33,7 @@ class SocialMediaTemplateRenderer
         $errors = [];
         $rawLimit = match ($provider) {
             'instagram' => 1800,
+            'threads' => 420,
             'linkedin' => 2800,
             default => 5000,
         };
@@ -89,7 +91,11 @@ class SocialMediaTemplateRenderer
         $currency = strtoupper(trim((string) data_get($product->metadata, 'currency', data_get($agent->organization?->settings, 'currency', 'GEL'))));
         $currency = preg_match('/^[A-Z]{3}$/', $currency) === 1 ? $currency : 'GEL';
         $description = $this->cleanText(strip_tags((string) $product->description));
-        $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', $provider === 'instagram' ? 500 : 700, '…');
+        $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', match ($provider) {
+            'threads' => 180,
+            'instagram' => 500,
+            default => 700,
+        }, '…');
         $values = [
             'business_name' => $this->cleanText((string) ($agent->business_name ?: $agent->name)),
             'product_title' => $this->cleanText((string) $product->name),

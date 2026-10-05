@@ -25,7 +25,7 @@ class ChannelController extends Controller
         $agent = $tenant->agent();
         $snippet = '<script src="'.$this->widgetScriptUrl($agent).'" async></script>';
         $connections = method_exists($agent, 'channelConnections')
-            ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram', 'linkedin', 'whatsapp'])->get()
+            ? $agent->channelConnections()->whereIn('provider', ['facebook', 'instagram', 'threads', 'linkedin', 'whatsapp'])->get()
             : collect();
 
         $metaChannels = collect([
@@ -65,6 +65,18 @@ class ChannelController extends Controller
             'error' => $linkedinConnection?->token_expires_at?->isPast()
                 ? 'LinkedIn authorization expired. Reconnect to resume publishing.'
                 : $linkedinConnection?->last_error,
+        ];
+        $threadsConnection = $connections->firstWhere('provider', 'threads');
+        $threadsChannel = [
+            'connection' => $threadsConnection,
+            'connected' => $threadsConnection?->isActive() ?? false,
+            'account_name' => $threadsConnection?->external_account_name,
+            'connect_url' => config('threads.app_id') && config('threads.app_secret') && Route::has('channels.threads.connect')
+                ? route('channels.threads.connect') : null,
+            'disconnect_url' => $threadsConnection && Route::has('channels.threads.disconnect')
+                ? route('channels.threads.disconnect', $threadsConnection) : null,
+            'error' => $threadsConnection?->token_expires_at?->isPast()
+                ? 'Threads authorization expired. Reconnect to resume publishing.' : $threadsConnection?->last_error,
         ];
         $whatsappConnection = $connections->firstWhere('provider', 'whatsapp');
         $whatsappChannel = [
@@ -118,6 +130,7 @@ class ChannelController extends Controller
             'metaChannels',
             'metaConnectUrl',
             'linkedinChannel',
+            'threadsChannel',
             'whatsappChannel',
             'productCount',
             'knowledgeSourceCount',

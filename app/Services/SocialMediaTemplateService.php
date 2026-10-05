@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 
 class SocialMediaTemplateService
 {
-    public const PROVIDERS = ['facebook', 'instagram', 'linkedin'];
+    public const PROVIDERS = ['facebook', 'instagram', 'threads', 'linkedin'];
 
     public const IMAGE_STYLES = ['three_d', 'original', 'storefront', 'raw', 'framed', 'editorial', 'dark', 'brand'];
 
@@ -103,12 +103,12 @@ class SocialMediaTemplateService
     {
         $language = mb_strtolower((string) data_get($agent->settings, 'language', 'en'));
         if (Str::startsWith($language, 'ka')) {
-            $callToAction = $provider === 'instagram' ? '🔗 დეტალები:' : '✅ შესაძენად გადადით საიტზე:';
+            $callToAction = in_array($provider, ['instagram', 'threads'], true) ? '🔗 დეტალები:' : '✅ შესაძენად გადადით საიტზე:';
 
             return "✨ {product_title}\n\n{product_description}\n\n💰 {price}\n🚚 {delivery}\n\n{$callToAction}\n{product_url}";
         }
 
-        $callToAction = $provider === 'instagram' ? '🔗 Product details:' : '✅ View and buy on our website:';
+        $callToAction = in_array($provider, ['instagram', 'threads'], true) ? '🔗 Product details:' : '✅ View and buy on our website:';
 
         return "✨ {product_title}\n\n{product_description}\n\n💰 {price}\n🚚 {delivery}\n\n{$callToAction}\n{product_url}";
     }

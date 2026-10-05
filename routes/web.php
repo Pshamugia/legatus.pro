@@ -20,6 +20,7 @@ use App\Http\Controllers\SocialMediaController;
 use App\Http\Controllers\SocialMediaImageController;
 use App\Http\Controllers\SocialMediaTemplateController;
 use App\Http\Controllers\SuperAdminController;
+use App\Http\Controllers\ThreadsConnectionController;
 use App\Http\Controllers\UiLocaleController;
 use App\Http\Controllers\WhatsAppConnectionController;
 use App\Http\Controllers\WhatsAppWebhookController;
@@ -181,6 +182,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/app/channels/linkedin/select/{selection}', [LinkedInConnectionController::class, 'selection'])->name('channels.linkedin.selection');
         Route::post('/app/channels/linkedin/select/{selection}', [LinkedInConnectionController::class, 'select'])->middleware('throttle:20,1')->name('channels.linkedin.select');
         Route::delete('/app/channels/linkedin/{connection}', [LinkedInConnectionController::class, 'disconnect'])->name('channels.linkedin.disconnect');
+        Route::get('/app/channels/threads/connect', [ThreadsConnectionController::class, 'connect'])->name('channels.threads.connect');
+        Route::get('/auth/threads/callback', [ThreadsConnectionController::class, 'callback'])->name('channels.threads.callback');
+        Route::delete('/app/channels/threads/{connection}', [ThreadsConnectionController::class, 'disconnect'])->name('channels.threads.disconnect');
         Route::get('/app/channels/whatsapp/connect', [WhatsAppConnectionController::class, 'connect'])->name('channels.whatsapp.connect');
         Route::post('/app/channels/whatsapp/connect', [WhatsAppConnectionController::class, 'store'])->middleware('throttle:10,1')->name('channels.whatsapp.store');
         Route::delete('/app/channels/whatsapp/{connection}', [WhatsAppConnectionController::class, 'disconnect'])->name('channels.whatsapp.disconnect');

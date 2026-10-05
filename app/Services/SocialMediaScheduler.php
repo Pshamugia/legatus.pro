@@ -363,7 +363,7 @@ class SocialMediaScheduler
     public function eligibleProducts(Agent $agent, array $categories = [], array $providers = []): Collection
     {
         $wanted = collect($categories)->map(fn ($value) => Str::lower(trim((string) $value)))->filter()->unique();
-        $imageRequired = collect($providers)->intersect(['instagram', 'linkedin'])->isNotEmpty();
+        $imageRequired = collect($providers)->intersect(['instagram', 'threads', 'linkedin'])->isNotEmpty();
 
         return $agent->customerProducts()
             ->where('is_active', true)
@@ -627,6 +627,6 @@ class SocialMediaScheduler
             && $product->is_active
             && $product->stock > 0
             && $this->publicHttpUrl($url)
-            && (! in_array($post->provider, ['instagram', 'linkedin'], true) || $this->publicHttpUrl($image));
+            && (! in_array($post->provider, ['instagram', 'threads', 'linkedin'], true) || $this->publicHttpUrl($image));
     }
 }
