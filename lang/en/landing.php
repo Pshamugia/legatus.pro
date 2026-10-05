@@ -57,5 +57,11 @@ return [
     'final' => [
         'title' => 'Your time should not be spent on every answer and every post.', 'body' => 'Hand recurring questions, post preparation, and publishing over to Legatus.', 'rest' => 'Spend your time on new products, orders, business growth — or simply resting.', 'statement' => 'You run the business. Legatus handles daily communication.', 'annual_note' => 'Choose the one-year plan and we will build your online store at no extra cost.',
     ],
+    'visual' => [
+        'post_ready' => 'AI post ready', 'auto_publishing' => 'Auto publishing', 'product' => 'Product', 'product_selected' => 'Catalog item selected',
+        'content_ready' => 'Copy and visual prepared', 'publish' => 'Publish', 'social_inbox' => 'Social inbox', 'new' => 'new', 'reply_ready' => 'AI reply prepared',
+        'business_brain' => 'Business brain', 'ready_to_answer' => 'Ready to answer', 'products' => 'Products', 'prices' => 'Prices', 'stock' => 'Stock', 'brand_voice' => 'Brand voice',
+        'original' => 'Original', 'social_ready' => 'Social ready',
+    ],
     'footer' => ['support' => 'Questions or support?', 'terms' => 'Terms of Service', 'privacy' => 'Privacy Policy', 'refunds' => 'Refund Policy'],
 ];
