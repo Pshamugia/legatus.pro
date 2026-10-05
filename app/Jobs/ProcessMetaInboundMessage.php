@@ -2,13 +2,15 @@
 
 namespace App\Jobs;
 
+use App\Models\Agent;
+use App\Models\AgentRun;
 use App\Models\ChannelConnection;
 use App\Models\ChannelMessage;
 use App\Models\Conversation;
-use App\Models\Agent;
 use App\Models\Message;
 use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
+use App\Services\CustomerImageCatalogMatcher;
 use App\Support\PrivacyRedactor;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -42,8 +44,11 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         return (string) $this->channelMessageId;
     }
 
-    public function handle(ConversationEngine $engine, ChannelMessageDispatcher $dispatcher): void
-    {
+    public function handle(
+        ConversationEngine $engine,
+        ChannelMessageDispatcher $dispatcher,
+        ?CustomerImageCatalogMatcher $imageMatcher = null,
+    ): void {
         $record = ChannelMessage::query()->with('connection.agent')->find($this->channelMessageId);
         if (! $record || in_array($record->status, ['processed', 'ignored'], true)) {
             return;
@@ -96,7 +101,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         }
 
         Cache::lock('meta-inbound:'.$connection->id.':'.hash('sha256', $senderId), 120)
-            ->block(20, function () use ($record, $connection, $senderId, $text, $engine, $dispatcher): void {
+            ->block(20, function () use ($record, $connection, $senderId, $text, $engine, $dispatcher, $imageMatcher): void {
                 $record->refresh();
                 if (in_array($record->status, ['processed', 'ignored'], true)) {
                     return;
@@ -110,7 +115,27 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 ]);
 
                 $customerInput = $text;
-                if ($record->message_type === 'attachment' || $this->immediatelyFollowsCustomerImage($record)) {
+                $imageRecord = $this->customerImageRecord($record);
+                if ($imageRecord) {
+                    $customerRecord = $record;
+                    $imageQuestion = $text;
+                    if ($imageRecord->is($record) && ($followingText = $this->customerTextAfterImage($record))) {
+                        $customerRecord = $followingText;
+                        $imageQuestion = trim((string) data_get($followingText->payload, 'text', $text));
+                    }
+                    $this->replyFromCustomerImage(
+                        $customerRecord,
+                        $imageRecord,
+                        $connection,
+                        $senderId,
+                        $imageQuestion,
+                        $imageMatcher ?? app(CustomerImageCatalogMatcher::class),
+                        $dispatcher,
+                    );
+
+                    return;
+                }
+                if ($record->message_type === 'attachment') {
                     $this->replyThatAttachmentCannotBeRead($record, $connection, $senderId, $text, $dispatcher);
 
                     return;
@@ -163,6 +188,176 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'processed_at' => now(),
                 ]);
             });
+    }
+
+    private function customerImageRecord(ChannelMessage $record): ?ChannelMessage
+    {
+        $hasUsableImage = fn (ChannelMessage $candidate): bool => collect(data_get($candidate->payload, 'attachments', []))
+            ->contains(fn ($attachment): bool => data_get($attachment, 'type') === 'image'
+                && is_string(data_get($attachment, 'url'))
+                && trim((string) data_get($attachment, 'url')) !== '');
+        if ($hasUsableImage($record)) {
+            return $record;
+        }
+        if ($record->message_type === 'attachment') {
+            return null;
+        }
+
+        $previous = ChannelMessage::query()
+            ->where('channel_connection_id', $record->channel_connection_id)
+            ->where('direction', 'inbound')
+            ->where('provider_sender_id', $record->provider_sender_id)
+            ->where('id', '<', $record->id)
+            ->latest('id')
+            ->first();
+        if (! $previous || $previous->message_type !== 'attachment') {
+            return null;
+        }
+        if ($record->received_at && $previous->received_at && $previous->received_at->lt($record->received_at->copy()->subMinutes(10))) {
+            return null;
+        }
+
+        return $hasUsableImage($previous) ? $previous : null;
+    }
+
+    private function customerTextAfterImage(ChannelMessage $imageRecord): ?ChannelMessage
+    {
+        $next = ChannelMessage::query()
+            ->where('channel_connection_id', $imageRecord->channel_connection_id)
+            ->where('direction', 'inbound')
+            ->where('provider_sender_id', $imageRecord->provider_sender_id)
+            ->where('id', '>', $imageRecord->id)
+            ->oldest('id')
+            ->first();
+        if (! $next || $next->message_type === 'attachment' || in_array($next->status, ['processed', 'ignored'], true)) {
+            return null;
+        }
+        if ($next->received_at && $imageRecord->received_at && $next->received_at->gt($imageRecord->received_at->copy()->addMinutes(10))) {
+            return null;
+        }
+
+        return filled(data_get($next->payload, 'text')) ? $next : null;
+    }
+
+    private function replyFromCustomerImage(
+        ChannelMessage $record,
+        ChannelMessage $imageRecord,
+        ChannelConnection $connection,
+        string $senderId,
+        string $text,
+        CustomerImageCatalogMatcher $matcher,
+        ChannelMessageDispatcher $dispatcher,
+    ): void {
+        $customerId = "meta:{$connection->provider}:{$connection->id}:{$senderId}";
+        $conversation = $connection->agent->conversations()
+            ->where('visitor_id', $customerId)
+            ->where('channel', $connection->provider)
+            ->whereIn('status', ['ai', 'open', 'human'])
+            ->latest('id')
+            ->first() ?? $connection->agent->conversations()->create([
+                'visitor_id' => $customerId,
+                'customer_name' => ucfirst($connection->provider).' customer',
+                'channel' => $connection->provider,
+                'status' => 'ai',
+            ]);
+        $conversation->update([
+            'channel_connection_id' => $connection->id,
+            'external_thread_id' => $senderId,
+            'last_message_at' => now(),
+        ]);
+
+        if ($imageRecord->id !== $record->id) {
+            $imageCustomer = $conversation->messages()->firstOrCreate(
+                ['request_id' => $imageRecord->idempotency_key],
+                ['role' => 'customer', 'content' => '[Customer sent an image.]', 'metadata' => [
+                    'attachment_received' => true,
+                    'image_received' => true,
+                ]],
+            );
+            $imageRecord->update(['conversation_id' => $conversation->id, 'message_id' => $imageCustomer->id]);
+        }
+        $caption = str_starts_with($text, '[Customer sent an image') ? '[Customer sent an image.]' : PrivacyRedactor::text($text);
+        $customer = $conversation->messages()->firstOrCreate(
+            ['request_id' => $record->idempotency_key],
+            ['role' => 'customer', 'content' => $caption, 'metadata' => [
+                'attachment_received' => true,
+                'image_received' => true,
+            ]],
+        );
+        $record->update(['conversation_id' => $conversation->id, 'message_id' => $customer->id]);
+
+        if ($conversation->status === 'human') {
+            $this->finishImageRecords($record, $imageRecord, 'human', []);
+
+            return;
+        }
+
+        $imageUrl = (string) collect(data_get($imageRecord->payload, 'attachments', []))
+            ->first(fn ($attachment): bool => data_get($attachment, 'type') === 'image' && filled(data_get($attachment, 'url')))['url'];
+        $started = microtime(true);
+        try {
+            $result = $matcher->resolve($connection->agent, $conversation, $imageUrl, $text);
+        } catch (\Throwable $exception) {
+            report($exception);
+            $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $text."\n".$conversation->messages()->latest('id')->limit(6)->pluck('content')->implode("\n")) === 1;
+            $result = [
+                'status' => 'failed',
+                'text' => $georgian
+                    ? 'ფოტოს ამჯერად სანდოდ დამუშავება ვერ მოვახერხე. შეგიძლიათ ცოტა მოგვიანებით თავიდან გამოგზავნოთ ან პროდუქტის დასახელება ტექსტურად მომწეროთ.'
+                    : 'I could not process the photo reliably this time. Please try sending it again later or send the product name as text.',
+                'products' => [],
+                'product_ids' => [],
+                'tools_used' => [],
+                'model' => (string) config('services.openai.image_recognition_model', 'gpt-5.6-sol'),
+                'usage' => ['input_tokens' => 0, 'output_tokens' => 0, 'requests' => 0],
+            ];
+        }
+
+        $assistant = $conversation->messages()->firstOrCreate(
+            ['request_id' => 'image-recognition:'.$imageRecord->idempotency_key],
+            ['role' => 'assistant', 'content' => $result['text'], 'confidence' => in_array($result['status'], ['available', 'unavailable', 'not_found'], true) ? 1 : .8, 'metadata' => [
+                'intent' => 'image_product_lookup',
+                'products' => $result['products'] ?? [],
+                'tools_used' => collect($result['tools_used'] ?? [])->pluck('name')->unique()->values()->all(),
+                'image_recognition_status' => $result['status'],
+                'image_recognition_model' => $result['model'] ?? null,
+                'image_recognition_failed' => $result['status'] === 'failed',
+            ]],
+        );
+        $productIds = collect($result['product_ids'] ?? [])->map(fn ($id): int => (int) $id)->filter()->unique()->values();
+        if ($productIds->isNotEmpty()) {
+            $context = (array) $conversation->context;
+            $context['last_catalog_product_ids'] = $productIds->all();
+            $conversation->update(['context' => $context, 'intent' => 'image_product_lookup']);
+        }
+
+        $usage = (array) ($result['usage'] ?? []);
+        AgentRun::create([
+            'agent_id' => $connection->agent->id,
+            'conversation_id' => $conversation->id,
+            'model' => (string) ($result['model'] ?? config('services.openai.image_recognition_model')),
+            'route' => 'image_catalog_match',
+            'status' => $result['status'] === 'failed' ? 'failed' : 'completed',
+            'tools_used' => $result['tools_used'] ?? [],
+            'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
+            'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
+            'latency_ms' => (int) ((microtime(true) - $started) * 1000),
+        ]);
+        $this->finishImageRecords($record, $imageRecord, (string) $result['status'], $productIds->all());
+        $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
+        $dispatcher->dispatch($assistant);
+    }
+
+    private function finishImageRecords(ChannelMessage $record, ChannelMessage $imageRecord, string $status, array $productIds): void
+    {
+        foreach (collect([$record, $imageRecord])->unique('id') as $message) {
+            $payload = $this->minimalPayload($message);
+            $payload['image_recognition_status'] = $status;
+            if ($productIds !== []) {
+                $payload['image_product_ids'] = $productIds;
+            }
+            $message->update(['status' => 'processed', 'payload' => $payload, 'processed_at' => now()]);
+        }
     }
 
     private function immediatelyFollowsCustomerImage(ChannelMessage $record): bool
@@ -231,7 +426,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'customer_name' => ucfirst($connection->provider).' customer',
                     'channel' => $connection->provider,
                     'status' => 'ai',
-            ]);
+                ]);
             $caption = str_starts_with($text, '[Customer sent an image') ? '[Customer sent an image.]' : PrivacyRedactor::text($text);
             $isImage = collect(data_get($record->payload, 'attachments', []))
                 ->contains(fn ($attachment): bool => data_get($attachment, 'type') === 'image')

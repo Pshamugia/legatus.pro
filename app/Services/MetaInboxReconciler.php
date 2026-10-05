@@ -39,7 +39,12 @@ class MetaInboxReconciler
                             ? 'image'
                             : (str_starts_with($mimeType, 'video/') || filled(data_get($attachment, 'video_data')) ? 'video' : 'file');
 
-                        return ['type' => $type];
+                        $url = $type === 'image' ? data_get($attachment, 'image_data.url') : null;
+
+                        return array_filter([
+                            'type' => $type,
+                            'url' => is_string($url) && str_starts_with($url, 'https://') ? $url : null,
+                        ], fn ($value): bool => $value !== null);
                     })
                     ->take(5)
                     ->values()

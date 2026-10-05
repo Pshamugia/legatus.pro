@@ -17,10 +17,12 @@ use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class MetaTransportTest extends TestCase
@@ -548,11 +550,22 @@ class MetaTransportTest extends TestCase
         $this->assertStringNotContainsString('INTERNAL_MACHINE_TOKEN', $conversation->messages()->pluck('content')->implode(' '));
     }
 
-    public function test_customer_image_gets_a_clear_limitation_reply_instead_of_a_false_catalog_answer(): void
+    public function test_customer_image_is_visually_matched_then_verified_against_catalog_and_stock(): void
     {
         Queue::fake();
         $connection = $this->connection('facebook', 'page-image-limitation');
+        $product = $connection->agent->products()->create([
+            'name' => 'არტისტული ყვავილები', 'sku' => 'ART-2052', 'category' => 'პოეზია',
+            'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე', 'price' => 14, 'stock' => 12,
+            'image' => 'https://catalog.example/artistuli.jpg',
+            'metadata' => ['author' => 'გალაკტიონ ტაბიძე', 'product_url' => 'https://shop.example/books/2052'],
+            'is_active' => true,
+        ]);
         $imageUrl = 'https://scontent.xx.fbcdn.net/customer-product.jpg';
+        $this->fakeCustomerImageVision($imageUrl, [
+            $this->customerImageIdentity('არტისტული ყვავილები', 'გალაკტიონ ტაბიძე'),
+            ['same_product' => true, 'matched_product_id' => $product->id, 'reason' => 'Exact title, author, and cover match.'],
+        ]);
         $payload = [
             'object' => 'page',
             'entry' => [[
@@ -581,20 +594,34 @@ class MetaTransportTest extends TestCase
         $conversation = $connection->conversations()->firstOrFail();
         $assistant = $conversation->messages()->where('role', 'assistant')->sole();
         $this->assertSame('ai', $conversation->status);
-        $this->assertStringContainsString('ფოტოს შინაარსის სანდოდ ამოცნობა არ შემიძლია', $assistant->content);
-        $this->assertTrue((bool) data_get($assistant->metadata, 'image_recognition_unavailable'));
+        $this->assertStringContainsString('ზუსტად ეს პროდუქტი გადავამოწმე', $assistant->content);
+        $this->assertStringContainsString('ხელმისაწვდომია', $assistant->content);
+        $this->assertSame('available', data_get($assistant->metadata, 'image_recognition_status'));
+        $this->assertSame($product->id, data_get($assistant->metadata, 'products.0.id'));
         $this->assertDatabaseHas('channel_messages', [
             'message_id' => $assistant->id,
             'direction' => 'outbound',
             'status' => 'queued',
         ]);
-        Http::assertNothingSent();
+        $this->assertDatabaseHas('agent_runs', [
+            'conversation_id' => $conversation->id,
+            'route' => 'image_catalog_match',
+            'status' => 'completed',
+        ]);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/responses'));
     }
 
-    public function test_text_sent_with_a_customer_image_cannot_produce_a_false_catalog_denial(): void
+    #[DataProvider('splitImageProcessingOrders')]
+    public function test_text_sent_with_a_customer_image_cannot_produce_a_false_catalog_denial(bool $textFirst): void
     {
         Queue::fake();
         $connection = $this->connection('facebook', 'page-split-image');
+        $imageUrl = 'https://scontent.xx.fbcdn.net/book.jpg';
+        $identity = $this->customerImageIdentity(null, null);
+        $identity['identifying_text_readable'] = false;
+        $identity['image_is_product'] = true;
+        $identity['uncertainty_reason'] = 'The title is blurred.';
+        $this->fakeCustomerImageVision($imageUrl, [$identity]);
         $payload = [
             'object' => 'page',
             'entry' => [[
@@ -606,7 +633,7 @@ class MetaTransportTest extends TestCase
                         'timestamp' => 1784512800000,
                         'message' => [
                             'mid' => 'split-image-mid',
-                            'attachments' => [['type' => 'image', 'payload' => ['url' => 'https://scontent.xx.fbcdn.net/book.jpg']]],
+                            'attachments' => [['type' => 'image', 'payload' => ['url' => $imageUrl]]],
                         ],
                     ],
                     [
@@ -627,8 +654,8 @@ class MetaTransportTest extends TestCase
         $records = $connection->channelMessages()->where('direction', 'inbound')->orderBy('id')->get();
         $this->assertCount(2, $records);
 
-        // Process the text first to reproduce parallel queue workers handling Meta events out of order.
-        foreach ($records->reverse() as $record) {
+        $processingOrder = $textFirst ? $records->reverse() : $records;
+        foreach ($processingOrder as $record) {
             (new ProcessMetaInboundMessage($record->id))->handle(
                 app(ConversationEngine::class),
                 app(ChannelMessageDispatcher::class),
@@ -639,13 +666,22 @@ class MetaTransportTest extends TestCase
         $assistantMessages = $conversation->messages()->where('role', 'assistant')->get();
         $this->assertCount(1, $assistantMessages);
         $this->assertTrue($assistantMessages->every(
-            fn ($message): bool => (bool) data_get($message->metadata, 'image_recognition_unavailable')
-                && str_contains($message->content, 'cannot reliably recognize'),
+            fn ($message): bool => data_get($message->metadata, 'image_recognition_status') === 'uncertain'
+                && str_contains($message->content, 'exact identity'),
         ));
         $allReplies = $assistantMessages->pluck('content')->implode(' ');
         $this->assertStringNotContainsString('exact product was not found', $allReplies);
         $this->assertStringNotContainsString('similar alternatives', $allReplies);
-        Http::assertNothingSent();
+        $this->assertSame('processed', $records->first()->fresh()->status);
+        $this->assertSame('processed', $records->last()->fresh()->status);
+    }
+
+    public static function splitImageProcessingOrders(): array
+    {
+        return [
+            'text job runs first' => [true],
+            'image job runs first' => [false],
+        ];
     }
 
     public function test_connect_route_uses_oauth_state_and_never_exposes_app_secret(): void
@@ -1346,7 +1382,7 @@ class MetaTransportTest extends TestCase
         $this->assertDatabaseCount('channel_messages', 1);
     }
 
-    public function test_reconciliation_preserves_an_image_as_an_attachment_and_never_sends_its_caption_to_ai(): void
+    public function test_reconciliation_preserves_the_encrypted_image_url_for_safe_vision_processing(): void
     {
         Queue::fake();
         $connection = $this->connection('facebook', 'page-reconciled-image');
@@ -1375,8 +1411,8 @@ class MetaTransportTest extends TestCase
 
         $inbound = $connection->channelMessages()->where('direction', 'inbound')->sole();
         $this->assertSame('attachment', $inbound->message_type);
-        $this->assertSame([['type' => 'image']], $inbound->payload['attachments']);
-        $this->assertStringNotContainsString('private-image.jpg', json_encode($inbound->payload));
+        $this->assertSame([['type' => 'image', 'url' => 'https://scontent.example/private-image.jpg']], $inbound->payload['attachments']);
+        $this->assertStringNotContainsString('private-image.jpg', (string) DB::table('channel_messages')->where('id', $inbound->id)->value('payload'));
 
         (new ProcessMetaInboundMessage($inbound->id))->handle(
             app(ConversationEngine::class),
@@ -1384,8 +1420,8 @@ class MetaTransportTest extends TestCase
         );
 
         $assistant = $connection->conversations()->sole()->messages()->where('role', 'assistant')->sole();
-        $this->assertTrue((bool) data_get($assistant->metadata, 'image_recognition_unavailable'));
-        $this->assertStringContainsString('cannot reliably recognize', $assistant->content);
+        $this->assertTrue((bool) data_get($assistant->metadata, 'image_recognition_failed'));
+        $this->assertStringContainsString('could not process the photo reliably', $assistant->content);
         Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'fields'), 'attachments'));
     }
 
@@ -1395,6 +1431,49 @@ class MetaTransportTest extends TestCase
             'CONTENT_TYPE' => 'application/json',
             'HTTP_X_HUB_SIGNATURE_256' => $signature,
         ], $body);
+    }
+
+    private function customerImageIdentity(?string $name, ?string $creator): array
+    {
+        return [
+            'image_is_product' => true,
+            'identifying_text_readable' => $name !== null,
+            'exact_name' => $name,
+            'creator' => $creator,
+            'brand' => null,
+            'model' => null,
+            'isbn' => null,
+            'barcode' => null,
+            'variant' => null,
+            'visible_text' => array_values(array_filter([$name, $creator])),
+            'uncertainty_reason' => '',
+        ];
+    }
+
+    private function fakeCustomerImageVision(string $imageUrl, array $structuredResponses): void
+    {
+        config(['services.openai.key' => 'test-key', 'services.openai.image_recognition_model' => 'gpt-5.6-sol']);
+        $image = UploadedFile::fake()->image('customer.jpg', 900, 1200);
+        $bytes = file_get_contents($image->getRealPath());
+        $responses = collect($structuredResponses);
+
+        Http::fake(function ($request) use ($imageUrl, $bytes, $responses) {
+            if ($request->url() === $imageUrl) {
+                return Http::response($bytes, 200, ['Content-Type' => 'image/jpeg']);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                return Http::response([
+                    'id' => 'vision-'.str()->random(6),
+                    'output' => [[
+                        'type' => 'message',
+                        'content' => [['type' => 'output_text', 'text' => json_encode($responses->shift(), JSON_UNESCAPED_UNICODE)]],
+                    ]],
+                    'usage' => ['input_tokens' => 120, 'output_tokens' => 30],
+                ]);
+            }
+
+            return Http::response([], 404);
+        });
     }
 
     private function connection(string $provider, string $externalId): ChannelConnection

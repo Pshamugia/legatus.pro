@@ -9,6 +9,7 @@ return [
         // a code deployment.
         'model' => env('OPENAI_MODEL', 'gpt-5.6-sol'),
         'primary_model' => env('OPENAI_PRIMARY_MODEL', 'gpt-5.6-luna'),
+        'image_recognition_model' => env('OPENAI_IMAGE_RECOGNITION_MODEL', 'gpt-5.6-sol'),
         'social_media_model' => env('OPENAI_SOCIAL_MEDIA_MODEL', 'gpt-5.6-luna'),
         'social_media_image_model' => env('OPENAI_SOCIAL_MEDIA_IMAGE_MODEL', 'gpt-image-2.5-sunburst'),
         'fallback_model' => env('OPENAI_FALLBACK_MODEL', 'gpt-5.6-sol'),
