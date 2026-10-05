@@ -731,18 +731,30 @@ class OpenAiSalesOrchestrator
             $data['product_ids'] = [];
             $data['factual_claims'] = [];
         }
+        $usedDeterministicDeliveryFallback = false;
         if (($verifiedDelivery['ok'] ?? false) === true) {
-            $data['text'] = $verifiedDelivery['customer_message'];
+            $modelUsedVerifiedDelivery = ($data['intent'] ?? null) === 'delivery'
+                && collect($data['factual_claims'] ?? [])->contains(
+                    fn ($claim): bool => is_array($claim) && ($claim['type'] ?? null) === 'delivery',
+                );
+            if (! $modelUsedVerifiedDelivery) {
+                // Keep a safe answer when the model ignored the verified
+                // result. A valid grounded draft, however, must retain the
+                // model's natural wording rather than exposing the tool's raw
+                // customer_message (which may contain labels or translations).
+                $data['text'] = $verifiedDelivery['customer_message'];
+                $data['factual_claims'] = [[
+                    'type' => 'delivery', 'product_id' => null, 'amount' => null,
+                    'quantity' => null, 'reference' => $verifiedDelivery['source']['url'] ?? null,
+                ]];
+                $usedDeterministicDeliveryFallback = true;
+            }
             $data['intent'] = 'delivery';
             $data['confidence'] = 1;
             $data['handoff'] = false;
             $data['escalation_reason'] = null;
             $data['product_ids'] = [];
             $data['sources'] = [$verifiedDelivery['source']];
-            $data['factual_claims'] = [[
-                'type' => 'delivery', 'product_id' => null, 'amount' => null,
-                'quantity' => null, 'reference' => $verifiedDelivery['source']['url'] ?? null,
-            ]];
         }
         $budgetRecommendations = $budgetConstraint !== null
             ? $usedCollection
@@ -891,7 +903,7 @@ class OpenAiSalesOrchestrator
         $data = $this->normalizeRecommendationClarification($data, $catalogContext, $usedCollection);
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
-        if (($verifiedDelivery['ok'] ?? false) === true) {
+        if ($usedDeterministicDeliveryFallback) {
             // This reply was assembled from the server-owned delivery result,
             // not drafted from model knowledge. Delivery fees and day ranges
             // are already authorized by that tool and must not be mistaken for
@@ -1035,15 +1047,6 @@ class OpenAiSalesOrchestrator
             $data['text'] = $handoffEnabled
                 ? $this->safeHandoffText($message)
                 : $this->safeUnavailableText($message);
-        } elseif (($data['intent'] ?? null) === 'delivery') {
-            $deliveryMessage = $usedCollection
-                ->where('name', 'calculate_delivery')
-                ->pluck('result.customer_message')
-                ->filter()
-                ->last();
-            if ($deliveryMessage) {
-                $data['text'] = $deliveryMessage;
-            }
         }
 
         $toolNames = collect($used)->pluck('name')->unique()->values();
@@ -1924,6 +1927,7 @@ class OpenAiSalesOrchestrator
 
         return ' Response style for this turn: '.$variant
             .' Do not reuse a stock opening or copy the wording of an earlier answer. Vary sentence structure and transitions naturally, while preserving the exact verified facts, constraints, and meaning.'
+            .' Speak in one language matching the customer\'s latest message. Turn tool evidence into ordinary human conversation: never copy a raw customer_message or tool payload, never expose field labels or key-value formatting, and never print the same facts again in a second language unless the customer asks for a translation. For a simple question, answer it directly in one to three natural sentences; avoid bureaucratic preambles such as "according to the provided information" when the same fact can be said plainly.'
             .' Every search_products or recommend_products result with result_scope=shortlist is a deliberately limited selection, not the full inventory. Describe returned records as selected examples or options. If has_more=true, explicitly offer to show more. Never state or imply that a shortlist contains every currently available match.';
     }
 
@@ -2630,8 +2634,8 @@ class OpenAiSalesOrchestrator
         if (preg_match('/(?:reserv(?:e|ed|ation)|hold\s+(?:it|this)|დარეზერვ|შემინახ)/iu', $text) && ! $successfulNames->contains('reserve_product')) {
             return 'A reservation claim requires a successful reservation tool call.';
         }
-        if ($this->currencyAmounts($text)->isNotEmpty() && ! $successfulNames->intersect(['search_products', 'recommend_products', 'compare_products', 'check_stock', 'build_offer'])->count()) {
-            return 'A monetary claim requires successful verified catalog or offer data.';
+        if ($this->currencyAmounts($text)->isNotEmpty() && ! $successfulNames->intersect(['search_products', 'recommend_products', 'compare_products', 'check_stock', 'calculate_delivery', 'build_offer'])->count()) {
+            return 'A monetary claim requires successful verified catalog, delivery, or offer data.';
         }
 
         return null;
@@ -2840,6 +2844,9 @@ class OpenAiSalesOrchestrator
         $allowed = $used->flatMap(fn ($call) => array_merge(
             $this->moneyValues($call['result'] ?? []),
             $this->moneyValues($call['arguments'] ?? []),
+            ($call['name'] ?? null) === 'calculate_delivery' && data_get($call, 'result.ok') === true
+                ? $this->currencyAmounts((string) data_get($call, 'result.customer_message', ''))->all()
+                : [],
         ))->map(fn ($value) => round((float) $value, 2))->unique();
         if ($allowed->isEmpty()) {
             return true;

@@ -256,6 +256,85 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNotContains('server_guardrail', $response->json('tools_used'));
     }
 
+    public function test_grounded_delivery_answer_keeps_the_models_natural_wording_instead_of_raw_policy_text(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery policy',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery policy',
+            'content' => 'თბილისი: 5 ლარი / 2 სამუშაო დღე რეგიონი: 7 ლარი / 3-5 სამუშაო დღე Tbilisi: 5 GEL / 2 business days Regions: 7 GEL / 3-5 business days',
+            'content_hash' => hash('sha256', 'bilingual-raw-delivery-policy'),
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        $naturalReply = 'კი, მიტანის სერვისი გვაქვს 😊 თბილისში ღირებულება 5 ლარია და დაახლოებით 2 სამუშაო დღე სჭირდება, რეგიონებში კი — 7 ლარი და 3–5 სამუშაო დღე.';
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'delivery-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
+                    'is_human_request' => false,
+                    'is_business_knowledge_request' => false,
+                    'knowledge_query' => null,
+                    'knowledge_scope' => null,
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_queries' => [],
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'explicit_name_identity' => null,
+                    'referenced_product_id' => null,
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['id' => 'natural-delivery-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => $naturalReply,
+                    'intent' => 'delivery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'delivery', 'product_id' => null, 'amount' => 5,
+                        'quantity' => null, 'reference' => 'Delivery policy',
+                    ], [
+                        'type' => 'delivery', 'product_id' => null, 'amount' => 7,
+                        'quantity' => null, 'reference' => 'Delivery policy',
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'მიტანის სერვისი გაქვთ?',
+        ])->assertOk();
+
+        $this->assertSame('delivery', $response->json('intent'), json_encode($response->json(), JSON_UNESCAPED_UNICODE));
+        $this->assertFalse($response->json('handoff'), json_encode($response->json(), JSON_UNESCAPED_UNICODE));
+
+        $this->assertSame($naturalReply, $response->json('text'));
+        $this->assertStringNotContainsString('Business days', $response->json('text'));
+        $this->assertStringNotContainsString('პირობების მიხედვით', $response->json('text'));
+        $this->assertContains('calculate_delivery', $response->json('tools_used'));
+        $this->assertNotContains('server_guardrail', $response->json('tools_used'));
+    }
+
     public function test_semantic_delivery_intent_understands_natural_arrival_wording_without_keyword_rules(): void
     {
         $this->seed();
@@ -2172,6 +2251,8 @@ class OpenAiOrchestrationTest extends TestCase
 
         $this->assertNotSame($first, $second);
         $this->assertStringContainsString('preserving the exact verified facts', $first);
+        $this->assertStringContainsString('Speak in one language matching the customer', $first);
+        $this->assertStringContainsString('never copy a raw customer_message', $first);
         $this->assertStringContainsString('result_scope=shortlist', $second);
         $this->assertStringContainsString('If has_more=true', $second);
     }
