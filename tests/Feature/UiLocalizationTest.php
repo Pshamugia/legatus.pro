@@ -40,6 +40,8 @@ class UiLocalizationTest extends TestCase
             ->assertSee('$30')
             ->assertSee('$576')
             ->assertSee('href="#pricing"', false)
+            ->assertSee('ვებსაიტზე ჩასართავად მხოლოდ ერთი პატარა სკრიპტია საჭირო.')
+            ->assertSee('Facebook Messenger, Instagram, WhatsApp და ვებსაიტის ჩატი')
             ->assertDontSee('მოურავი');
 
         $response->assertSee('Legatus შენი ბიზნესის AI ასისტენტია');

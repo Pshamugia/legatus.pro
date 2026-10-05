@@ -7,7 +7,7 @@ return [
     'hero' => [
         'label' => 'AI assistant for your business', 'title' => 'Your business stays active — even while you rest.',
         'line_one' => 'It answers customers. Writes posts. Prepares images. Publishes on Facebook and Instagram.',
-        'description' => 'Legatus is your business AI assistant — it learns your products, answers customers in Facebook, Instagram, and website chats, and manages social media publishing.',
+        'description' => 'Legatus is your business AI assistant — it learns your products, answers customers in Facebook Messenger, Instagram, WhatsApp, and website chat, and manages social media publishing.',
         'closing' => 'Less time on daily routine. More time for your business and yourself.',
     ],
     'banner' => ['title' => 'The annual plan includes a free online store.', 'body' => 'Buy a one-year Legatus plan and we will create an online store with every Legatus feature enabled at no extra cost.', 'link' => 'See the annual offer'],
@@ -15,7 +15,9 @@ return [
         'title' => 'Every message is a potential order. Be there on time.', 'questions_label' => 'Common customer questions', 'question_price' => '“How much is it?”', 'question_stock' => '“Is it in stock?”', 'question_recommend' => '“Which one do you recommend?”',
         'problem' => 'Customers need an answer at the moment they are ready to buy. You cannot always be in the chat.',
         'solution' => 'Legatus answers questions about products, prices, and stock on your behalf, explains your terms, and helps customers choose the right product.',
-        'channels' => 'Facebook Messenger, Instagram, and website chat — your assistant is where your customers message you.',
+        'channels' => 'Facebook Messenger, Instagram, WhatsApp, and website chat — your assistant is where your customers message you.',
+        'script_title' => 'Your website needs only one small script.',
+        'script_body' => 'Copy the ready-made Legatus code and add it to your website once — the website AI chat is ready. Facebook, Instagram, and WhatsApp are connected separately from Legatus.',
     ],
     'business' => [
         'title' => 'In about an hour — an assistant that knows your business.',
@@ -34,7 +36,7 @@ return [
     'annual' => [
         'label' => 'Annual plan offer', 'title' => 'One annual plan. Your online store and AI assistant together.', 'intro' => 'Is your business only on Facebook and Instagram? You can leave the creation of your own online store to us.',
         'highlight' => 'When you purchase a one-year Legatus plan, we will create an online store with every Legatus feature enabled at no extra cost.', 'includes' => 'The annual plan includes:',
-        'item_store' => 'An online store built for your business.', 'item_chat' => 'The Legatus AI assistant in your website chat.', 'item_messages' => 'Customer communication on Facebook and Instagram.', 'item_content' => 'Preparation of post copy and visuals.', 'item_publishing' => 'Automatic publishing according to your schedule.',
+        'item_store' => 'An online store built for your business.', 'item_chat' => 'The Legatus AI assistant in your website chat.', 'item_messages' => 'Customer communication on Facebook, Instagram, and WhatsApp.', 'item_content' => 'Preparation of post copy and visuals.', 'item_publishing' => 'Automatic publishing according to your schedule.',
         'closing' => 'Share information about your business and products. We will take care of building the store and enabling Legatus.', 'card_months' => 'months',
     ],
     'pricing' => [
@@ -49,7 +51,7 @@ return [
     'steps' => [
         'label' => 'How to begin', 'title' => 'Three steps to hand off the daily work.',
         'one_title' => 'Introduce your business', 'one_body' => 'Share your products, prices, stock, terms, and brand style.',
-        'two_title' => 'Connect channels and set a schedule', 'two_body' => 'Enable Legatus on Facebook, Instagram, and your website. Choose when posts should be published.',
+        'two_title' => 'Connect channels and set a schedule', 'two_body' => 'Enable Legatus on Facebook, Instagram, WhatsApp, and your website. Choose when posts should be published.',
         'three_title' => 'Review and manage', 'three_body' => 'Legatus answers customers and publishes content. You monitor its work and adjust instructions whenever needed.',
     ],
     'final' => [
