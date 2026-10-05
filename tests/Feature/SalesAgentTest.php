@@ -24,7 +24,7 @@ class SalesAgentTest extends TestCase
             ->assertSee('fonts/bpg_boxo-boxo.ttf', false)
             ->assertSee("html[lang=\"ka\"] body,html[lang=\"ka\"] body *{font-family:'Legatus Boxo'", false)
             ->assertSee("font-family:'Legatus Dachi'", false)
-            ->assertSee('fonts/Dachi the Lynx.otf', false)
+            ->assertSee('fonts/dachi-the-lynx.otf', false)
             ->assertSee('html[lang="ka"] body h1,html[lang="ka"] body h1 *,html[lang="ka"] body h2', false)
             ->assertSee('html[lang="ka"] body h3,html[lang="ka"] body h3 *', false)
             ->assertSee('Your business stays active — even while you rest.')
@@ -76,14 +76,14 @@ class SalesAgentTest extends TestCase
 
     public function test_landing_css_and_local_fonts_are_ready_before_body_rendering(): void
     {
-        $this->assertFileExists(public_path('fonts/Dachi the Lynx.otf'));
+        $this->assertFileExists(public_path('fonts/dachi-the-lynx.otf'));
 
         $html = $this->get('/')->assertOk()->getContent();
         $bodyPosition = strpos($html, '<body>');
         $landingCssPosition = strpos($html, '.landing-hero h1');
         $boxoPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/bpg_boxo-boxo.ttf').'"');
         $archyPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/archyedt-bold-webfont.ttf').'"');
-        $dachiPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/Dachi the Lynx.otf').'"');
+        $dachiPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/dachi-the-lynx.otf').'"');
 
         $this->assertIsInt($bodyPosition);
         $this->assertIsInt($landingCssPosition);
