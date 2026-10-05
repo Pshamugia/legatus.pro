@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -600,6 +601,8 @@ class MetaTransportTest extends TestCase
         $this->assertStringContainsString('ხელმისაწვდომია', $assistant->content);
         $this->assertSame('available', data_get($assistant->metadata, 'image_recognition_status'));
         $this->assertSame($product->id, data_get($assistant->metadata, 'products.0.id'));
+        $this->assertTrue(Str::isUuid($assistant->request_id));
+        $this->assertSame(36, strlen($assistant->request_id));
         $this->assertDatabaseHas('channel_messages', [
             'message_id' => $assistant->id,
             'direction' => 'outbound',
@@ -672,7 +675,9 @@ class MetaTransportTest extends TestCase
         $this->assertCount(1, $assistantMessages);
         $this->assertTrue($assistantMessages->every(
             fn ($message): bool => data_get($message->metadata, 'image_recognition_status') === 'uncertain'
-                && str_contains($message->content, 'exact identity'),
+                && str_contains($message->content, 'exact identity')
+                && Str::isUuid($message->request_id)
+                && strlen($message->request_id) === 36,
         ));
         $allReplies = $assistantMessages->pluck('content')->implode(' ');
         $this->assertStringNotContainsString('exact product was not found', $allReplies);

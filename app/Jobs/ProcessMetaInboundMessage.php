@@ -21,6 +21,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Ramsey\Uuid\Uuid;
 
 class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 {
@@ -352,7 +353,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         }
 
         $assistant = $conversation->messages()->firstOrCreate(
-            ['request_id' => 'image-recognition:'.$imageRecord->idempotency_key],
+            ['request_id' => $this->derivedRequestId('image-recognition', $imageRecord->idempotency_key)],
             ['role' => 'assistant', 'content' => $result['text'], 'confidence' => in_array($result['status'], ['available', 'unavailable', 'not_found'], true) ? 1 : .8, 'metadata' => [
                 'intent' => 'image_product_lookup',
                 'products' => $result['products'] ?? [],
@@ -514,7 +515,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             };
 
             return $conversation->messages()->firstOrCreate(
-                ['request_id' => 'image-unavailable:'.$record->idempotency_key],
+                ['request_id' => $this->derivedRequestId('image-unavailable', $record->idempotency_key)],
                 ['role' => 'assistant', 'content' => $reply, 'confidence' => 1, 'metadata' => [
                     'attachment_unavailable' => true,
                     'image_recognition_unavailable' => $isImage,
@@ -525,6 +526,11 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         if ($assistant) {
             $dispatcher->dispatch($assistant);
         }
+    }
+
+    private function derivedRequestId(string $purpose, string $idempotencyKey): string
+    {
+        return Uuid::uuid5(Uuid::NAMESPACE_OID, "legatus:meta:{$purpose}:{$idempotencyKey}")->toString();
     }
 
     public function failed(?\Throwable $exception): void
