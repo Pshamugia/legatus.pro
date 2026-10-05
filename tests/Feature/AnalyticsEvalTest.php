@@ -113,4 +113,45 @@ class AnalyticsEvalTest extends TestCase
 
         $this->assertFalse($response->viewData('runs')->contains($orphan));
     }
+
+    public function test_analytics_lists_only_the_current_tenants_recent_customer_feedback(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $user = User::where('email', 'demo@legatus.ai')->firstOrFail();
+        $agent = Agent::where('slug', 'legatus-demo')->firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'rated-customer',
+            'customer_name' => 'Visible Customer',
+            'channel' => 'website',
+            'status' => 'ai',
+        ]);
+        $visible = $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'Visible response that needs review.',
+            'feedback' => 'unhelpful',
+        ]);
+
+        $other = Organization::create(['name' => 'Other Feedback Org', 'slug' => 'other-feedback']);
+        $otherAgent = $other->agents()->create(['name' => 'Other Agent', 'slug' => 'other-feedback-agent', 'business_name' => 'Other']);
+        $otherConversation = $otherAgent->conversations()->create([
+            'visitor_id' => 'hidden-rated-customer',
+            'channel' => 'website',
+            'status' => 'ai',
+        ]);
+        $otherConversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'Hidden response from another tenant.',
+            'feedback' => 'unhelpful',
+        ]);
+
+        $response = $this->actingAs($user)->get(route('analytics.index'))
+            ->assertOk()
+            ->assertSee('Recent customer feedback')
+            ->assertSee('Visible response that needs review.')
+            ->assertSee(route('inbox.index', ['conversation' => $conversation->id]), false)
+            ->assertDontSee('Hidden response from another tenant.');
+
+        $this->assertTrue($response->viewData('recentFeedback')->contains($visible));
+        $this->assertGreaterThanOrEqual(1, $response->viewData('metrics')['unhelpful_responses']);
+    }
 }

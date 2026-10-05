@@ -30,6 +30,7 @@ class AnalyticsController extends Controller
             ->whereIn('conversation_id', (clone $customerConversations)->select('conversations.id'));
         $rated = (clone $assistantMessages)->whereNotNull('feedback')->count();
         $helpful = (clone $assistantMessages)->where('feedback', 'helpful')->count();
+        $unhelpful = (clone $assistantMessages)->where('feedback', 'unhelpful')->count();
         $metrics = [
             'conversations' => $total,
             'automation_rate' => $total ? round((($total - $handoffs) / $total) * 100) : 0,
@@ -42,12 +43,21 @@ class AnalyticsController extends Controller
             'output_tokens' => (clone $customerRuns)->sum('output_tokens'),
             'avg_latency' => round((float) (clone $customerRuns)->where('status', 'completed')->avg('latency_ms')),
             'helpfulness_rate' => $rated ? round($helpful / $rated * 100) : null,
+            'rated_responses' => $rated,
+            'helpful_responses' => $helpful,
+            'unhelpful_responses' => $unhelpful,
             'revenue_influenced' => (float) (clone $customerConversations)->sum('outcome_value'),
             'simulated_runs' => (clone $customerRuns)->where('response_id', 'like', 'demo-trace-%')->count(),
         ];
         $runs = (clone $customerRuns)->latest()->take(20)->get();
+        $recentFeedback = (clone $assistantMessages)
+            ->whereNotNull('feedback')
+            ->with('conversation:id,agent_id,customer_name,channel')
+            ->latest('messages.updated_at')
+            ->take(20)
+            ->get();
         $eval = EvaluationRun::where('agent_id', $agent->id)->latest()->first();
 
-        return view('analytics', compact('agent', 'metrics', 'runs', 'eval'));
+        return view('analytics', compact('agent', 'metrics', 'runs', 'recentFeedback', 'eval'));
     }
 }

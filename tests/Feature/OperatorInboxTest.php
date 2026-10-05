@@ -198,4 +198,31 @@ class OperatorInboxTest extends TestCase
             ->assertOk()
             ->assertSee('Open product ↗');
     }
+
+    public function test_operator_inbox_shows_feedback_on_the_exact_assistant_reply_and_in_polling(): void
+    {
+        $conversation = $this->conversation();
+        $helpful = $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'This reply was useful.',
+            'feedback' => 'helpful',
+        ]);
+        $unhelpful = $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'This reply needs review.',
+            'feedback' => 'unhelpful',
+        ]);
+
+        $this->get('/app/inbox?conversation='.$conversation->id)
+            ->assertOk()
+            ->assertSee('Customer marked this helpful')
+            ->assertSee('Customer marked this unhelpful');
+
+        $messages = collect($this->getJson("/app/inbox/{$conversation->id}/poll")
+            ->assertOk()
+            ->json('messages'));
+
+        $this->assertSame('helpful', $messages->firstWhere('id', $helpful->id)['feedback']);
+        $this->assertSame('unhelpful', $messages->firstWhere('id', $unhelpful->id)['feedback']);
+    }
 }

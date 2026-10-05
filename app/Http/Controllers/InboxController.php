@@ -100,6 +100,7 @@ class InboxController extends Controller
                 'role' => $message->role,
                 'content' => $message->content,
                 'confidence' => $message->confidence,
+                'feedback' => $message->role === 'assistant' ? $message->feedback : null,
                 'sources' => $message->role === 'assistant' ? ($message->metadata['sources'] ?? []) : [],
                 'products' => $message->role === 'assistant' ? ($message->metadata['products'] ?? []) : [],
                 'delivery_status' => $this->deliveryStatus($message),
