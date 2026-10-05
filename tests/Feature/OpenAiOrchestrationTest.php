@@ -245,6 +245,27 @@ class OpenAiOrchestrationTest extends TestCase
                         ], JSON_UNESCAPED_UNICODE),
                     ]],
                 ]],
+            ])
+            ->push([
+                'id' => 'delivery-natural-repair',
+                'output' => [[
+                    'type' => 'message',
+                    'content' => [[
+                        'type' => 'output_text',
+                        'text' => json_encode([
+                            'text' => 'კი, სახლში მიწოდება შესაძლებელია — თბილისში 5 ლარი ღირს და დაახლოებით 1-2 სამუშაო დღეში სრულდება.',
+                            'intent' => 'delivery', 'confidence' => .99,
+                            'handoff' => false, 'escalation_reason' => null,
+                            'clarification_next_tool' => null, 'clarification_missing_input' => null,
+                            'product_ids' => [], 'sources' => [],
+                            'factual_claims' => [[
+                                'type' => 'delivery', 'product_id' => null, 'amount' => 5,
+                                'quantity' => null, 'reference' => 'Customer information',
+                            ]],
+                        ], JSON_UNESCAPED_UNICODE),
+                    ]],
+                ]],
+                'usage' => [],
             ]);
 
         $response = $this->postJson("/demo/{$agent->slug}/message", [
@@ -252,7 +273,9 @@ class OpenAiOrchestrationTest extends TestCase
         ])->assertOk()->assertJsonPath('intent', 'delivery')->assertJsonPath('handoff', false);
 
         $this->assertStringContainsString('1-2 სამუშაო დღეში', $response->json('text'));
+        $this->assertStringStartsWith('კი, სახლში მიწოდება შესაძლებელია', $response->json('text'));
         $this->assertContains('calculate_delivery', $response->json('tools_used'));
+        $this->assertContains('guardrail_repair', $response->json('tools_used'));
         $this->assertNotContains('server_guardrail', $response->json('tools_used'));
     }
 

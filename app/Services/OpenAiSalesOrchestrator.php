@@ -731,23 +731,14 @@ class OpenAiSalesOrchestrator
             $data['product_ids'] = [];
             $data['factual_claims'] = [];
         }
-        $usedDeterministicDeliveryFallback = false;
+        $deliveryDraftIgnoredEvidence = false;
         if (($verifiedDelivery['ok'] ?? false) === true) {
             $modelUsedVerifiedDelivery = ($data['intent'] ?? null) === 'delivery'
                 && collect($data['factual_claims'] ?? [])->contains(
                     fn ($claim): bool => is_array($claim) && ($claim['type'] ?? null) === 'delivery',
                 );
             if (! $modelUsedVerifiedDelivery) {
-                // Keep a safe answer when the model ignored the verified
-                // result. A valid grounded draft, however, must retain the
-                // model's natural wording rather than exposing the tool's raw
-                // customer_message (which may contain labels or translations).
-                $data['text'] = $verifiedDelivery['customer_message'];
-                $data['factual_claims'] = [[
-                    'type' => 'delivery', 'product_id' => null, 'amount' => null,
-                    'quantity' => null, 'reference' => $verifiedDelivery['source']['url'] ?? null,
-                ]];
-                $usedDeterministicDeliveryFallback = true;
+                $deliveryDraftIgnoredEvidence = true;
             }
             $data['intent'] = 'delivery';
             $data['confidence'] = 1;
@@ -903,12 +894,8 @@ class OpenAiSalesOrchestrator
         $data = $this->normalizeRecommendationClarification($data, $catalogContext, $usedCollection);
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
-        if ($usedDeterministicDeliveryFallback) {
-            // This reply was assembled from the server-owned delivery result,
-            // not drafted from model knowledge. Delivery fees and day ranges
-            // are already authorized by that tool and must not be mistaken for
-            // unverified product prices or stock quantities by generic checks.
-            $escalationReason = null;
+        if ($deliveryDraftIgnoredEvidence) {
+            $escalationReason = 'The response ignored the successful verified delivery result instead of answering the customer naturally from it.';
         }
         if (is_string($verifiedSuggestion) && ($data['intent'] ?? null) === 'clarification') {
             // did_you_mean is already tenant-scoped and edit-distance validated
@@ -1004,6 +991,30 @@ class OpenAiSalesOrchestrator
                     'exception' => $exception::class,
                     'message' => $exception->getMessage(),
                 ]);
+            }
+        }
+
+        if ($escalationReason) {
+            if (($verifiedDelivery['ok'] ?? false) === true) {
+                // Both natural-answer attempts failed validation. Preserve a
+                // grounded answer instead of handing off or inventing facts;
+                // this raw tool wording is an emergency fallback only.
+                $data = [
+                    'text' => $verifiedDelivery['customer_message'],
+                    'intent' => 'delivery',
+                    'confidence' => 1,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [],
+                    'sources' => [$verifiedDelivery['source']],
+                    'factual_claims' => [[
+                        'type' => 'delivery', 'product_id' => null, 'amount' => null,
+                        'quantity' => null, 'reference' => $verifiedDelivery['source']['url'] ?? null,
+                    ]],
+                ];
+                $escalationReason = null;
             }
         }
 
