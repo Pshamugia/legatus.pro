@@ -1728,6 +1728,95 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertTrue($schedule->posts->every(fn ($post): bool => $post->description === 'Verified public description.'));
     }
 
+    public function test_secondary_website_language_uses_its_own_source_base_record_and_restarts_after_exhaustion(): void
+    {
+        [$user, $agent] = $this->tenant('secondary-language-base-cycle');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Georgian',
+            'name' => 'Website language: Georgian', 'url' => 'https://shop.example',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $englishSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
+            'name' => 'Website language: English', 'url' => 'https://shop.example/en',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $attributes = $this->product('Verified English Product', 'Books', 3);
+        $attributes['metadata']['source_id'] = $englishSource->id;
+        $attributes['metadata']['source_url'] = $englishSource->url;
+        $attributes['metadata']['languages'] = ['English'];
+        $product = $agent->products()->create($attributes);
+        $payload = [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['English'],
+        ];
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $firstPost = $agent->socialMediaPosts()->firstOrFail();
+        $this->assertSame($product->id, $firstPost->product_id);
+        $this->assertSame('English', $firstPost->language);
+        $this->assertSame('Verified English Product', $firstPost->title);
+        $firstPost->update(['status' => 'published', 'published_at' => now()]);
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $secondPost = $agent->socialMediaSchedules()->latest('id')->firstOrFail()->posts()->sole();
+
+        $this->assertSame($product->id, $secondPost->product_id);
+        $this->assertSame('English', $secondPost->language);
+        $this->assertDatabaseHas('social_publication_cycles', [
+            'agent_id' => $agent->id,
+            'provider' => 'instagram',
+            'current_cycle' => 2,
+        ]);
+    }
+
+    public function test_existing_secondary_language_placeholder_resolves_from_its_source_base_record_when_due(): void
+    {
+        [$user, $agent] = $this->tenant('secondary-language-placeholder-recovery');
+        $this->connections($agent);
+        $agent->channelConnections()->create([
+            'provider' => 'threads', 'status' => 'active', 'external_account_id' => 'threads-secondary-language',
+            'external_account_name' => 'secondary_language', 'access_token' => 'threads-token', 'connected_at' => now(),
+        ]);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Georgian',
+            'name' => 'Website language: Georgian', 'url' => 'https://shop.example',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $englishSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
+            'name' => 'Website language: English', 'url' => 'https://shop.example/en',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['instagram', 'threads'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['English'],
+        ])->assertSessionHasNoErrors();
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->assertTrue($schedule->posts()->get()->every(fn ($post): bool => $post->product_id === null));
+
+        $attributes = $this->product('Recovered English Product', 'Books', 3);
+        $attributes['metadata']['source_id'] = $englishSource->id;
+        $attributes['metadata']['source_url'] = $englishSource->url;
+        $attributes['metadata']['languages'] = ['English'];
+        $product = $agent->products()->create($attributes);
+        $post = $schedule->posts()->firstOrFail();
+
+        $safeIds = app(SocialMediaScheduler::class)
+            ->prepareDueSlot($schedule->fresh('agent'), $post->scheduled_for);
+
+        $this->assertEqualsCanonicalizing($schedule->posts()->pluck('id')->all(), $safeIds);
+        $this->assertTrue($schedule->posts()->get()->every(
+            fn ($scheduledPost): bool => $scheduledPost->product_id === $product->id
+                && $scheduledPost->language === 'English'
+                && $scheduledPost->title === 'Recovered English Product',
+        ));
+    }
+
     public function test_existing_primary_language_placeholders_resolve_from_the_base_catalog_when_due(): void
     {
         [$user, $agent] = $this->tenant('primary-language-placeholder-recovery');

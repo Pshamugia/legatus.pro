@@ -419,12 +419,10 @@ class SocialMediaScheduler
             ])->values();
         }
 
-        // The first configured website language is the storefront's primary
-        // language (the controller uses the same rule for the live preview).
-        // Its copy lives on the base catalog record, so it must not require a
-        // second metadata.localized entry produced by an optional language
-        // crawl. Secondary languages still require their verified localized
-        // record and therefore cannot silently fall back to the wrong copy.
+        // A language crawl may store verified copy either as a localized
+        // variant on the primary product or as the base record owned by that
+        // language source. Both are authoritative for the selected language.
+        // A source-owned base record must never leak into another language.
         $languageSources = $agent->knowledgeSources()
             ->where('source_scope', 'language')
             ->oldest('id')
@@ -447,6 +445,7 @@ class SocialMediaScheduler
                 $languageKey = Str::lower($language);
 
                 return $localizedKeys->has($languageKey)
+                    || ($sourceLanguageKey !== null && $sourceLanguageKey === $languageKey)
                     || ($primaryLanguageKey !== ''
                         && $languageKey === $primaryLanguageKey
                         && ($sourceLanguageKey === null || $sourceLanguageKey === $primaryLanguageKey));
