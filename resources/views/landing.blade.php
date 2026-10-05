@@ -1,305 +1,128 @@
 @extends('layouts.app')
 
-@section('title', 'Legatus — AI Shopping Assistant, Social Media Manager & Copywriter')
-@section('description', 'Legatus combines an AI shopping assistant, customer conversations across web and social channels, automated publishing, and an AI copywriter in one platform.')
+@section('title', __('landing.meta.title'))
+@section('description', __('landing.meta.description'))
 
 @section('body')
 @php
-    if (auth()->check()) {
-        $primaryRoute = route('onboarding');
-        $primaryLabel = 'Configure Legatus →';
-    } elseif (config('legatus.registration_enabled')) {
-        $primaryRoute = route('register');
-        $primaryLabel = 'Create a workspace →';
-    } elseif ($demoAgent) {
-        $primaryRoute = route('chat.show', $demoAgent);
-        $primaryLabel = 'Try the live demo ↗';
-    } else {
-        $primaryRoute = route('login');
-        $primaryLabel = 'Sign in →';
-    }
+    $primaryRoute = auth()->check()
+        ? route('onboarding')
+        : (config('legatus.registration_enabled')
+            ? route('register')
+            : ($demoAgent ? route('chat.show', $demoAgent) : route('login')));
+    $annualRoute = auth()->check()
+        ? route('billing.index', ['period' => 'yearly', 'package' => 'chat_social'])
+        : (config('legatus.registration_enabled')
+            ? route('register', ['period' => 'yearly', 'package' => 'chat_social'])
+            : $primaryRoute);
 @endphp
 
-<div class="wrap">
-    <nav class="nav">
+<div class="wrap landing-wrap">
+    <nav class="nav landing-nav">
         <a class="brand" href="{{ route('landing') }}"><span class="mark">L</span> Legatus</a>
         <div class="navlinks">
-            <a href="#product">Product</a>
-            <a href="#trust">Trust</a>
-            <a href="#pricing">Pricing</a>
-            <a href="#contact">Contact</a>
+            <a href="#communication">{{ __('landing.nav.communication') }}</a>
+            <a href="#social-media">{{ __('landing.nav.social') }}</a>
+            <a href="#annual-offer">{{ __('landing.nav.annual') }}</a>
+            <a href="#how-it-works">{{ __('landing.nav.how') }}</a>
             @auth
-                <a href="{{ route('onboarding') }}">Business setup</a>
+                <a href="{{ route('onboarding') }}">{{ __('landing.nav.setup') }}</a>
             @else
-                <a href="{{ route('login') }}">Sign in</a>
+                <a href="{{ route('login') }}">{{ __('landing.nav.sign_in') }}</a>
             @endauth
             @include('partials.ui-locale-switcher')
-            <a class="btn" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
+            <a class="btn" href="{{ $primaryRoute }}">{{ __('landing.cta.start') }}</a>
         </div>
     </nav>
 
-    <main class="hero" id="product">
-        <section>
-            <span class="tag"><span class="dot"></span> AI team for sales, content &amp; social media</span>
-            <h1>Legatus — your AI <em>steward</em></h1>
-            <p>Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter — all in one platform. It supports customer conversations on your website, Facebook, Instagram, and WhatsApp, creates content in three distinct styles, and automatically publishes social posts.</p>
-            <div class="actions">
-                <a class="btn lime" href="{{ $primaryRoute }}">{{ $primaryLabel }}</a>
-                <a class="btn ghost" href="#how-it-works">See how it works ↓</a>
+    <main>
+        <section class="landing-hero" id="product">
+            <div class="landing-hero-copy">
+                <span class="tag"><span class="dot"></span> {{ __('landing.hero.label') }}</span>
+                <h1>{{ __('landing.hero.title') }}</h1>
+                <p class="landing-lead">{{ __('landing.hero.line_one') }}</p>
+                <p>{{ __('landing.hero.description') }}</p>
+                <p>{{ __('landing.hero.closing') }}</p>
+                <div class="actions">
+                    <a class="btn lime" href="{{ $primaryRoute }}">{{ __('landing.cta.start') }}</a>
+                    <a class="btn ghost" href="#how-it-works">{{ __('landing.cta.see_how') }} ↓</a>
+                </div>
             </div>
-            <div class="proof">
-                <span><b>24/7</b><br>Customer support</span>
-                <span><b>Automatic</b><br>Social publishing</span>
-                <span><b>3 styles</b><br>Simple · Creative · Informative</span>
-                <span><b>KA · EN</b><br>Bilingual assistant</span>
+            <div class="landing-hero-visual" aria-hidden="true">
+                <div class="assistant-orbit orbit-one"></div><div class="assistant-orbit orbit-two"></div>
+                <div class="assistant-core"><span>L</span></div>
+                <div class="assistant-pulse pulse-one"></div><div class="assistant-pulse pulse-two"></div><div class="assistant-pulse pulse-three"></div>
             </div>
         </section>
 
-        <section class="demo-card product-demo" aria-label="Illustrative product demonstration">
-            <div class="demo-head">
-                <div class="person">
-                    <span class="avatar">L</span>
-                    <div><strong>One platform. Three AI teammates.</strong><small>Shopping · Social · Copy</small></div>
-                </div>
-                <span class="tag">Illustrative demo · seeded catalog</span>
+        <aside class="annual-banner" aria-labelledby="annual-banner-title">
+            <div><h2 id="annual-banner-title">{{ __('landing.banner.title') }}</h2><p>{{ __('landing.banner.body') }}</p></div>
+            <a href="#annual-offer">{{ __('landing.banner.link') }} →</a>
+        </aside>
+
+        <section class="story-section" id="communication">
+            <div class="section-heading"><span class="section-number">01</span><h2>{{ __('landing.communication.title') }}</h2></div>
+            <div class="story-grid">
+                <div class="quote-stack" aria-label="{{ __('landing.communication.questions_label') }}"><span>{{ __('landing.communication.question_price') }}</span><span>{{ __('landing.communication.question_stock') }}</span><span>{{ __('landing.communication.question_recommend') }}</span></div>
+                <div class="story-copy"><p>{{ __('landing.communication.problem') }}</p><p>{{ __('landing.communication.solution') }}</p><p class="section-emphasis">{{ __('landing.communication.channels') }}</p></div>
             </div>
-            <div class="demo-tabs" role="tablist" aria-label="Legatus capabilities">
-                <button class="demo-tab is-active" type="button" role="tab" aria-selected="true" data-demo-tab="shopping">Shopping</button>
-                <button class="demo-tab" type="button" role="tab" aria-selected="false" data-demo-tab="social">Social</button>
-                <button class="demo-tab" type="button" role="tab" aria-selected="false" data-demo-tab="copywriter">Copywriter</button>
+        </section>
+
+        <section class="story-section" id="business-knowledge">
+            <div class="section-heading"><span class="section-number">02</span><h2>{{ __('landing.business.title') }}</h2></div>
+            <div class="split-copy"><p>{{ __('landing.business.intro') }}</p><p>{{ __('landing.business.rules') }}</p></div>
+            <strong class="statement">{{ __('landing.business.statement') }}</strong>
+        </section>
+
+        <section class="story-section" id="social-media">
+            <div class="section-heading"><span class="section-number">03</span><h2>{{ __('landing.social.title') }}</h2></div>
+            <div class="story-grid">
+                <div class="story-copy"><p>{{ __('landing.social.problem') }}</p><p>{{ __('landing.social.intro') }}</p><ul class="feature-list"><li>{{ __('landing.social.item_products') }}</li><li>{{ __('landing.social.item_copy') }}</li><li>{{ __('landing.social.item_images') }}</li><li>{{ __('landing.social.item_publish') }}</li></ul></div>
+                <div class="schedule-visual" aria-hidden="true"><div><b>09:00</b><span>Facebook</span><i></i></div><div><b>09:00</b><span>Instagram</span><i></i></div><div><b>18:30</b><span>Facebook</span><i></i></div></div>
             </div>
-            <div class="chatbody demo-pane is-active" data-demo-pane="shopping">
-                <div class="bubble user">I am looking for a contemporary novel like The Master and Margarita, under $30.</div>
-                <div class="bubble ai">
-                    <b>Piranesi</b> is the best match — it has a mysterious atmosphere and plays with the boundaries of reality. It costs $27.50, with 7 copies in stock.
-                    <div class="product-row">
-                        <div class="product-mini"><b>Piranesi</b><span>$27.50 · 7 in stock</span></div>
-                        <div class="product-mini"><b>Before the Coffee Gets Cold</b><span>$26.90 · 9 in stock</span></div>
-                    </div>
-                    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px">
-                        <span class="tag">Seeded catalog snapshot</span>
-                        <span class="tag">Confidence · 94%</span>
-                        <span class="tag">check_stock</span>
-                    </div>
-                </div>
-                <div class="bubble user">Can you offer an 18% discount on 10 copies for corporate gifts?</div>
-                <div class="bubble ai">There are 14 in stock, but that discount exceeds my 10% approval limit. I will pass the quantity and full offer context to a manager.</div>
+            <p class="section-emphasis">{{ __('landing.social.closing') }}</p>
+        </section>
+
+        <section class="story-section" id="product-images">
+            <div class="section-heading"><span class="section-number">04</span><h2>{{ __('landing.images.title') }}</h2></div>
+            <div class="split-copy"><p>{{ __('landing.images.truth') }}</p><p>{{ __('landing.images.preparation') }}</p></div>
+            <strong class="statement">{{ __('landing.images.closing') }}</strong>
+        </section>
+
+        <section class="annual-offer" id="annual-offer">
+            <div class="annual-offer-copy">
+                <span class="eyebrow">{{ __('landing.annual.label') }}</span><h2>{{ __('landing.annual.title') }}</h2><p>{{ __('landing.annual.intro') }}</p>
+                <p class="annual-highlight">{{ __('landing.annual.highlight') }}</p><h3>{{ __('landing.annual.includes') }}</h3>
+                <ul class="feature-list annual-list"><li>{{ __('landing.annual.item_store') }}</li><li>{{ __('landing.annual.item_chat') }}</li><li>{{ __('landing.annual.item_messages') }}</li><li>{{ __('landing.annual.item_content') }}</li><li>{{ __('landing.annual.item_publishing') }}</li></ul>
+                <p>{{ __('landing.annual.closing') }}</p><a class="btn lime annual-cta" href="{{ $annualRoute }}">{{ __('landing.cta.annual') }}</a>
             </div>
-            <div class="demo-pane social-demo" data-demo-pane="social" hidden>
-                <div class="social-demo-head"><div><span class="eyebrow">September schedule</span><strong>Content planned and ready</strong></div><span class="pill">Active</span></div>
-                <div class="social-calendar">
-                    <div><b>08</b><span>Facebook</span><small>09:00 · Product post</small></div>
-                    <div><b>08</b><span>Instagram</span><small>09:00 · Product post</small></div>
-                    <div><b>09</b><span>Facebook</span><small>18:30 · Product post</small></div>
-                </div>
-                <div class="social-demo-note"><span>✓</span><p><b>Published automatically</b><br>Same verified product, image, and message across selected channels.</p></div>
-            </div>
-            <div class="demo-pane copy-demo" data-demo-pane="copywriter" hidden>
-                <div class="copy-product"><span class="copy-cover">L</span><div><span class="eyebrow">Verified product</span><strong>One product. Three ready-to-publish voices.</strong></div></div>
-                <article><span>Simple</span><p>A clear, concise introduction focused on what customers need to know.</p></article>
-                <article><span>Creative</span><p>A vivid, memorable story that gives the product a distinctive social voice.</p></article>
-                <article><span>Informative</span><p>A precise, composed description built from verified product details.</p></article>
-            </div>
+            <div class="annual-card" aria-hidden="true"><span>12</span><strong>{{ __('landing.annual.card_months') }}</strong><i></i><b>Legatus + Store</b></div>
+        </section>
+
+        <section class="steps-section" id="how-it-works">
+            <div class="section-heading centered-heading"><span class="eyebrow">{{ __('landing.steps.label') }}</span><h2>{{ __('landing.steps.title') }}</h2></div>
+            <div class="steps-grid"><article class="panel"><span>01</span><h3>{{ __('landing.steps.one_title') }}</h3><p>{{ __('landing.steps.one_body') }}</p></article><article class="panel"><span>02</span><h3>{{ __('landing.steps.two_title') }}</h3><p>{{ __('landing.steps.two_body') }}</p></article><article class="panel"><span>03</span><h3>{{ __('landing.steps.three_title') }}</h3><p>{{ __('landing.steps.three_body') }}</p></article></div>
+        </section>
+
+        <section class="final-cta" id="start">
+            <h2>{{ __('landing.final.title') }}</h2><p>{{ __('landing.final.body') }}</p><p>{{ __('landing.final.rest') }}</p><strong>{{ __('landing.final.statement') }}</strong>
+            <a class="btn lime" href="{{ $primaryRoute }}">{{ __('landing.cta.final') }}</a><small>{{ __('landing.final.annual_note') }}</small>
         </section>
     </main>
 
-    <section class="metrics capability-metrics" aria-label="Legatus capabilities">
-        <div class="metric"><b>AI Shopping Assistant</b><span>Answers questions, recommends verified products, and helps customers choose 24/7.</span></div>
-        <div class="metric"><b>Social Media Manager</b><span>Handles customer conversations across connected channels and publishes product posts to Facebook and Instagram.</span></div>
-        <div class="metric"><b>AI Copywriter</b><span>Creates Simple, Creative, and Informative copy for every scheduled product.</span></div>
-    </section>
-
-    <section class="channel-section" aria-labelledby="channel-section-title">
-        <div class="channel-section-copy">
-            <span class="eyebrow">Connected customer journey</span>
-            <h2 id="channel-section-title">One assistant across every customer channel.</h2>
-            <p>Legatus keeps the same verified business knowledge, conversation context, and human handoff workflow wherever customers reach you.</p>
-        </div>
-        <div class="channel-grid">
-            <article class="channel-card"><span class="channel-mark">W</span><div><h3>Website</h3><p>Shopping guidance and verified answers, available 24/7.</p></div><span class="channel-status is-live">Available</span></article>
-            <article class="channel-card"><span class="channel-mark">f</span><div><h3>Facebook</h3><p>Messenger conversations and automated product publishing.</p></div><span class="channel-status is-live">Available</span></article>
-            <article class="channel-card"><span class="channel-mark">I</span><div><h3>Instagram</h3><p>Direct messages and scheduled product content.</p></div><span class="channel-status is-live">Available</span></article>
-            <article class="channel-card"><span class="channel-mark">WA</span><div><h3>WhatsApp Business</h3><p>The same grounded assistant for customer conversations.</p></div><span class="channel-status is-pilot">Pilot</span></article>
-            <article class="channel-card"><span class="channel-mark">in</span><div><h3>LinkedIn</h3><p>Company Page publishing is next in the social workspace.</p></div><span class="channel-status is-soon">Coming soon</span></article>
-        </div>
-    </section>
-
-    <section class="trust-section" id="trust" aria-labelledby="trust-title">
-        <div class="trust-copy"><span class="eyebrow">Why you can trust Legatus</span><h2 id="trust-title">AI automation with verified business data and human control.</h2></div>
-        <div class="metrics trust-metrics">
-        <div class="metric"><b>Grounded</b><span>Prices and availability come only from verified business data</span></div>
-        <div class="metric"><b>Observable</b><span>Sources, confidence, tools, latency, and escalation reasons for every flow</span></div>
-        <div class="metric"><b>Human-led</b><span>Policy exceptions and uncertain cases are handed to a person</span></div>
-        </div>
-    </section>
-
-    <section class="launch-steps" id="how-it-works" aria-labelledby="launch-steps-title">
-        <div class="launch-steps-copy">
-            <span class="eyebrow">Simple setup</span>
-            <h2 id="launch-steps-title">Launch in 3 simple steps</h2>
-        </div>
-        <div class="launch-steps-grid">
-            <article class="panel"><span>01</span><h3>Connect your website</h3><p>Legatus instantly learns your products and business rules.</p></article>
-            <article class="panel"><span>02</span><h3>Turn on your channels</h3><p>Connect website, Facebook, Instagram, or WhatsApp conversations from one workspace.</p></article>
-            <article class="panel"><span>03</span><h3>Delegate the routine</h3><p>AI answers customers with verified information and plans posts months in advance.</p></article>
-        </div>
-    </section>
-
-    <section id="pricing" style="padding:70px 0">
-        <div style="text-align:center;max-width:680px;margin:0 auto 30px">
-            <span class="eyebrow">Simple pricing</span>
-            <h2 style="font-size:38px;margin:10px 0">Start with chat. Add social when you need it.</h2>
-            <p style="color:var(--muted)">Choose a billing period, then add automated social publishing to your Legatus Chat subscription.</p>
-        </div>
-        <div class="billing-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px">
-            @foreach([
-                ['id' => 'monthly', 'key' => 'monthly', 'label' => 'Monthly', 'chat' => '$30', 'social' => '$60', 'chat_note' => 'billed every month', 'social_note' => 'Chat + Social · billed every month', 'addon' => '+$30/month', 'featured' => false],
-                ['id' => 'six-months', 'key' => 'six_months', 'label' => '6 months', 'chat' => '$162', 'social' => '$324', 'chat_note' => 'billed every 6 months · save $18', 'social_note' => 'Chat + Social · billed every 6 months · save $36', 'addon' => '+$162/6 months', 'featured' => false],
-                ['id' => 'annual', 'key' => 'yearly', 'label' => 'Annual', 'chat' => '$288', 'social' => '$576', 'chat_note' => 'billed every year · save $72', 'social_note' => 'Chat + Social · billed every year · save $144', 'addon' => '+$288/year', 'featured' => true],
-            ] as $period)
-                @php
-                    $checkoutRoute = auth()->check()
-                        ? route('billing.index', ['period' => $period['key'], 'package' => 'chat'])
-                        : (config('legatus.registration_enabled')
-                            ? route('register', ['period' => $period['key'], 'package' => 'chat'])
-                            : $primaryRoute);
-                @endphp
-                <article class="panel billing-option{{ $period['featured'] ? ' billing-option-featured' : '' }}" data-chat-price="{{ $period['chat'] }}" data-social-price="{{ $period['social'] }}" data-chat-note="{{ $period['chat_note'] }}" data-social-note="{{ $period['social_note'] }}" data-checkout-base="{{ $checkoutRoute }}" data-period="{{ $period['key'] }}">
-                    <span class="eyebrow">{{ $period['label'] }}</span>
-                    <details class="billing-package-picker">
-                        <summary><span class="billing-package-name">Legatus Chat</span><span aria-hidden="true">⌄</span></summary>
-                        <label for="social-addon-{{ $period['id'] }}">
-                            <input id="social-addon-{{ $period['id'] }}" class="social-addon-toggle" type="checkbox">
-                            <span><strong>Add Social media manager</strong><small>Automated Facebook and Instagram publishing</small></span>
-                            <b>{{ $period['addon'] }}</b>
-                        </label>
-                    </details>
-                    <h3 aria-live="polite">{{ $period['chat'] }}</h3>
-                    <p>{{ $period['chat_note'] }}</p>
-                    <a class="btn billing-checkout-link{{ $period['featured'] ? ' lime' : '' }}" href="{{ $checkoutRoute }}">Start free trial</a>
-                </article>
-            @endforeach
-        </div>
-        <article class="creative-preview panel">
-            <div><span class="eyebrow">Included with Social</span><h3>Automated publishing + AI Copywriter</h3><p>Schedule verified products for Facebook and Instagram, then publish original copy or choose Simple, Creative, or Informative AI-generated text.</p></div>
-            <span class="creative-badge">Available now</span>
-        </article>
-    </section>
-
-    <footer id="contact" class="panel" style="margin:0 0 40px;padding:28px;display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap">
-        <div><strong>Questions or support?</strong><p style="color:var(--muted);margin:7px 0 0"><a href="mailto:{{ config('legatus.privacy_email') }}">{{ config('legatus.privacy_email') }}</a></p></div>
-        <div style="display:flex;gap:18px;flex-wrap:wrap"><a href="{{ route('terms') }}">Terms of Service</a><a href="{{ route('privacy') }}">Privacy Policy</a><a href="{{ route('refund-policy') }}">Refund Policy</a></div>
-    </footer>
+    <footer id="contact" class="panel landing-footer"><div><strong>{{ __('landing.footer.support') }}</strong><p><a href="mailto:{{ config('legatus.privacy_email') }}">{{ config('legatus.privacy_email') }}</a></p></div><div><a href="{{ route('terms') }}">{{ __('landing.footer.terms') }}</a><a href="{{ route('privacy') }}">{{ __('landing.footer.privacy') }}</a><a href="{{ route('refund-policy') }}">{{ __('landing.footer.refunds') }}</a></div></footer>
 </div>
+
 @push('head')
 <link rel="preload" href="{{ asset('fonts/bpg_boxo-boxo.ttf') }}" as="font" type="font/ttf" crossorigin>
 <link rel="preload" href="{{ asset('fonts/archyedt-bold-webfont.ttf') }}" as="font" type="font/ttf" crossorigin>
 <style>
-@font-face{font-family:'Legatus Boxo';src:url('{{ asset('fonts/bpg_boxo-boxo.ttf') }}') format('truetype');font-style:normal;font-weight:400;font-display:block}
-html[lang="ka"] body,html[lang="ka"] body *{font-family:'Legatus Boxo','Noto Sans Georgian',sans-serif!important}
-html[lang="ka"] body h1,html[lang="ka"] body h1 *,html[lang="ka"] body h2,html[lang="ka"] body h2 *,html[lang="ka"] body h3,html[lang="ka"] body h3 *,html[lang="ka"] body .brand,html[lang="ka"] body .brand *{font-family:'Legatus Archy','Noto Sans Georgian',sans-serif!important}
-@font-face{font-family:'Legatus Archy';src:url('{{ asset('fonts/archyedt-bold-webfont.ttf') }}') format('truetype');font-style:normal;font-weight:700;font-display:block}
-html[lang="ka"] .hero h1,
-html[lang="ka"] .channel-section-copy h2,
-html[lang="ka"] .trust-copy h2,
-html[lang="ka"] .launch-steps-copy h2,
-html[lang="ka"] #pricing>div:first-child h2,
-html[lang="ka"] .creative-preview h3{font-family:'Legatus Archy','Noto Sans Georgian',sans-serif;font-weight:700;letter-spacing:0;line-height:1.18}
-.hero{grid-template-columns:minmax(0,1fr) minmax(440px,.9fr);gap:48px}.hero h1{font-size:clamp(48px,5vw,68px)}.hero>section:first-child>p{max-width:660px}.proof{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 24px}.product-demo{transform:none}.demo-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;padding:0 15px 14px}.demo-tab{border:1px solid var(--line);border-radius:11px;padding:10px 7px;background:#f6f8f5;color:var(--muted);font:700 11px 'DM Sans';cursor:pointer}.demo-tab.is-active{border-color:var(--green);background:var(--green);color:#fff}.demo-pane{min-height:410px}.social-demo,.copy-demo{padding:22px;border-radius:20px;background:#f4f6f2}.social-demo-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding-bottom:18px}.social-demo-head>div{display:flex;flex-direction:column;gap:5px}.social-calendar{display:grid;gap:10px}.social-calendar>div{display:grid;grid-template-columns:42px 90px 1fr;align-items:center;gap:9px;padding:13px;border:1px solid var(--line);border-radius:13px;background:#fff}.social-calendar b{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--lime)}.social-calendar span{font-size:12px;font-weight:800}.social-calendar small{color:var(--muted)}.social-demo-note{display:flex;align-items:center;gap:11px;margin-top:16px;padding:14px;border-radius:13px;background:var(--green);color:#fff}.social-demo-note>span{display:grid;place-items:center;flex:0 0 30px;height:30px;border-radius:50%;background:var(--lime);color:var(--ink);font-weight:900}.social-demo-note p{margin:0;color:#d4e4de;font-size:12px;line-height:1.5}.social-demo-note b{color:#fff}.copy-product{display:flex;align-items:center;gap:12px;margin-bottom:14px}.copy-product>div{display:flex;flex-direction:column;gap:5px}.copy-cover{display:grid;place-items:center;flex:0 0 52px;height:66px;border-radius:7px;background:linear-gradient(145deg,var(--green),#0e2920);color:var(--lime);font:800 20px Manrope}.copy-demo article{padding:13px 14px;border:1px solid var(--line);border-radius:13px;background:#fff}.copy-demo article+article{margin-top:9px}.copy-demo article span{display:inline-flex;padding:4px 8px;border-radius:99px;background:#edf4e8;color:var(--green);font-size:10px;font-weight:800}.copy-demo article p{margin:7px 0 0;color:var(--muted);font-size:12px;line-height:1.5}.capability-metrics{padding-top:15px}.capability-metrics .metric{border-top:3px solid var(--green)}.capability-metrics .metric b{font-size:20px}.channel-section{padding:36px 0 70px;border-top:1px solid var(--line)}.channel-section-copy{display:grid;grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr);gap:18px 48px;align-items:end;margin-bottom:28px}.channel-section-copy .eyebrow{grid-column:1/-1}.channel-section-copy h2{font-size:36px;line-height:1.15;margin:0}.channel-section-copy p{color:var(--muted);line-height:1.7;margin:0}.channel-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:14px}.channel-card{grid-column:span 2;position:relative;display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;padding:20px;border:1px solid var(--line);border-radius:17px;background:#fff;min-height:158px}.channel-card:nth-child(4){grid-column:2/span 2}.channel-card h3{margin:2px 0 7px}.channel-card p{margin:0;color:var(--muted);font-size:13px;line-height:1.55}.channel-mark{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:var(--green);color:var(--lime);font:800 13px Manrope}.channel-status{position:absolute;left:76px;bottom:17px;padding:5px 8px;border-radius:99px;font-size:10px;font-weight:800}.channel-status.is-live{background:#e9f8dc;color:#477426}.channel-status.is-pilot{background:#fff4d5;color:#7d5c00}.channel-status.is-soon{background:#eef0ef;color:#65716d}.trust-section{padding:30px 0 45px;border-top:1px solid var(--line)}.trust-copy{max-width:720px}.trust-copy h2{font-size:36px;margin:10px 0}.trust-metrics{padding:20px 0 0}.trust-metrics .metric b{font-size:25px}
-.launch-steps{padding:25px 0 70px}.launch-steps-copy{text-align:center;max-width:680px;margin:0 auto 28px}.launch-steps-copy h2{font-size:38px;margin:10px 0}.launch-steps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.launch-steps-grid article>span{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--lime);font-weight:800}.launch-steps-grid h3{margin:18px 0 8px}.launch-steps-grid p{color:var(--muted);font-size:14px;line-height:1.65;margin:0}
-.billing-option{padding:28px;min-width:0}.billing-option h3{font-size:38px;margin:18px 0 4px}.billing-option>p{color:var(--muted);min-height:48px}.billing-option-featured{border:2px solid var(--green)}.billing-package-picker{position:relative;margin-top:12px}.billing-package-picker summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:#f8faf8;cursor:pointer;font-weight:750;list-style:none}.billing-package-picker summary::-webkit-details-marker{display:none}.billing-package-picker[open] summary{border-color:var(--green);border-radius:12px 12px 0 0}.billing-package-picker label{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:13px;border:1px solid var(--green);border-top:0;border-radius:0 0 12px 12px;background:#fff;cursor:pointer}.billing-package-picker input{width:18px;height:18px;accent-color:var(--green)}.billing-package-picker label span{display:flex;flex-direction:column;gap:3px}.billing-package-picker label small{color:var(--muted);font-size:11px;line-height:1.35}.billing-package-picker label b{color:var(--green);font-size:12px;white-space:nowrap}.billing-checkout-link{display:block;width:100%;margin-top:14px;text-align:center}.creative-preview{margin-top:18px;padding:24px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#f3f4f2}.creative-preview h3{font-size:24px;margin:8px 0}.creative-preview p{margin:0;color:var(--muted)}.creative-badge{padding:9px 13px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12px;font-weight:800;white-space:nowrap}
-@media(max-width:850px){
-    .hero{grid-template-columns:minmax(0,1fr);gap:42px}
-    .hero>section{min-width:0}
-    .demo-head{gap:14px;flex-wrap:wrap}
-    .demo-head>.tag{max-width:100%;white-space:normal}
-    .channel-section-copy{grid-template-columns:1fr;align-items:start}.channel-section-copy .eyebrow{grid-column:auto}.channel-card,.channel-card:nth-child(4){grid-column:span 3}
-}
-@media(max-width:600px){
-    .wrap{padding-inline:16px}
-    .nav{height:auto;min-height:68px;gap:10px}
-    .navlinks{gap:8px}
-    .navlinks .btn{padding:10px 12px;font-size:12px}
-    .hero{padding:34px 0 58px;gap:32px}
-    .hero h1{font-size:clamp(38px,13vw,46px);line-height:1.02;letter-spacing:-2.5px;margin:18px 0}
-    .hero p{font-size:16px;line-height:1.65}
-    .actions{flex-direction:column;align-items:stretch;margin-top:24px}
-    .actions .btn{width:100%}
-    .proof{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:28px}
-    .demo-card{padding:10px;border-radius:21px}
-    .demo-head{align-items:flex-start;padding:11px;flex-direction:column}
-    .person{min-width:0}
-    .person>div{min-width:0}
-    .person strong,.person small{overflow-wrap:anywhere}
-    .chatbody{padding:13px;min-height:0}
-    .demo-pane{min-height:0}.demo-tabs{padding:0 11px 11px}.demo-tab{font-size:10px}.social-demo,.copy-demo{padding:14px}.social-calendar>div{grid-template-columns:38px 78px 1fr;padding:10px}.trust-copy h2{font-size:30px}.capability-metrics .metric b{font-size:19px}
-    .bubble{max-width:94%;padding:11px 12px;font-size:13px}
-    .metrics{padding:22px 0 55px}
-    .metric{padding:20px 12px}
-    .channel-section{padding:24px 0 52px}.channel-section-copy h2{font-size:30px}.channel-grid{grid-template-columns:1fr}.channel-card,.channel-card:nth-child(4){grid-column:auto;min-height:150px}
-    .launch-steps{padding:10px 0 48px}
-    .launch-steps-copy h2{font-size:32px}
-    .launch-steps-grid{grid-template-columns:1fr}
-    #pricing{padding:48px 0!important}
-    #pricing h2{font-size:32px!important}
-    .billing-grid{grid-template-columns:1fr!important}
-    .creative-preview{align-items:flex-start;flex-direction:column}
-}
-@media(max-width:380px){
-    .brand{font-size:18px}
-    .navlinks .btn{padding:9px 10px}
-    .proof{grid-template-columns:1fr}
-}
-.hero>section:first-child>h1{font-size:clamp(22px,3.15vw,42px);white-space:nowrap}
-html[lang="ka"] body .hero h1{font-size:clamp(18px,3.15vw,42px);line-height:1.08;letter-spacing:-.4px}
-@media(max-width:600px){
-    .hero>section:first-child>h1{font-size:clamp(18px,5.35vw,22px);letter-spacing:-.75px}
-    html[lang="ka"] body .hero h1{font-size:clamp(17px,5.35vw,22px);letter-spacing:-.25px}
-}
+@font-face{font-family:'Legatus Boxo';src:url('{{ asset('fonts/bpg_boxo-boxo.ttf') }}') format('truetype');font-style:normal;font-weight:400;font-display:block}@font-face{font-family:'Legatus Archy';src:url('{{ asset('fonts/archyedt-bold-webfont.ttf') }}') format('truetype');font-style:normal;font-weight:700;font-display:block}
+html[lang="ka"] body,html[lang="ka"] body *{font-family:'Legatus Boxo','Noto Sans Georgian',sans-serif!important}html[lang="ka"] body h1,html[lang="ka"] body h1 *,html[lang="ka"] body h2,html[lang="ka"] body h2 *,html[lang="ka"] body h3,html[lang="ka"] body h3 *,html[lang="ka"] body .brand,html[lang="ka"] body .brand *{font-family:'Legatus Archy','Noto Sans Georgian',sans-serif!important}
+.landing-wrap{--landing-space:clamp(70px,9vw,118px)}.landing-nav{position:relative;z-index:5}.landing-hero{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr);align-items:center;gap:clamp(32px,6vw,86px);min-height:650px;padding:80px 0 62px}.landing-hero-copy{max-width:790px}.landing-hero h1{max-width:780px;margin:22px 0;font-size:clamp(46px,5.3vw,78px);line-height:1.02;letter-spacing:-3px}.landing-hero p{max-width:730px;color:var(--muted);font-size:17px;line-height:1.75}.landing-hero .landing-lead{color:var(--ink);font-size:clamp(20px,2vw,27px);line-height:1.48}.landing-hero-visual{position:relative;display:grid;place-items:center;aspect-ratio:1;max-width:440px;margin:auto}.assistant-core{position:relative;z-index:3;display:grid;place-items:center;width:150px;height:150px;border-radius:42px;background:var(--green);box-shadow:0 28px 70px rgba(14,51,40,.28);transform:rotate(-8deg)}.assistant-core span{color:var(--lime);font:800 68px Manrope;transform:rotate(8deg)}.assistant-orbit{position:absolute;border:1px solid rgba(28,83,65,.18);border-radius:50%}.orbit-one{inset:16%}.orbit-two{inset:2%}.assistant-pulse{position:absolute;z-index:2;width:18px;height:18px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 8px rgba(190,255,74,.16)}.pulse-one{top:17%;right:22%}.pulse-two{bottom:20%;left:13%;background:var(--green)}.pulse-three{right:3%;bottom:37%;width:12px;height:12px}
+.annual-banner{display:flex;align-items:center;justify-content:space-between;gap:28px;padding:25px 30px;border:1px solid rgba(190,255,74,.5);border-radius:20px;background:var(--green);color:white}.annual-banner h2{margin:0 0 7px;font-size:24px}.annual-banner p{margin:0;color:#d3e2dc;line-height:1.55}.annual-banner a{flex:0 0 auto;color:var(--lime);font-weight:800}.story-section{padding:var(--landing-space) 0;border-bottom:1px solid var(--line)}.section-heading{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:20px;max-width:960px;margin-bottom:42px}.section-number{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:var(--lime);font-weight:900}.section-heading h2,.annual-offer h2,.final-cta h2{margin:0;font-size:clamp(34px,4vw,54px);line-height:1.12;letter-spacing:-1.4px}.story-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(0,1.2fr);gap:clamp(34px,7vw,100px);align-items:center}.story-copy,.split-copy{color:var(--muted);font-size:17px;line-height:1.75}.story-copy p:first-child,.split-copy p:first-child{margin-top:0}.quote-stack{display:grid;gap:13px}.quote-stack span{display:block;width:max-content;max-width:100%;padding:15px 19px;border:1px solid var(--line);border-radius:16px 16px 16px 4px;background:white;font-size:18px;font-weight:800;box-shadow:0 12px 30px rgba(14,51,40,.06)}.quote-stack span:nth-child(2){margin-left:11%}.quote-stack span:nth-child(3){margin-left:22%}.section-emphasis,.statement{display:block;color:var(--green);font-size:clamp(20px,2.4vw,28px);line-height:1.5}.split-copy{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:40px}.statement{margin-top:32px}.feature-list{display:grid;gap:12px;margin:20px 0 0;padding:0;list-style:none}.feature-list li{position:relative;padding-left:28px;line-height:1.6}.feature-list li::before{content:'✓';position:absolute;left:0;top:0;color:var(--green);font-weight:900}.schedule-visual{display:grid;gap:12px;padding:25px;border:1px solid var(--line);border-radius:22px;background:#f2f6ef}.schedule-visual div{display:grid;grid-template-columns:74px 1fr 12px;align-items:center;gap:16px;padding:16px;border-radius:14px;background:white}.schedule-visual b{color:var(--green)}.schedule-visual span{font-weight:800}.schedule-visual i{width:10px;height:10px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 5px rgba(190,255,74,.2)}
+.annual-offer{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(270px,.8fr);gap:clamp(36px,7vw,100px);align-items:center;margin:var(--landing-space) 0;padding:clamp(34px,6vw,74px);border-radius:30px;background:var(--green);color:white;overflow:hidden}.annual-offer h2{margin:12px 0 22px}.annual-offer p{color:#d3e2dc;font-size:16px;line-height:1.7}.annual-highlight{padding:18px 20px;border-left:4px solid var(--lime);background:rgba(255,255,255,.07);color:white!important;font-weight:800}.annual-offer h3{margin-top:30px}.annual-list{grid-template-columns:repeat(2,minmax(0,1fr));color:#e5efeb}.annual-list li::before{color:var(--lime)}.annual-cta{margin-top:18px}.annual-card{position:relative;display:grid;place-items:center;align-content:center;min-height:360px;border:1px solid rgba(255,255,255,.2);border-radius:26px;background:linear-gradient(145deg,rgba(255,255,255,.13),rgba(255,255,255,.04));text-align:center}.annual-card span{color:var(--lime);font:800 clamp(90px,12vw,156px)/.85 Manrope}.annual-card strong{margin-top:14px;text-transform:uppercase;letter-spacing:3px}.annual-card i{width:60%;height:1px;margin:30px 0;background:rgba(255,255,255,.25)}.annual-card b{font-size:20px}.steps-section{padding:30px 0 var(--landing-space)}.centered-heading{display:block;max-width:780px;margin:0 auto 40px;text-align:center}.centered-heading h2{margin-top:12px}.steps-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.steps-grid article{padding:28px}.steps-grid article>span{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:var(--lime);font-weight:900}.steps-grid h3{margin:20px 0 10px}.steps-grid p{margin:0;color:var(--muted);line-height:1.65}.final-cta{display:flex;flex-direction:column;align-items:center;padding:clamp(54px,8vw,94px) clamp(22px,6vw,80px);border-radius:28px;background:#edf3eb;text-align:center}.final-cta h2{max-width:900px}.final-cta p{max-width:760px;margin:22px 0 0;color:var(--muted);font-size:17px;line-height:1.7}.final-cta strong{max-width:760px;margin-top:28px;color:var(--green);font-size:24px}.final-cta .btn{margin-top:30px}.final-cta small{margin-top:16px;color:var(--muted);font-weight:700}.landing-footer{display:flex;justify-content:space-between;gap:24px;margin:38px 0 40px;padding:28px;flex-wrap:wrap}.landing-footer p{margin:7px 0 0;color:var(--muted)}.landing-footer>div:last-child{display:flex;gap:18px;flex-wrap:wrap}
+@media(max-width:900px){.landing-hero{grid-template-columns:1fr;min-height:0}.landing-hero-visual{width:min(75vw,360px)}.story-grid,.annual-offer{grid-template-columns:1fr}.annual-card{min-height:270px}.annual-list{grid-template-columns:1fr}}@media(max-width:700px){.landing-wrap{padding-inline:16px}.landing-nav{height:auto;min-height:68px;gap:10px}.navlinks{gap:8px}.navlinks>a:not(.btn),.navlinks>.ui-locale{display:none}.navlinks .btn{padding:10px 12px;font-size:12px}.landing-hero{padding:44px 0 48px;gap:18px}.landing-hero h1{font-size:clamp(38px,11vw,52px);letter-spacing:-1.8px}.landing-hero-visual{width:min(64vw,270px)}.assistant-core{width:104px;height:104px;border-radius:30px}.assistant-core span{font-size:48px}.annual-banner{align-items:flex-start;flex-direction:column;padding:22px}.story-section{padding:65px 0}.section-heading{grid-template-columns:1fr;gap:14px;margin-bottom:28px}.section-heading h2,.annual-offer h2,.final-cta h2{font-size:clamp(31px,9vw,40px)}.story-grid{gap:30px}.quote-stack span:nth-child(2),.quote-stack span:nth-child(3){margin-left:0}.split-copy{grid-template-columns:1fr;gap:8px}.schedule-visual{padding:14px}.schedule-visual div{grid-template-columns:66px 1fr 10px;padding:13px}.annual-offer{padding:34px 22px;border-radius:22px}.annual-card{min-height:220px}.steps-grid{grid-template-columns:1fr}.final-cta{border-radius:22px}.landing-footer{align-items:flex-start;flex-direction:column}}
 </style>
 @endpush
-<script nonce="{{ request()->attributes->get('csp_nonce') }}">
-document.addEventListener('DOMContentLoaded', () => {
-    const demoTabs = document.querySelectorAll('[data-demo-tab]');
-    const demoPanes = document.querySelectorAll('[data-demo-pane]');
-
-    demoTabs.forEach((tab) => tab.addEventListener('click', () => {
-        demoTabs.forEach((candidate) => {
-            const selected = candidate === tab;
-            candidate.classList.toggle('is-active', selected);
-            candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
-        });
-        demoPanes.forEach((pane) => {
-            const selected = pane.dataset.demoPane === tab.dataset.demoTab;
-            pane.hidden = !selected;
-            pane.classList.toggle('is-active', selected);
-        });
-    }));
-
-    const options = document.querySelectorAll('.billing-option');
-
-    options.forEach((option) => {
-        const toggle = option.querySelector('.social-addon-toggle');
-        const packageName = option.querySelector('.billing-package-name');
-        const price = option.querySelector('h3');
-        const note = option.querySelector(':scope > p');
-        const checkout = option.querySelector('.billing-checkout-link');
-
-        if (!toggle || !packageName || !price || !note || !checkout) return;
-
-        const updatePricing = () => {
-            price.textContent = toggle.checked ? option.dataset.socialPrice : option.dataset.chatPrice;
-            note.textContent = toggle.checked ? option.dataset.socialNote : option.dataset.chatNote;
-            packageName.textContent = toggle.checked ? 'Legatus Chat + Social' : 'Legatus Chat';
-            const checkoutUrl = new URL(option.dataset.checkoutBase, window.location.origin);
-            checkoutUrl.searchParams.set('period', option.dataset.period);
-            checkoutUrl.searchParams.set('package', toggle.checked ? 'chat_social' : 'chat');
-            checkout.href = checkoutUrl.toString();
-        };
-
-        toggle.addEventListener('change', updatePricing);
-        updatePricing();
-    });
-});
-</script>
 @endsection

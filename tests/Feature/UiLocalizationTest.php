@@ -31,19 +31,18 @@ class UiLocalizationTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Language', 'ka')
             ->assertSee('<html lang="ka">', false)
-            ->assertSee('Legatus — შენი AI')
-            ->assertSee('მოურავი')
-            ->assertSee('AI სავაჭრო ასისტენტი, სოციალური მედიის მენეჯერი და ქოფირაითერი')
+            ->assertSee('შენი ბიზნესი აქტიურია — მაშინაც, როცა შენ ისვენებ.')
+            ->assertSee('ბიზნესის AI ასისტენტი')
+            ->assertSee('წლიურ პაკეტს უფასო ონლაინ მაღაზია მოჰყვება.')
+            ->assertSee('აირჩიე წლიური პაკეტი — მიიღე მაღაზია უფასოდ')
             ->assertSee('ინტერფეისის ენა')
             ->assertSee('value="en"', false)
-            ->assertSee('const updatePricing', false)
-            ->assertDontSee('updateფასები', false);
+            ->assertDontSee('მოურავი');
 
-        $response->assertSee('Legatus არის თქვენი AI სავაჭრო ასისტენტი');
-        $response->assertSee("html[lang=\"ka\"] .hero h1", false)
-            ->assertSee("fonts/archyedt-bold-webfont.ttf", false)
-            ->assertSee('font-size:clamp(18px,3.15vw,42px)', false)
-            ->assertSee('white-space:nowrap', false);
+        $response->assertSee('Legatus შენი ბიზნესის AI ასისტენტია');
+        $response->assertSee('.landing-hero h1', false)
+            ->assertSee('fonts/archyedt-bold-webfont.ttf', false)
+            ->assertSee('@media(max-width:700px)', false);
         $this->assertMatchesRegularExpression('/<div class="navlinks">.*class="ui-locale"/s', $response->getContent());
 
         $this->withServerVariables($server)->post(route('ui-locale.update'), ['locale' => 'en'])
@@ -52,9 +51,9 @@ class UiLocalizationTest extends TestCase
         $this->withServerVariables($server)->get(route('landing'))
             ->assertOk()
             ->assertSee('<html lang="en">', false)
-            ->assertSee('Legatus — your AI')
-            ->assertSee('steward')
-            ->assertDontSee('შენი AI მოურავი');
+            ->assertSee('Your business stays active — even while you rest.')
+            ->assertSee('AI assistant for your business')
+            ->assertDontSee('მოურავი');
     }
 
     public function test_georgian_locale_applies_to_the_authenticated_admin(): void
@@ -82,8 +81,8 @@ class UiLocalizationTest extends TestCase
                 ->get(route('landing'))
                 ->assertOk()
                 ->assertSee('<html lang="en">', false)
-                ->assertSee('Legatus — your AI')
-                ->assertSee('steward')
+                ->assertSee('Your business stays active — even while you rest.')
+                ->assertSee('AI assistant for your business')
                 ->assertDontSee('Interface language')
                 ->assertDontSee('გაყიდე მეტი');
         }

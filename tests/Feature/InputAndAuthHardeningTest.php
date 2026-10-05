@@ -33,7 +33,7 @@ class InputAndAuthHardeningTest extends TestCase
             ->assertSee('href="'.route('login').'"', false)
             ->assertDontSee('href="'.route('register').'"', false)
             ->assertDontSee('href="'.route('onboarding').'"', false)
-            ->assertSee('Illustrative demo · seeded catalog');
+            ->assertSee('Your business stays active — even while you rest.');
     }
 
     public function test_local_demo_auth_ui_is_available_only_when_enabled(): void

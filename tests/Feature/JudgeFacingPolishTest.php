@@ -93,8 +93,8 @@ class JudgeFacingPolishTest extends TestCase
 
         $this->get(route('landing'))
             ->assertOk()
-            ->assertSee('KA · EN')
-            ->assertDontSee('KA · EN · RU');
+            ->assertSee('AI assistant for your business')
+            ->assertDontSee('steward');
     }
 
     public function test_dashboard_and_analytics_share_the_same_qualified_lead_definition(): void

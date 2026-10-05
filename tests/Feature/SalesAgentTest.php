@@ -19,68 +19,43 @@ class SalesAgentTest extends TestCase
 
     public function test_landing_page_is_available(): void
     {
-        $this->get('/')
+        $response = $this->get('/')
             ->assertOk()
             ->assertSee('fonts/bpg_boxo-boxo.ttf', false)
             ->assertSee("html[lang=\"ka\"] body,html[lang=\"ka\"] body *{font-family:'Legatus Boxo'", false)
             ->assertSee('html[lang="ka"] body h1,html[lang="ka"] body h1 *', false)
-            ->assertSee('Legatus — your AI')
-            ->assertSee('steward')
-            ->assertSee('Legatus is your AI Shopping Assistant, Social Media Manager, and Copywriter')
-            ->assertSee('AI team for sales, content &amp; social media', false)
-            ->assertSee('data-demo-tab="shopping"', false)
-            ->assertSee('data-demo-tab="social"', false)
-            ->assertSee('data-demo-tab="copywriter"', false)
-            ->assertSee('One platform. Three AI teammates.')
-            ->assertSee('AI Shopping Assistant')
-            ->assertSee('Social Media Manager')
-            ->assertSee('AI Copywriter')
-            ->assertSee('One assistant across every customer channel.')
-            ->assertSee('WhatsApp Business')
-            ->assertSee('The same grounded assistant for customer conversations.')
-            ->assertSee('Pilot')
-            ->assertSee('LinkedIn')
-            ->assertSee('Company Page publishing is next in the social workspace.')
-            ->assertSee('Coming soon')
-            ->assertSee('Simple · Creative · Informative')
-            ->assertSee('Why you can trust Legatus')
-            ->assertSee('Grounded')
-            ->assertSee('Observable')
-            ->assertSee('Human-led')
-            ->assertSee('Launch in 3 simple steps')
-            ->assertSee('Connect your website')
-            ->assertSee('Turn on your channels')
-            ->assertSee('Delegate the routine')
-            ->assertSee('Start with chat. Add social when you need it.')
-            ->assertSee('Legatus Chat')
-            ->assertSee('Add Social media manager')
-            ->assertSee('id="social-addon-monthly"', false)
-            ->assertSee('id="social-addon-six-months"', false)
-            ->assertSee('id="social-addon-annual"', false)
-            ->assertSee('class="social-addon-toggle"', false)
-            ->assertSee('data-chat-price="$30"', false)
-            ->assertSee('data-social-price="$60"', false)
-            ->assertSee('data-chat-price="$162"', false)
-            ->assertSee('data-social-price="$324"', false)
-            ->assertSee('data-chat-price="$288"', false)
-            ->assertSee('data-social-price="$576"', false)
-            ->assertSee('Start free trial')
-            ->assertSee('package=chat', false)
-            ->assertSee("checkoutUrl.searchParams.set('package', toggle.checked ? 'chat_social' : 'chat')", false)
-            ->assertSee('Automated publishing + AI Copywriter')
-            ->assertSee('Available now')
-            ->assertDontSee('Legatus Creative')
-            ->assertSee('script nonce=', false)
-            ->assertDontSee('$99')
-            ->assertSee('@media(max-width:600px)', false)
+            ->assertSee('Your business stays active — even while you rest.')
+            ->assertSee('The annual plan includes a free online store.')
+            ->assertSee('Every message is a potential order. Be there on time.')
+            ->assertSee('In about an hour — an assistant that knows your business.')
+            ->assertSee('Set the schedule once. Legatus handles daily posting.')
+            ->assertSee('A post-ready image that preserves the real look of your product.')
+            ->assertSee('One annual plan. Your online store and AI assistant together.')
+            ->assertSee('Three steps to hand off the daily work.')
+            ->assertSee('Your time should not be spent on every answer and every post.')
+            ->assertSee('period=yearly&amp;package=chat_social', false)
+            ->assertSee('href="#annual-offer"', false)
+            ->assertSee('@media(max-width:700px)', false)
+            ->assertDontSee('steward')
+            ->assertDontSee('One platform. Three AI teammates.')
+            ->assertDontSee('id="social-addon-monthly"', false)
             ->assertDontSee('პროდუქტი');
+
+        $html = $response->getContent();
+        $sections = ['id="product"', '<aside class="annual-banner"', 'id="communication"', 'id="business-knowledge"', 'id="social-media"', 'id="product-images"', 'id="annual-offer"', 'id="how-it-works"', 'id="start"'];
+        $positions = array_map(fn (string $marker): int|false => strpos($html, $marker), $sections);
+
+        foreach ($positions as $position) {
+            $this->assertIsInt($position);
+        }
+        $this->assertSame($positions, collect($positions)->sort()->values()->all());
     }
 
     public function test_landing_css_and_local_fonts_are_ready_before_body_rendering(): void
     {
         $html = $this->get('/')->assertOk()->getContent();
         $bodyPosition = strpos($html, '<body>');
-        $landingCssPosition = strpos($html, '.hero>section:first-child>h1');
+        $landingCssPosition = strpos($html, '.landing-hero h1');
         $boxoPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/bpg_boxo-boxo.ttf').'"');
         $archyPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/archyedt-bold-webfont.ttf').'"');
 
