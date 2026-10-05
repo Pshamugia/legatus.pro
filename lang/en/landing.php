@@ -3,7 +3,7 @@
 return [
     'meta' => ['title' => 'Legatus — AI Assistant for Your Business', 'description' => 'Legatus answers customers, prepares content, and manages publishing on Facebook and Instagram.'],
     'nav' => ['communication' => 'Communication', 'social' => 'Social media', 'annual' => 'Annual offer', 'how' => 'How it works', 'pricing' => 'Pricing', 'setup' => 'Business setup', 'sign_in' => 'Sign in'],
-    'cta' => ['start' => 'Start using Legatus', 'see_how' => 'See how it works', 'annual' => 'Choose the annual plan — get a free store', 'final' => 'Bring Legatus into your business'],
+    'cta' => ['start' => 'Start using Legatus', 'start_short' => 'Start now', 'see_how' => 'See how it works', 'annual' => 'Choose the annual plan — get a free store', 'final' => 'Bring Legatus into your business'],
     'hero' => [
         'label' => 'AI assistant for your business', 'title' => 'Your business stays active — even while you rest.',
         'line_one' => 'It answers customers. Writes posts. Prepares images. Publishes on Facebook and Instagram.',
