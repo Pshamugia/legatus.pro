@@ -65,6 +65,23 @@ class ThreadsConnectionTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_business_setup_shows_the_threads_connection_between_meta_and_linkedin(): void
+    {
+        [$user] = $this->tenant('threads-onboarding');
+
+        $this->actingAs($user)->get(route('onboarding'))
+            ->assertOk()
+            ->assertSeeInOrder([
+                'Facebook and Instagram',
+                'Threads publishing',
+                'LinkedIn company page',
+                'WhatsApp Business',
+            ])
+            ->assertSee('data-channel="threads" data-status="disconnected"', false)
+            ->assertSee('Connect Threads')
+            ->assertSee(route('channels.threads.connect'), false);
+    }
+
     private function tenant(string $slug): array
     {
         $user = User::factory()->create();

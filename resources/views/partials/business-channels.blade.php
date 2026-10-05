@@ -151,9 +151,30 @@
         <p class="meta-security">Authorization happens on Meta’s official page. Legatus never sees your Facebook or Instagram password.</p>
     </article>
 
+    <article class="channel-block" id="threads-channel">
+        <div class="channel-block__head">
+            <div><span class="channel-number">4</span><div><h3>Threads publishing</h3><p>Publish scheduled product posts to your business Threads profile.</p></div></div>
+            <span @class(['channel-status', 'is-connected' => $threadsChannel['connected'], 'is-off' => ! $threadsChannel['connected']])>{{ $threadsChannel['connected'] ? '✓ Connected' : ($threadsChannel['error'] ? 'Needs attention' : 'Not connected') }}</span>
+        </div>
+        <div class="meta-channel-grid" style="grid-template-columns:1fr">
+            <div class="meta-channel-card" data-channel="threads" data-status="{{ $threadsChannel['connected'] ? 'connected' : ($threadsChannel['error'] ? 'error' : 'disconnected') }}">
+                <div class="meta-channel-card__title"><span style="background:#111;color:#fff">@</span><div><b>Threads</b><small>{{ $threadsChannel['connected'] ? 'Ready for scheduled publishing' : ($threadsChannel['error'] ? 'Connection needs attention' : 'Public Threads profile connection required') }}</small></div></div>
+                <p>Uses Threads' official authorization and publishes the same verified product with channel-specific text.</p>
+                @if($threadsChannel['connected'])
+                    <div class="connected-account"><small>Connected profile</small><b>@@{{ ltrim($threadsChannel['account_name'] ?: 'Threads profile', '@') }}</b></div>
+                    <div class="channel-actions"><a class="btn ghost" href="{{ route('social-media.index') }}">Open scheduler</a>@if($canManageChannels && $threadsChannel['disconnect_url'])<form action="{{ $threadsChannel['disconnect_url'] }}" method="POST">@csrf @method('DELETE')<button class="link-button" type="submit">Disconnect</button></form>@endif</div>
+                @else
+                    @if($threadsChannel['error'])<p class="channel-error">{{ $threadsChannel['error'] }}</p>@endif
+                    @if($canManageChannels && $threadsChannel['connect_url'])<a class="btn" href="{{ $threadsChannel['connect_url'] }}">{{ $threadsChannel['error'] ? 'Reconnect Threads' : 'Connect Threads' }}</a>@endif
+                @endif
+            </div>
+        </div>
+        <p class="meta-security">Authorization happens on Threads' official page. Legatus never sees your Threads or Instagram password.</p>
+    </article>
+
     <article class="channel-block" id="linkedin-channel">
         <div class="channel-block__head">
-            <div><span class="channel-number">4</span><div><h3>LinkedIn company page</h3><p>Publish scheduled product posts to a LinkedIn Page managed by your business.</p></div></div>
+            <div><span class="channel-number">5</span><div><h3>LinkedIn company page</h3><p>Publish scheduled product posts to a LinkedIn Page managed by your business.</p></div></div>
             <span @class(['channel-status', 'is-connected' => $linkedinChannel['connected']])>{{ $linkedinChannel['connected'] ? '✓ Connected' : 'Not connected' }}</span>
         </div>
         <div class="meta-channel-grid" style="grid-template-columns:1fr">
@@ -174,7 +195,7 @@
 
     <article class="channel-block" id="whatsapp-channel">
         <div class="channel-block__head">
-            <div><span class="channel-number">5</span><div><h3>WhatsApp Business</h3><p>Let customers message your business number and receive grounded Legatus replies.</p></div></div>
+            <div><span class="channel-number">6</span><div><h3>WhatsApp Business</h3><p>Let customers message your business number and receive grounded Legatus replies.</p></div></div>
             <span @class(['channel-status', 'is-connected' => $whatsappChannel['connected']])>{{ $whatsappChannel['connected'] ? '✓ Connected' : 'Not connected' }}</span>
         </div>
         <div class="meta-channel-grid" style="grid-template-columns:1fr">
