@@ -47,6 +47,8 @@ class UiLocalizationTest extends TestCase
         $response->assertSee('Legatus შენი ბიზნესის AI ასისტენტია');
         $response->assertSee('.landing-hero h1', false)
             ->assertSee('fonts/archyedt-bold-webfont.ttf', false)
+            ->assertSee('fonts/Dachi the Lynx.otf', false)
+            ->assertSee("font-family:'Legatus Dachi'", false)
             ->assertSee('@media(max-width:700px)', false);
         $this->assertMatchesRegularExpression('/class="landing-nav-primary".*class="landing-nav-actions".*class="ui-locale"/s', $response->getContent());
 

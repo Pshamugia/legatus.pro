@@ -23,7 +23,10 @@ class SalesAgentTest extends TestCase
             ->assertOk()
             ->assertSee('fonts/bpg_boxo-boxo.ttf', false)
             ->assertSee("html[lang=\"ka\"] body,html[lang=\"ka\"] body *{font-family:'Legatus Boxo'", false)
-            ->assertSee('html[lang="ka"] body h1,html[lang="ka"] body h1 *', false)
+            ->assertSee("font-family:'Legatus Dachi'", false)
+            ->assertSee('fonts/Dachi the Lynx.otf', false)
+            ->assertSee('html[lang="ka"] body h1,html[lang="ka"] body h1 *,html[lang="ka"] body h2', false)
+            ->assertSee('html[lang="ka"] body h3,html[lang="ka"] body h3 *', false)
             ->assertSee('Your business stays active — even while you rest.')
             ->assertSee('The annual plan includes a free online store.')
             ->assertSee('Every message is a potential order. Be there on time.')
@@ -73,19 +76,24 @@ class SalesAgentTest extends TestCase
 
     public function test_landing_css_and_local_fonts_are_ready_before_body_rendering(): void
     {
+        $this->assertFileExists(public_path('fonts/Dachi the Lynx.otf'));
+
         $html = $this->get('/')->assertOk()->getContent();
         $bodyPosition = strpos($html, '<body>');
         $landingCssPosition = strpos($html, '.landing-hero h1');
         $boxoPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/bpg_boxo-boxo.ttf').'"');
         $archyPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/archyedt-bold-webfont.ttf').'"');
+        $dachiPreloadPosition = strpos($html, 'rel="preload" href="'.asset('fonts/Dachi the Lynx.otf').'"');
 
         $this->assertIsInt($bodyPosition);
         $this->assertIsInt($landingCssPosition);
         $this->assertIsInt($boxoPreloadPosition);
         $this->assertIsInt($archyPreloadPosition);
+        $this->assertIsInt($dachiPreloadPosition);
         $this->assertLessThan($bodyPosition, $landingCssPosition);
         $this->assertLessThan($bodyPosition, $boxoPreloadPosition);
         $this->assertLessThan($bodyPosition, $archyPreloadPosition);
+        $this->assertLessThan($bodyPosition, $dachiPreloadPosition);
         $this->assertStringContainsString('font-display:block', $html);
         $this->assertStringContainsString('display=block', $html);
         $this->assertStringNotContainsString('display=swap', $html);
