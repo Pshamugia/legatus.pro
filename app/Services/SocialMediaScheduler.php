@@ -112,15 +112,25 @@ class SocialMediaScheduler
     public function updateTiming(SocialMediaSchedule $schedule, array $data): SocialMediaSchedule
     {
         $agent = $schedule->agent()->firstOrFail();
+        $providers = array_values($data['providers'] ?? $schedule->providers);
+        $existingSnapshots = (array) $schedule->template_snapshots;
+        $missingSnapshotProviders = collect($providers)
+            ->reject(fn (string $provider): bool => array_key_exists($provider, $existingSnapshots))
+            ->values()
+            ->all();
+        $templateSnapshots = array_replace(
+            $existingSnapshots,
+            $this->templates->snapshots($agent, $missingSnapshotProviders),
+        );
         $this->publicationHistory->backfill($agent);
         $allProducts = $this->eligibleProductVariants(
             $agent,
             $schedule->categories ?? [],
             $schedule->languages ?? [],
-            $schedule->providers,
+            $providers,
         )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
         $previouslyPosted = $agent->socialMediaPosts()
-            ->whereIn('provider', $schedule->providers)
+            ->whereIn('provider', $providers)
             ->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->where(function ($query) use ($schedule): void {
                 $query->where('social_media_schedule_id', '!=', $schedule->id)
@@ -129,19 +139,19 @@ class SocialMediaScheduler
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
-        $this->startNewCycleWhenExhausted($agent, $allProducts, $schedule->providers);
+        $this->startNewCycleWhenExhausted($agent, $allProducts, $providers);
         $products = $allProducts
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
                 $agent,
                 $variant['product'],
-                $schedule->providers,
+                $providers,
             ))
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $schedule->timezone)->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $schedule->timezone)->startOfDay();
 
-        return DB::transaction(function () use ($schedule, $agent, $data, $products, $starts, $ends): SocialMediaSchedule {
+        return DB::transaction(function () use ($schedule, $agent, $data, $providers, $templateSnapshots, $products, $starts, $ends): SocialMediaSchedule {
             $lockedSchedule = SocialMediaSchedule::query()->whereKey($schedule->id)->lockForUpdate()->firstOrFail();
             if ($lockedSchedule->copy_mode === 'ai') {
                 Agent::query()->whereKey($agent->id)->lockForUpdate()->firstOrFail();
@@ -157,7 +167,9 @@ class SocialMediaScheduler
             $lockedSchedule->update([
                 'starts_on' => $data['starts_on'],
                 'ends_on' => $data['ends_on'],
+                'providers' => $providers,
                 'posting_times' => $data['posting_times'] ?? null,
+                'template_snapshots' => $templateSnapshots,
             ]);
 
             $productIndex = 0;
@@ -181,14 +193,14 @@ class SocialMediaScheduler
                     if ($copyMode === 'ai') {
                         $remainingAiProducts--;
                     }
-                    foreach ($lockedSchedule->providers as $provider) {
+                    foreach ($providers as $provider) {
                         $lockedSchedule->posts()->create($variant
                             ? $this->postAttributes(
                                 $agent,
                                 $variant['product'],
                                 $provider,
                                 $slot,
-                                $lockedSchedule->template_snapshots[$provider],
+                                $templateSnapshots[$provider],
                                 $variant['language'],
                                 $copyMode,
                             )

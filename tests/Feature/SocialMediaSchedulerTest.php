@@ -2373,6 +2373,10 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [$user, $agent] = $this->tenant('editable-schedule');
         $this->connections($agent);
+        $agent->channelConnections()->create([
+            'provider' => 'threads', 'status' => 'active', 'external_account_id' => 'threads-1',
+            'external_account_name' => 'legatus_ai', 'access_token' => 'threads-token', 'connected_at' => now(),
+        ]);
         foreach (range(1, 8) as $number) {
             $agent->products()->create($this->product("Editable Product {$number}", 'General', 10));
         }
@@ -2388,6 +2392,10 @@ class SocialMediaSchedulerTest extends TestCase
         ])->assertSessionHasNoErrors();
 
         $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('data-schedule-providers="'.$schedule->id.'"', false)
+            ->assertSee('Threads profile');
         $published = $schedule->posts()->orderBy('scheduled_for')->firstOrFail();
         $originalPublishedFor = $published->scheduled_for->copy();
         $published->update(['status' => 'published', 'published_at' => now()]);
@@ -2396,6 +2404,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->actingAs($user)->put(route('social-media.update', $schedule), [
             'starts_on' => $newDate,
             'ends_on' => $newDate,
+            'providers' => ['facebook', 'threads'],
             'timing_mode' => 'custom',
             'posting_times' => ['11:15', '19:45'],
         ])->assertSessionHasNoErrors();
@@ -2403,7 +2412,9 @@ class SocialMediaSchedulerTest extends TestCase
         $schedule->refresh();
         $this->assertSame($newDate, $schedule->starts_on->toDateString());
         $this->assertSame($newDate, $schedule->ends_on->toDateString());
+        $this->assertSame(['facebook', 'threads'], $schedule->providers);
         $this->assertSame(['11:15', '19:45'], $schedule->posting_times);
+        $this->assertArrayHasKey('threads', $schedule->template_snapshots);
         $this->assertSame('published', $published->fresh()->status);
         $this->assertTrue($published->fresh()->scheduled_for->equalTo($originalPublishedFor));
         $this->assertSame(4, $schedule->posts()->where('status', 'scheduled')->count());
@@ -2419,6 +2430,32 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertTrue($schedule->posts()->where('status', 'scheduled')->get()->groupBy('scheduled_for')->every(
             fn ($slotPosts): bool => $slotPosts->pluck('product_id')->unique()->count() === 1,
         ));
+        $this->assertTrue($schedule->posts()->where('status', 'scheduled')->get()->groupBy('scheduled_for')->every(
+            fn ($slotPosts): bool => $slotPosts->pluck('provider')->sort()->values()->all() === ['facebook', 'threads'],
+        ));
+        $this->assertSame(0, $schedule->posts()->where('status', 'scheduled')->where('provider', 'instagram')->count());
+    }
+
+    public function test_schedule_edit_rejects_a_new_channel_that_is_not_connected(): void
+    {
+        [$user, $agent] = $this->tenant('disconnected-edit-provider');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Provider Validation Product', 'General', 4));
+        $date = now('Asia/Tbilisi')->addDay()->toDateString();
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => $date, 'ends_on' => $date, 'posts_per_day' => 1,
+            'providers' => ['facebook'], 'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+
+        $this->actingAs($user)->put(route('social-media.update', $schedule), [
+            'starts_on' => $date, 'ends_on' => $date, 'providers' => ['facebook', 'threads'],
+            'timing_mode' => 'auto',
+        ])->assertSessionHasErrors('providers');
+
+        $this->assertSame(['facebook'], $schedule->fresh()->providers);
+        $this->assertSame(['facebook'], $schedule->posts()->pluck('provider')->unique()->values()->all());
     }
 
     public function test_schedule_edit_rejects_duplicate_or_incomplete_posting_times(): void

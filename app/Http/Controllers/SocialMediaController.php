@@ -188,13 +188,17 @@ class SocialMediaController extends Controller
         $tenant->authorize(['owner', 'admin']);
         abort_unless($schedule->agent_id === $tenant->agent()->id, 404);
         $request->merge(['timing_mode' => $request->input('timing_mode', 'auto')]);
+        $request->merge(['providers' => $request->input('providers', $schedule->providers)]);
         $data = $request->validate([
             'starts_on' => ['required', 'date', 'after_or_equal:today'],
             'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
+            'providers' => ['required', 'array', 'min:1'],
+            'providers.*' => [Rule::in(SocialMediaTemplateService::PROVIDERS)],
             'timing_mode' => ['required', Rule::in(['auto', 'custom'])],
             'posting_times' => ['nullable', 'array'],
             'posting_times.*' => ['required', 'date_format:H:i'],
         ]);
+        $data['providers'] = collect($data['providers'])->unique()->values()->all();
         $data['posts_per_day'] = $schedule->posts_per_day;
         $data['timezone'] = $schedule->timezone;
 
@@ -217,9 +221,17 @@ class SocialMediaController extends Controller
             $data['posting_times'] = null;
         }
 
+        $active = $tenant->agent()->channelConnections()
+            ->whereIn('provider', $data['providers'])
+            ->where('status', 'active')
+            ->pluck('provider');
+        if (collect($data['providers'])->diff($active)->isNotEmpty()) {
+            throw ValidationException::withMessages(['providers' => 'Connect every selected social account before updating the schedule.']);
+        }
+
         $scheduler->updateTiming($schedule, $data);
 
-        return back()->with('social_success', 'Schedule dates and posting times updated. Unpublished posts were rescheduled.');
+        return back()->with('social_success', 'Schedule channels, dates and posting times updated. Unpublished posts were rescheduled.');
     }
 
     public function pause(SocialMediaSchedule $schedule, TenantContext $tenant)
