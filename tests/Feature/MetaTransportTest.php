@@ -90,6 +90,8 @@ class MetaTransportTest extends TestCase
         $storedPayload = DB::table('channel_messages')->value('payload');
         $this->assertStringNotContainsString('რა ღირს', $storedPayload);
         $this->assertSame('რა ღირს?', ChannelMessage::query()->firstOrFail()->payload['text']);
+        Queue::assertPushed(ProcessMetaInboundMessage::class, fn ($job): bool => $job->delay instanceof \DateTimeInterface
+            && $job->delay->getTimestamp() >= now()->addSeconds(2)->getTimestamp());
         Queue::assertPushed(ProcessMetaInboundMessage::class, 1);
         $this->assertNotNull($connection->fresh()->last_webhook_at);
     }
@@ -612,7 +614,7 @@ class MetaTransportTest extends TestCase
     }
 
     #[DataProvider('splitImageProcessingOrders')]
-    public function test_text_sent_with_a_customer_image_cannot_produce_a_false_catalog_denial(bool $textFirst): void
+    public function test_text_sent_with_a_customer_image_cannot_produce_a_false_catalog_denial(bool $imageEventFirst, bool $textJobFirst): void
     {
         Queue::fake();
         $connection = $this->connection('facebook', 'page-split-image');
@@ -622,30 +624,29 @@ class MetaTransportTest extends TestCase
         $identity['image_is_product'] = true;
         $identity['uncertainty_reason'] = 'The title is blurred.';
         $this->fakeCustomerImageVision($imageUrl, [$identity]);
+        $imageEvent = [
+            'sender' => ['id' => 'split-image-customer'],
+            'recipient' => ['id' => 'page-split-image'],
+            'timestamp' => $imageEventFirst ? 1784512800000 : 1784512801000,
+            'message' => [
+                'mid' => 'split-image-mid',
+                'attachments' => [['type' => 'image', 'payload' => ['url' => $imageUrl]]],
+            ],
+        ];
+        $textEvent = [
+            'sender' => ['id' => 'split-image-customer'],
+            'recipient' => ['id' => 'page-split-image'],
+            'timestamp' => $imageEventFirst ? 1784512801000 : 1784512800000,
+            'message' => [
+                'mid' => 'split-image-question-mid',
+                'text' => 'Do you have this product?',
+            ],
+        ];
         $payload = [
             'object' => 'page',
             'entry' => [[
                 'id' => 'page-split-image',
-                'messaging' => [
-                    [
-                        'sender' => ['id' => 'split-image-customer'],
-                        'recipient' => ['id' => 'page-split-image'],
-                        'timestamp' => 1784512800000,
-                        'message' => [
-                            'mid' => 'split-image-mid',
-                            'attachments' => [['type' => 'image', 'payload' => ['url' => $imageUrl]]],
-                        ],
-                    ],
-                    [
-                        'sender' => ['id' => 'split-image-customer'],
-                        'recipient' => ['id' => 'page-split-image'],
-                        'timestamp' => 1784512801000,
-                        'message' => [
-                            'mid' => 'split-image-question-mid',
-                            'text' => 'Do you have this product?',
-                        ],
-                    ],
-                ],
+                'messaging' => $imageEventFirst ? [$imageEvent, $textEvent] : [$textEvent, $imageEvent],
             ]],
         ];
         $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
@@ -654,7 +655,11 @@ class MetaTransportTest extends TestCase
         $records = $connection->channelMessages()->where('direction', 'inbound')->orderBy('id')->get();
         $this->assertCount(2, $records);
 
-        $processingOrder = $textFirst ? $records->reverse() : $records;
+        $textRecord = $records->firstWhere('message_type', 'text');
+        $imageRecord = $records->firstWhere('message_type', 'attachment');
+        $processingOrder = $textJobFirst
+            ? collect([$textRecord, $imageRecord])
+            : collect([$imageRecord, $textRecord]);
         foreach ($processingOrder as $record) {
             (new ProcessMetaInboundMessage($record->id))->handle(
                 app(ConversationEngine::class),
@@ -679,8 +684,10 @@ class MetaTransportTest extends TestCase
     public static function splitImageProcessingOrders(): array
     {
         return [
-            'text job runs first' => [true],
-            'image job runs first' => [false],
+            'image event first and text job first' => [true, true],
+            'image event first and image job first' => [true, false],
+            'text event first and text job first' => [false, true],
+            'text event first and image job first' => [false, false],
         ];
     }
 

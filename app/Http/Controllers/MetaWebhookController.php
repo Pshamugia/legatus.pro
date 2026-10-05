@@ -119,7 +119,13 @@ class MetaWebhookController extends Controller
         }
 
         if ($message->status === 'received') {
-            ProcessMetaInboundMessage::dispatch($message->id)->onQueue('channels')->afterCommit();
+            // Meta can split one customer action into adjacent text and image
+            // webhooks. Give both records a short coalescing window before a
+            // worker decides that the text is an independent request.
+            ProcessMetaInboundMessage::dispatch($message->id)
+                ->onQueue('channels')
+                ->delay(now()->addSeconds(3))
+                ->afterCommit();
         }
     }
 

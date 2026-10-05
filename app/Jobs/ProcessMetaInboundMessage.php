@@ -26,6 +26,8 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    private const META_SPLIT_MEDIA_WINDOW_SECONDS = 15;
+
     public int $tries = 3;
 
     public int $timeout = 75;
@@ -119,9 +121,9 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 if ($imageRecord) {
                     $customerRecord = $record;
                     $imageQuestion = $text;
-                    if ($imageRecord->is($record) && ($followingText = $this->customerTextAfterImage($record))) {
-                        $customerRecord = $followingText;
-                        $imageQuestion = trim((string) data_get($followingText->payload, 'text', $text));
+                    if ($imageRecord->is($record) && ($pairedText = $this->customerTextForImage($record))) {
+                        $customerRecord = $pairedText;
+                        $imageQuestion = trim((string) data_get($pairedText->payload, 'text', $text));
                     }
                     $this->replyFromCustomerImage(
                         $customerRecord,
@@ -211,17 +213,53 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             ->latest('id')
             ->first();
         if (! $previous || $previous->message_type !== 'attachment') {
+            $previous = null;
+        }
+        if ($previous
+            && (! $record->received_at
+                || ! $previous->received_at
+                || ! $previous->received_at->lt($record->received_at->copy()->subMinutes(10)))
+            && $hasUsableImage($previous)) {
+            return $previous;
+        }
+
+        $following = ChannelMessage::query()
+            ->where('channel_connection_id', $record->channel_connection_id)
+            ->where('direction', 'inbound')
+            ->where('provider_sender_id', $record->provider_sender_id)
+            ->where('id', '>', $record->id)
+            ->oldest('id')
+            ->first();
+        if (! $following || $following->message_type !== 'attachment') {
             return null;
         }
-        if ($record->received_at && $previous->received_at && $previous->received_at->lt($record->received_at->copy()->subMinutes(10))) {
+        if ($record->received_at && $following->received_at
+            && $following->received_at->gt($record->received_at->copy()->addSeconds(self::META_SPLIT_MEDIA_WINDOW_SECONDS))) {
             return null;
         }
 
-        return $hasUsableImage($previous) ? $previous : null;
+        return $hasUsableImage($following) ? $following : null;
     }
 
-    private function customerTextAfterImage(ChannelMessage $imageRecord): ?ChannelMessage
+    private function customerTextForImage(ChannelMessage $imageRecord): ?ChannelMessage
     {
+        $previous = ChannelMessage::query()
+            ->where('channel_connection_id', $imageRecord->channel_connection_id)
+            ->where('direction', 'inbound')
+            ->where('provider_sender_id', $imageRecord->provider_sender_id)
+            ->where('id', '<', $imageRecord->id)
+            ->latest('id')
+            ->first();
+        if ($previous
+            && $previous->message_type !== 'attachment'
+            && ! in_array($previous->status, ['processed', 'ignored'], true)
+            && (! $previous->received_at
+                || ! $imageRecord->received_at
+                || ! $previous->received_at->lt($imageRecord->received_at->copy()->subSeconds(self::META_SPLIT_MEDIA_WINDOW_SECONDS)))
+            && filled(data_get($previous->payload, 'text'))) {
+            return $previous;
+        }
+
         $next = ChannelMessage::query()
             ->where('channel_connection_id', $imageRecord->channel_connection_id)
             ->where('direction', 'inbound')
