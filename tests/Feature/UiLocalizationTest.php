@@ -37,13 +37,16 @@ class UiLocalizationTest extends TestCase
             ->assertSee('აირჩიე წლიური პაკეტი — მიიღე მაღაზია უფასოდ')
             ->assertSee('ინტერფეისის ენა')
             ->assertSee('value="en"', false)
+            ->assertSee('$30')
+            ->assertSee('$576')
+            ->assertSee('href="#pricing"', false)
             ->assertDontSee('მოურავი');
 
         $response->assertSee('Legatus შენი ბიზნესის AI ასისტენტია');
         $response->assertSee('.landing-hero h1', false)
             ->assertSee('fonts/archyedt-bold-webfont.ttf', false)
             ->assertSee('@media(max-width:700px)', false);
-        $this->assertMatchesRegularExpression('/<div class="navlinks">.*class="ui-locale"/s', $response->getContent());
+        $this->assertMatchesRegularExpression('/class="landing-nav-primary".*class="landing-nav-actions".*class="ui-locale"/s', $response->getContent());
 
         $this->withServerVariables($server)->post(route('ui-locale.update'), ['locale' => 'en'])
             ->assertRedirect();
@@ -53,6 +56,8 @@ class UiLocalizationTest extends TestCase
             ->assertSee('<html lang="en">', false)
             ->assertSee('Your business stays active — even while you rest.')
             ->assertSee('AI assistant for your business')
+            ->assertSee('Pricing')
+            ->assertSee('$324')
             ->assertDontSee('მოურავი');
     }
 

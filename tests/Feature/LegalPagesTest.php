@@ -37,6 +37,12 @@ class LegalPagesTest extends TestCase
         $this->get(route('landing'))
             ->assertOk()
             ->assertSee('The annual plan includes a free online store.')
+            ->assertSee('$30')
+            ->assertSee('$60')
+            ->assertSee('$162')
+            ->assertSee('$324')
+            ->assertSee('$288')
+            ->assertSee('$576')
             ->assertSee('period=yearly&amp;package=chat_social', false)
             ->assertSee(route('refund-policy'));
     }

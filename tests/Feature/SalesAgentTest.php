@@ -31,10 +31,21 @@ class SalesAgentTest extends TestCase
             ->assertSee('Set the schedule once. Legatus handles daily posting.')
             ->assertSee('A post-ready image that preserves the real look of your product.')
             ->assertSee('One annual plan. Your online store and AI assistant together.')
+            ->assertSee('$30')
+            ->assertSee('$60')
+            ->assertSee('$162')
+            ->assertSee('$324')
+            ->assertSee('$288')
+            ->assertSee('$576')
+            ->assertSee('period=monthly&amp;package=chat', false)
+            ->assertSee('period=monthly&amp;package=chat_social', false)
             ->assertSee('Three steps to hand off the daily work.')
             ->assertSee('Your time should not be spent on every answer and every post.')
             ->assertSee('period=yearly&amp;package=chat_social', false)
             ->assertSee('href="#annual-offer"', false)
+            ->assertSee('href="#pricing"', false)
+            ->assertSee('class="landing-nav-primary"', false)
+            ->assertSee('class="landing-nav-actions"', false)
             ->assertSee('@media(max-width:700px)', false)
             ->assertDontSee('steward')
             ->assertDontSee('One platform. Three AI teammates.')
@@ -42,7 +53,7 @@ class SalesAgentTest extends TestCase
             ->assertDontSee('პროდუქტი');
 
         $html = $response->getContent();
-        $sections = ['id="product"', '<aside class="annual-banner"', 'id="communication"', 'id="business-knowledge"', 'id="social-media"', 'id="product-images"', 'id="annual-offer"', 'id="how-it-works"', 'id="start"'];
+        $sections = ['id="product"', '<aside class="annual-banner"', 'id="communication"', 'id="business-knowledge"', 'id="social-media"', 'id="product-images"', 'id="annual-offer"', 'id="pricing"', 'id="how-it-works"', 'id="start"'];
         $positions = array_map(fn (string $marker): int|false => strpos($html, $marker), $sections);
 
         foreach ($positions as $position) {

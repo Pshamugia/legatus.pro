@@ -2,7 +2,7 @@
 
 return [
     'meta' => ['title' => 'Legatus — AI Assistant for Your Business', 'description' => 'Legatus answers customers, prepares content, and manages publishing on Facebook and Instagram.'],
-    'nav' => ['communication' => 'Communication', 'social' => 'Social media', 'annual' => 'Annual offer', 'how' => 'How it works', 'setup' => 'Business setup', 'sign_in' => 'Sign in'],
+    'nav' => ['communication' => 'Communication', 'social' => 'Social media', 'annual' => 'Annual offer', 'how' => 'How it works', 'pricing' => 'Pricing', 'setup' => 'Business setup', 'sign_in' => 'Sign in'],
     'cta' => ['start' => 'Start using Legatus', 'see_how' => 'See how it works', 'annual' => 'Choose the annual plan — get a free store', 'final' => 'Bring Legatus into your business'],
     'hero' => [
         'label' => 'AI assistant for your business', 'title' => 'Your business stays active — even while you rest.',
@@ -36,6 +36,15 @@ return [
         'highlight' => 'When you purchase a one-year Legatus plan, we will create an online store with every Legatus feature enabled at no extra cost.', 'includes' => 'The annual plan includes:',
         'item_store' => 'An online store built for your business.', 'item_chat' => 'The Legatus AI assistant in your website chat.', 'item_messages' => 'Customer communication on Facebook and Instagram.', 'item_content' => 'Preparation of post copy and visuals.', 'item_publishing' => 'Automatic publishing according to your schedule.',
         'closing' => 'Share information about your business and products. We will take care of building the store and enabling Legatus.', 'card_months' => 'months',
+    ],
+    'pricing' => [
+        'label' => 'Plans and pricing', 'title' => 'Choose the right plan for your business.',
+        'description' => 'Every billing period is available for customer chat only or together with social media management.',
+        'monthly' => 'Monthly', 'six_months' => '6 months', 'yearly' => 'Annual', 'best_value' => 'Best value',
+        'chat_description' => 'Customer chats and the AI assistant', 'social_description' => 'Chats, content, and automated publishing',
+        'choose_chat' => 'Choose Chat', 'choose_social' => 'Choose Chat + Social',
+        'save_18' => 'Save $18', 'save_36' => 'Save $36', 'save_72' => 'Save $72', 'save_144' => 'Save $144',
+        'store_included' => 'The annual Chat + Social plan includes a free online store.',
     ],
     'steps' => [
         'label' => 'How to begin', 'title' => 'Three steps to hand off the daily work.',
