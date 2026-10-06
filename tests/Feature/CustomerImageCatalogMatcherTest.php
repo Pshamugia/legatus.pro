@@ -54,6 +54,52 @@ class CustomerImageCatalogMatcherTest extends TestCase
         $this->assertStringStartsWith('data:image/', (string) data_get($openAiRequests[0]->data(), 'input.0.content.1.image_url'));
         $this->assertTrue(collect(data_get($openAiRequests[1]->data(), 'input.0.content', []))
             ->contains(fn ($item): bool => data_get($item, 'image_url') === $product->image));
+        $this->assertStringContainsString(
+            'this is not an OCR-only task',
+            (string) data_get($openAiRequests[0]->data(), 'input.0.content.0.text'),
+        );
+    }
+
+    public function test_product_without_readable_text_can_find_a_visually_similar_tenant_catalog_item(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'Oak lounge chair',
+            'sku' => 'CHAIR-17',
+            'category' => 'Furniture',
+            'description' => 'Curved oak lounge chair with a woven seat and low arms.',
+            'search_text' => 'Furniture oak lounge chair curved wooden frame woven seat low arms',
+            'price' => 320,
+            'stock' => 4,
+            'image' => 'https://catalog.example/oak-lounge-chair.jpg',
+            'metadata' => ['material' => 'oak and woven fiber', 'product_url' => 'https://shop.example/chairs/17'],
+            'is_active' => true,
+        ]);
+        $identity = $this->identity(null);
+        $identity['identifying_text_readable'] = false;
+        $identity['requested_match'] = 'similar';
+        $identity['product_type'] = 'chair';
+        $identity['category'] = 'Furniture';
+        $identity['visual_attributes'] = ['curved wooden frame', 'woven seat', 'low arms'];
+        $identity['catalog_search_queries'] = ['Furniture', 'oak lounge chair'];
+        $this->fakeVision([
+            $identity,
+            ['same_product' => false, 'similar_product' => true, 'matched_product_id' => $product->id, 'reason' => 'Same product type, curved frame, woven seat, and proportions.'],
+        ]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent,
+            $conversation,
+            'https://scontent.xx.fbcdn.net/customer-photo.jpg',
+            'Do you have a chair similar to this one?',
+        );
+
+        $this->assertSame('available', $result['status']);
+        $this->assertSame('similar', $result['match_type']);
+        $this->assertSame([$product->id], $result['product_ids']);
+        $this->assertStringContainsString('visually similar item in our catalog', $result['text']);
+        $this->assertContains('search_products', collect($result['tools_used'])->pluck('name')->all());
+        $this->assertSame('check_stock', collect($result['tools_used'])->last()['name']);
     }
 
     public function test_similar_catalog_item_is_not_presented_when_visual_verifier_cannot_confirm_identity(): void
@@ -173,7 +219,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
         return [$agent, $conversation];
     }
 
-    private function identity(string $name, ?string $creator = null): array
+    private function identity(?string $name, ?string $creator = null): array
     {
         return [
             'image_is_product' => true,
@@ -185,6 +231,11 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'isbn' => null,
             'barcode' => null,
             'variant' => null,
+            'requested_match' => 'exact',
+            'product_type' => null,
+            'category' => null,
+            'visual_attributes' => [],
+            'catalog_search_queries' => [],
             'visible_text' => array_values(array_filter([$name, $creator])),
             'uncertainty_reason' => '',
         ];
