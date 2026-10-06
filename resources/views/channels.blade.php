@@ -379,7 +379,7 @@
                         </div>
                         <p>Publish the same verified product, prepared image and channel-specific text to your Threads profile.</p>
                         @if($threadsChannel['connected'])
-                            <div class="connected-account"><span>Connected profile</span><b>@@{{ ltrim($threadsChannel['account_name'] ?: 'Threads profile', '@') }}</b><small>Ready for scheduled image posts</small></div>
+                            <div class="connected-account"><span>Connected profile</span><b>{{ '@'.ltrim($threadsChannel['account_name'] ?: 'Threads profile', '@') }}</b><small>Ready for scheduled image posts</small></div>
                             <div class="channel-actions">
                                 <a class="btn ghost" href="{{ route('social-media.index') }}">Open scheduler</a>
                                 <form action="{{ $threadsChannel['disconnect_url'] }}" method="POST">@csrf @method('DELETE')<button class="link-button" type="submit">Disconnect</button></form>

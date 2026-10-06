@@ -46,6 +46,7 @@
 
         @if(session('status'))<div class="panel setup-notice success">✓ {{ session('status') }}</div>@endif
         @if(session('success'))<div class="panel setup-notice success">✓ {{ session('success') }}</div>@endif
+        @if(session('error'))<div class="panel setup-notice error">{{ session('error') }}</div>@endif
         @if($errors->any())<div class="panel setup-notice error">{{ $errors->first() }}</div>@endif
 
         <form class="form-card setup-form" id="onboarding-form" method="post" enctype="multipart/form-data" action="{{ route('onboarding.store') }}">

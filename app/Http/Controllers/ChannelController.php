@@ -17,6 +17,10 @@ class ChannelController extends Controller
 
     public function index(TenantContext $tenant)
     {
+        // OAuth callbacks redirect through this legacy endpoint. Preserve their
+        // one-time status message for the onboarding page that follows.
+        session()->reflash();
+
         return redirect(route('onboarding').'#channels');
     }
 

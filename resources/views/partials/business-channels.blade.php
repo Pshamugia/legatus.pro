@@ -161,7 +161,7 @@
                 <div class="meta-channel-card__title"><span style="background:#111;color:#fff">@</span><div><b>Threads</b><small>{{ $threadsChannel['connected'] ? 'Ready for scheduled publishing' : ($threadsChannel['error'] ? 'Connection needs attention' : 'Public Threads profile connection required') }}</small></div></div>
                 <p>Uses Threads' official authorization and publishes the same verified product with channel-specific text.</p>
                 @if($threadsChannel['connected'])
-                    <div class="connected-account"><small>Connected profile</small><b>@@{{ ltrim($threadsChannel['account_name'] ?: 'Threads profile', '@') }}</b></div>
+                    <div class="connected-account"><small>Connected profile</small><b>{{ '@'.ltrim($threadsChannel['account_name'] ?: 'Threads profile', '@') }}</b></div>
                     <div class="channel-actions"><a class="btn ghost" href="{{ route('social-media.index') }}">Open scheduler</a>@if($canManageChannels && $threadsChannel['disconnect_url'])<form action="{{ $threadsChannel['disconnect_url'] }}" method="POST">@csrf @method('DELETE')<button class="link-button" type="submit">Disconnect</button></form>@endif</div>
                 @else
                     @if($threadsChannel['error'])<p class="channel-error">{{ $threadsChannel['error'] }}</p>@endif

@@ -6,6 +6,7 @@ use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class ThreadsConnectionTest extends TestCase
@@ -46,7 +47,7 @@ class ThreadsConnectionTest extends TestCase
 
         $this->get(route('channels.threads.callback', ['state' => $query['state'], 'code' => 'oauth-code']))
             ->assertRedirect(route('channels.index'))
-            ->assertSessionHas('success');
+            ->assertSessionHas('channel_success');
 
         $connection = $agent->channelConnections()->where('provider', 'threads')->firstOrFail();
         $this->assertSame('9911', $connection->external_account_id);
@@ -54,6 +55,11 @@ class ThreadsConnectionTest extends TestCase
         $this->assertSame('long-secret-token', $connection->access_token);
         $this->assertStringNotContainsString('long-secret-token', (string) $connection->getRawOriginal('access_token'));
         $this->assertTrue($connection->token_expires_at->isFuture());
+
+        $this->get(route('onboarding'))
+            ->assertOk()
+            ->assertSee('@legatus_profile')
+            ->assertDontSee("@@{{ ltrim(\$threadsChannel['account_name']", false);
     }
 
     public function test_threads_callback_rejects_a_forged_oauth_state(): void
@@ -63,6 +69,44 @@ class ThreadsConnectionTest extends TestCase
         $this->actingAs($user)->get(route('channels.threads.callback', ['state' => 'forged', 'code' => 'code']))
             ->assertForbidden();
         Http::assertNothingSent();
+    }
+
+    public function test_threads_permission_failure_explains_the_tester_requirement_without_logging_the_token(): void
+    {
+        [$user] = $this->tenant('threads-permission');
+        Log::spy();
+        Http::fake([
+            'https://graph.threads.test/oauth/access_token' => Http::response([
+                'access_token' => 'short-secret-token', 'user_id' => '9912',
+            ]),
+            'https://graph.threads.test/access_token*' => Http::response([
+                'error' => [
+                    'message' => 'This action requires the threads_basic permission. You must submit for app review, or your user must be a tester.',
+                    'type' => 'OAuthException',
+                    'code' => 10,
+                ],
+            ], 400),
+        ]);
+
+        $connect = $this->actingAs($user)->get(route('channels.threads.connect'));
+        parse_str((string) parse_url($connect->headers->get('Location'), PHP_URL_QUERY), $query);
+
+        $this->get(route('channels.threads.callback', ['state' => $query['state'], 'code' => 'oauth-code']))
+            ->assertRedirect(route('channels.index'))
+            ->assertSessionHas('channel_error', fn (string $message): bool => str_contains($message, 'Threads Tester'));
+
+        $this->get(route('channels.index'))->assertRedirect(route('onboarding').'#channels');
+        $this->get(route('onboarding'))
+            ->assertOk()
+            ->assertSee('add this exact profile as a Threads Tester');
+
+        Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context): bool {
+            return $message === 'Threads connection failed.'
+                && $context['stage'] === 'exchange_long_lived_token'
+                && $context['http_status'] === 400
+                && $context['meta_error_code'] === 10
+                && ! str_contains(json_encode($context), 'short-secret-token');
+        });
     }
 
     public function test_business_setup_shows_the_threads_connection_between_meta_and_linkedin(): void
