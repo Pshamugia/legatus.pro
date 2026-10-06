@@ -1,17 +1,26 @@
-@php($connectedMetaCount = $metaChannels->where('connected', true)->count())
+@php
+    $connectedMetaCount = $metaChannels->where('connected', true)->count();
+    $conversationChannelCount = $connectedMetaCount + ($whatsappChannel['connected'] ? 1 : 0) + (($widgetInstallation['installed'] ?? false) ? 1 : 0);
+    $publishingChannelCount = $connectedMetaCount + ($threadsChannel['connected'] ? 1 : 0) + ($linkedinChannel['connected'] ? 1 : 0);
+@endphp
 <section class="business-channels" id="channels" aria-labelledby="channels-title">
     <div class="business-channels__heading">
         <span class="eyebrow">Customer channels</span>
-        <h2 id="channels-title">Where Legatus talks to customers</h2>
-        <p>Manage each channel here. Products, policies and business information stay in Knowledge.</p>
+        <h2 id="channels-title">Choose where Legatus works</h2>
+        <p>See the whole setup at a glance. Expand a row only when you want to connect, review or change that channel.</p>
+    </div>
+
+    <div class="channel-purpose-grid" aria-label="Channel capabilities">
+        <div><span class="purpose-icon">↔</span><p><b>Customer conversations</b><small>Website chat, Messenger, Instagram Direct and WhatsApp all use the same knowledge and Inbox.</small></p><strong>{{ $conversationChannelCount }}/4 ready</strong></div>
+        <div><span class="purpose-icon">↗</span><p><b>Scheduled publishing</b><small>Facebook, Instagram, Threads and LinkedIn can publish product-led content from one scheduler.</small></p><strong>{{ $publishingChannelCount }}/4 ready</strong></div>
     </div>
 
     @if(session('channel_success') || session('channel_error'))
         <div @class(['channel-message', 'channel-message--error' => session('channel_error')])>{{ session('channel_success') ?? session('channel_error') }}</div>
     @endif
 
-    <article class="channel-block" id="commerce-connection">
-        <div class="channel-block__head">
+    <details class="channel-block" id="commerce-connection" @if(! in_array($catalogConnectionState, ['live', 'available'], true)) open @endif>
+        <summary class="channel-block__head">
             <div><span class="channel-number">1</span><div><h3>Product catalog connection</h3><p>See whether Legatus has products to sell and, when needed, connect a live store.</p></div></div>
             <span data-catalog-status="{{ $catalogConnectionState }}" @class(['channel-status', 'is-connected' => in_array($catalogConnectionState, ['live', 'available'], true), 'is-off' => $catalogConnectionState === 'missing'])>
                 @if($catalogConnectionState === 'live') ✓ Live API connected
@@ -20,7 +29,7 @@
                 @else Catalog not added
                 @endif
             </span>
-        </div>
+        </summary>
         @if($catalogConnectionState === 'available')
             <div class="catalog-summary"><div><b>Your catalog is already available</b><small>Legatus is using your {{ number_format($productCount) }} active {{ \Illuminate\Support\Str::plural('product', $productCount) }}. Live API is optional for real-time stock and prices.</small></div><a class="btn ghost" href="{{ route('knowledge.index') }}">Manage in Knowledge</a></div>
         @elseif(!$commerceConnection)
@@ -50,13 +59,13 @@
         @else
             <p class="commerce-readonly">Only a business owner or admin can change the connection.</p>
         @endif
-    </article>
+    </details>
 
-    <article class="channel-block" id="website-channel">
-        <div class="channel-block__head">
+    <details class="channel-block" id="website-channel" @if(! ($widgetInstallation['installed'] ?? false)) open @endif>
+        <summary class="channel-block__head">
             <div><span class="channel-number">2</span><div><h3>Website chat</h3><p>Legatus detects your platform, shows the right steps, and checks the installation.</p></div></div>
             <span @class(['channel-status', 'is-connected' => ($widgetInstallation['installed'] ?? false), 'is-off' => ! ($widgetInstallation['installed'] ?? false)])>{{ ($widgetInstallation['installed'] ?? false) ? '✓ Installed' : 'Not verified' }}</span>
-        </div>
+        </summary>
         <div class="widget-control">
             <div><b>{{ $widgetEnabled ? 'Visible to website visitors' : 'Hidden from website visitors' }}</b><small>The installed script can stay in place when chat is off.</small></div>
             @if($canManageChannels)
@@ -117,13 +126,13 @@
         </div>
         @if($widgetDomains->isNotEmpty())<p class="allowed-domains">Allowed on: {{ $widgetDomains->join(', ') }}</p>@endif
         <p class="widget-security-note">🔒 The widget frame is allowed only on the saved business domain. Detecting a platform does not install or activate anything on that website.</p>
-    </article>
+    </details>
 
-    <article class="channel-block" id="meta-channels">
-        <div class="channel-block__head">
+    <details class="channel-block" id="meta-channels" @if($connectedMetaCount < 2) open @endif>
+        <summary class="channel-block__head">
             <div><span class="channel-number">3</span><div><h3>Facebook and Instagram</h3><p>Connect through Meta once, then manage both accounts below.</p></div></div>
             <span @class(['channel-status', 'is-connected' => $connectedMetaCount === 2])>{{ $connectedMetaCount }}/2 connected</span>
-        </div>
+        </summary>
         @if($metaConnectUrl)
             <div class="meta-account-control">
                 <div>
@@ -149,13 +158,13 @@
             @endforeach
         </div>
         <p class="meta-security">Authorization happens on Meta’s official page. Legatus never sees your Facebook or Instagram password.</p>
-    </article>
+    </details>
 
-    <article class="channel-block" id="threads-channel">
-        <div class="channel-block__head">
+    <details class="channel-block" id="threads-channel" @if($threadsChannel['error']) open @endif>
+        <summary class="channel-block__head">
             <div><span class="channel-number">4</span><div><h3>Threads publishing</h3><p>Publish scheduled product posts to your business Threads profile.</p></div></div>
             <span @class(['channel-status', 'is-connected' => $threadsChannel['connected'], 'is-off' => ! $threadsChannel['connected']])>{{ $threadsChannel['connected'] ? '✓ Connected' : ($threadsChannel['error'] ? 'Needs attention' : 'Not connected') }}</span>
-        </div>
+        </summary>
         <div class="meta-channel-grid" style="grid-template-columns:1fr">
             <div class="meta-channel-card" data-channel="threads" data-status="{{ $threadsChannel['connected'] ? 'connected' : ($threadsChannel['error'] ? 'error' : 'disconnected') }}">
                 <div class="meta-channel-card__title"><span style="background:#111;color:#fff">@</span><div><b>Threads</b><small>{{ $threadsChannel['connected'] ? 'Ready for scheduled publishing' : ($threadsChannel['error'] ? 'Connection needs attention' : 'Public Threads profile connection required') }}</small></div></div>
@@ -170,13 +179,13 @@
             </div>
         </div>
         <p class="meta-security">Authorization happens on Threads' official page. Legatus never sees your Threads or Instagram password.</p>
-    </article>
+    </details>
 
-    <article class="channel-block" id="linkedin-channel">
-        <div class="channel-block__head">
+    <details class="channel-block" id="linkedin-channel" @if($linkedinChannel['error']) open @endif>
+        <summary class="channel-block__head">
             <div><span class="channel-number">5</span><div><h3>LinkedIn company page</h3><p>Publish scheduled product posts to a LinkedIn Page managed by your business.</p></div></div>
             <span @class(['channel-status', 'is-connected' => $linkedinChannel['connected']])>{{ $linkedinChannel['connected'] ? '✓ Connected' : 'Not connected' }}</span>
-        </div>
+        </summary>
         <div class="meta-channel-grid" style="grid-template-columns:1fr">
             <div class="meta-channel-card" data-channel="linkedin" data-status="{{ $linkedinChannel['connected'] ? 'connected' : 'disconnected' }}">
                 <div class="meta-channel-card__title"><span style="background:#e8f2fb;color:#0a66c2">in</span><div><b>LinkedIn</b><small>{{ $linkedinChannel['connected'] ? 'Ready for scheduled publishing' : 'Company Page connection required' }}</small></div></div>
@@ -191,13 +200,13 @@
             </div>
         </div>
         <p class="meta-security">Authorization happens on LinkedIn's official page. Legatus never sees your LinkedIn password.</p>
-    </article>
+    </details>
 
-    <article class="channel-block" id="whatsapp-channel">
-        <div class="channel-block__head">
+    <details class="channel-block" id="whatsapp-channel" @if($whatsappChannel['error']) open @endif>
+        <summary class="channel-block__head">
             <div><span class="channel-number">6</span><div><h3>WhatsApp Business</h3><p>Let customers message your business number and receive grounded Legatus replies.</p></div></div>
             <span @class(['channel-status', 'is-connected' => $whatsappChannel['connected']])>{{ $whatsappChannel['connected'] ? '✓ Connected' : 'Not connected' }}</span>
-        </div>
+        </summary>
         <div class="meta-channel-grid" style="grid-template-columns:1fr">
             <div class="meta-channel-card" data-channel="whatsapp" data-status="{{ $whatsappChannel['connected'] ? 'connected' : 'disconnected' }}">
                 <div class="meta-channel-card__title"><span style="background:#e8f8ed;color:#128c4a">W</span><div><b>WhatsApp</b><small>{{ $whatsappChannel['connected'] ? 'Ready for customer conversations' : 'Business number connection required' }}</small></div></div>
@@ -212,14 +221,18 @@
             </div>
         </div>
         <p class="meta-security">WhatsApp Status/Stories publishing is not shown because Meta does not provide a supported public Cloud API for it.</p>
-    </article>
+    </details>
 </section>
 
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">
 .business-channels{margin-top:34px}.business-channels__heading{margin-bottom:18px}.business-channels__heading h2{font-size:30px;margin:7px 0}.business-channels__heading p,.channel-block__head p{color:var(--muted);margin:0}.channel-block{margin-top:16px;padding:24px;border:1px solid var(--line);border-radius:20px;background:#fff}.channel-block__head,.channel-block__head>div,.widget-control,.channel-snippet,.meta-channel-card__title,.channel-actions,.meta-account-control{display:flex;align-items:center}.channel-block__head{justify-content:space-between;gap:18px}.channel-block__head>div{align-items:flex-start;gap:12px}.channel-block__head h3{margin:1px 0 5px;font-size:20px}.channel-block__head p{font-size:12px}.channel-number{display:grid;place-items:center;flex:0 0 32px;height:32px;border-radius:10px;background:var(--green);color:var(--lime);font-weight:800}.channel-status{padding:7px 10px;border:1px solid var(--line);border-radius:99px;color:var(--muted);font-size:11px;font-weight:800}.channel-status.is-connected{background:#eaf7df;color:#356342}.channel-status.is-off{background:#fff3ed;color:#904d39}.widget-control{justify-content:space-between;gap:18px;margin-top:20px;padding:16px;border-radius:14px;background:#f4f8f4}.widget-control b,.widget-control small{display:block}.widget-control small,.allowed-domains{color:var(--muted);font-size:10px;margin-top:4px}.channel-snippet{gap:12px;margin-top:14px;padding:12px;border-radius:13px;background:#122c24}.channel-snippet code{min-width:0;flex:1;overflow:auto;color:#d9ff72;white-space:nowrap}.copy-feedback{min-height:16px;margin:6px 0 0;color:#377157;font-size:11px}.meta-connect{display:block;margin-top:18px;padding:13px;border-radius:12px;background:var(--green);color:#fff;text-align:center;font-weight:800}.meta-account-control{justify-content:space-between;gap:18px;margin-top:18px;padding:14px 16px;border:1px solid #d8e7dc;border-radius:13px;background:#f4faf5}.meta-account-control b,.meta-account-control small{display:block}.meta-account-control small{margin-top:4px;color:var(--muted);font-size:10px;line-height:1.5}.meta-account-control .btn{flex:0 0 auto}.meta-channel-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}.meta-channel-card{display:flex;flex-direction:column;padding:18px;border:1px solid var(--line);border-radius:16px}.meta-channel-card__title{gap:10px}.meta-channel-card__title>span{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:#eef3ef;font-weight:900}.meta-channel-card__title b,.meta-channel-card__title small{display:block}.meta-channel-card__title small{color:var(--muted);font-size:10px;margin-top:3px}.meta-channel-card>p{color:var(--muted);font-size:11px;line-height:1.55}.meta-channel-card>.btn{margin-top:auto;text-align:center}.connected-account{margin-top:auto;padding:12px;border-radius:11px;background:#f4f8f4}.connected-account small,.connected-account b{display:block}.connected-account small{color:var(--muted)}.channel-actions{justify-content:space-between;gap:10px;margin-top:10px}.link-button{border:0;background:transparent;color:#914c38;cursor:pointer}.channel-error{padding:10px;border-radius:10px;background:#fff1eb;color:#904b38!important}.meta-security{margin:14px 0 0;color:var(--muted);font-size:11px}.channel-message{margin:12px 0;padding:12px 14px;border-radius:12px;background:#eaf7df;color:#356342}.channel-message--error{background:#fff1eb;color:#904b38}@media(max-width:720px){.channel-block__head,.widget-control,.channel-snippet,.meta-account-control{align-items:stretch;flex-direction:column}.meta-channel-grid{grid-template-columns:1fr}.channel-snippet .btn,.meta-account-control .btn{width:100%}}
 .catalog-summary{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:18px;padding:16px;border-radius:14px;background:#f4f8f4}.catalog-summary b,.catalog-summary small,.commerce-status span,.commerce-status b,.commerce-status small{display:block}.catalog-summary small,.commerce-status span,.commerce-status small,.developer-connector>p{margin-top:4px;color:var(--muted);font-size:10px}.commerce-status{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.commerce-status>div{padding:13px;border-radius:13px;background:#f4f8f4}.commerce-actions{margin-top:14px}.developer-connector,.commerce-disconnect{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)}.developer-connector summary,.commerce-disconnect summary{cursor:pointer;font-weight:700}.commerce-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;padding:16px;border-radius:14px;background:#f7f9f7}.commerce-form label{margin:0}.commerce-form input{margin-top:6px}.commerce-form .btn{grid-column:1/-1}.commerce-readonly{margin-top:16px;padding:12px;border-radius:11px;background:#f4f6f4;color:var(--muted);font-size:11px}@media(max-width:720px){.catalog-summary{align-items:stretch;flex-direction:column}.commerce-status,.commerce-form{grid-template-columns:1fr}.commerce-form .btn{grid-column:1}}
 .widget-installer{margin-top:16px;padding:18px;border:1px solid #dce7df;border-radius:16px;background:#fbfdf9}.widget-installer__head,.platform-picker,.installer-actions{display:flex;align-items:center;gap:12px}.widget-installer__head{justify-content:space-between}.widget-installer__head b,.widget-installer__head small{display:block}.widget-installer__head small{margin-top:4px;color:var(--muted);font-size:10px}.platform-picker{margin-top:16px;padding:12px;border-radius:12px;background:#f1f6f1}.platform-picker label{font-size:11px;font-weight:800}.platform-picker select{min-width:240px;flex:1;margin:0;padding:10px 11px;border:1px solid var(--line);border-radius:10px;background:#fff}.platform-guide{margin-top:14px;padding:17px;border-radius:14px;background:#fff;border:1px solid #e7ece8}.platform-guide h4{margin:5px 0 4px;font-size:17px}.platform-guide>p{margin:0;color:var(--muted);font-size:11px}.platform-guide ol{list-style:none;padding:0;margin:15px 0}.platform-guide li{display:flex;align-items:flex-start;gap:9px;margin-top:8px;color:#40534b;font-size:12px;line-height:1.5}.platform-guide li span{display:grid;place-items:center;flex:0 0 23px;height:23px;border-radius:50%;background:#e9f5dd;color:#3e6b36;font-size:10px;font-weight:800}.installer-actions{justify-content:flex-end;flex-wrap:wrap;margin-top:11px}.installer-actions form{margin:0}.widget-security-note{margin:12px 0 0;color:#587064;font-size:10px;line-height:1.5}@media(max-width:720px){.widget-installer__head,.platform-picker,.installer-actions{align-items:stretch;flex-direction:column}.platform-picker select,.platform-picker .btn,.installer-actions .btn,.installer-actions form{width:100%}.installer-actions form .btn{width:100%}}
+.business-channels{margin-top:46px}.business-channels__heading{display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center;margin-bottom:16px}.business-channels__heading .eyebrow{grid-row:1/3;align-self:start;margin-top:4px;padding:7px 10px;border-radius:99px;background:#eaf3e8;color:#356342}.business-channels__heading h2{margin:0;font-size:28px}.business-channels__heading p{font-size:12px}.channel-purpose-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0 20px}.channel-purpose-grid>div{display:grid;grid-template-columns:42px 1fr auto;gap:12px;align-items:center;padding:17px 18px;border:1px solid var(--line);border-radius:17px;background:#fff;box-shadow:0 10px 26px rgba(25,55,43,.04)}.purpose-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#eaf3e8;color:#2e684d;font-size:19px;font-weight:900}.channel-purpose-grid p,.channel-purpose-grid b,.channel-purpose-grid small{display:block;margin:0}.channel-purpose-grid small{margin-top:4px;color:var(--muted);font-size:10px;line-height:1.45}.channel-purpose-grid strong{padding:6px 9px;border-radius:99px;background:#f0f6ed;color:#386249;font-size:10px;white-space:nowrap}.channel-block{scroll-margin-top:20px;margin-top:10px;padding:0;overflow:hidden;box-shadow:0 8px 24px rgba(31,58,48,.035)}.channel-block__head{position:relative;padding:19px 22px;cursor:pointer;list-style:none}.channel-block__head::-webkit-details-marker{display:none}.channel-block__head:focus-visible{outline:3px solid rgba(91,135,110,.25);outline-offset:-3px}.channel-block__head::after{content:'›';flex:0 0 auto;margin-left:2px;color:#668075;font-size:24px;line-height:1;transform:rotate(90deg);transition:transform .18s ease}.channel-block[open]>.channel-block__head{border-bottom:1px solid var(--line);background:#fbfcfa}.channel-block[open]>.channel-block__head::after{transform:rotate(-90deg)}.channel-block>.channel-block__head~*{margin-left:22px;margin-right:22px}.channel-block>.channel-block__head+*{margin-top:18px}.channel-block>:last-child:not(summary){margin-bottom:20px}.channel-block__head .channel-status{margin-left:auto}.channel-block:not([open]) .channel-block__head p{max-width:680px}.channel-block[open]{box-shadow:0 16px 38px rgba(25,55,43,.07)}@media(max-width:760px){.business-channels__heading{display:block}.business-channels__heading .eyebrow{display:inline-block;margin:0 0 8px}.channel-purpose-grid{grid-template-columns:1fr}.channel-purpose-grid>div{grid-template-columns:38px 1fr}.channel-purpose-grid strong{grid-column:2;justify-self:start}.channel-block__head{align-items:flex-start;flex-direction:row;padding:17px 15px}.channel-block__head>div{min-width:0}.channel-block__head .channel-status{display:none}.channel-block__head::after{margin-left:auto}.channel-block>.channel-block__head~*{margin-left:15px;margin-right:15px}}
 </style>
+<script nonce="{{ request()->attributes->get('csp_nonce') }}">
+(()=>{const openHashTarget=()=>{if(!window.location.hash)return;const target=document.querySelector(window.location.hash);if(target instanceof HTMLDetailsElement)target.open=true};openHashTarget();window.addEventListener('hashchange',openHashTarget)})();
+</script>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 (()=>{const snippet=document.querySelector('#widget-snippet');const feedback=document.querySelector('#copy-feedback');if(!snippet||!feedback)return;const developerWebsite=@json($widgetWebsite ?: 'the business website', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);let resetTimer;const writeClipboard=async(text)=>{if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return}catch(error){}}const field=document.createElement('textarea');field.value=text;field.setAttribute('readonly','');field.style.position='fixed';field.style.opacity='0';document.body.appendChild(field);field.select();const copied=document.execCommand('copy');field.remove();if(!copied)throw new Error('Copy command was rejected')};const resetButton=(target,label)=>{window.clearTimeout(resetTimer);resetTimer=window.setTimeout(()=>{target.textContent=label},2400)};const copy=async(text,success,target)=>{const defaultLabel=target.dataset.defaultLabel||target.textContent.trim();try{await writeClipboard(text);target.textContent='Copied ✓';feedback.textContent=success}catch(error){target.textContent='Copy failed';feedback.textContent='Copying was blocked by the browser. Select the script and copy it manually.'}resetButton(target,defaultLabel)};const button=document.querySelector('#copy-snippet');if(button)button.addEventListener('click',()=>copy(snippet.textContent.trim(),'Universal script copied. Add it site-wide before </body>.',button));const developer=document.querySelector('#copy-developer-instructions');if(developer)developer.addEventListener('click',()=>copy(`Please install the Legatus website chat on every page of ${developerWebsite}. Add this script immediately before the closing </body> tag:\n\n${snippet.textContent.trim()}\n\nAfter publishing, let the business owner run “Check installation” in Legatus.`, 'Developer instructions copied. You can paste them into an email or message.',developer))})();
 </script>

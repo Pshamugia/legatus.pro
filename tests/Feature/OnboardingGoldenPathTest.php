@@ -56,7 +56,7 @@ class OnboardingGoldenPathTest extends TestCase
 
         $this->actingAs($user)->get('/onboarding')
             ->assertOk()
-            ->assertSee('Update your business setup.')
+            ->assertSee('Set up how Legatus works for Golden Store.')
             ->assertSee('value="Golden Store"', false)
             ->assertSee('value="ანა"', false)
             ->assertSee('value="https://example.com/store"', false)

@@ -210,6 +210,12 @@ class WidgetChannelTest extends TestCase
 
         $this->get('/onboarding')
             ->assertOk()
+            ->assertSee('Business setup overview', false)
+            ->assertSee('Recommended next step')
+            ->assertSee('Customer conversations')
+            ->assertSee('Scheduled publishing')
+            ->assertSee('<details class="channel-block" id="website-channel"', false)
+            ->assertSee('<summary class="channel-block__head">', false)
             ->assertSeeInOrder(['Customer channels', 'Website chat', 'Facebook and Instagram'])
             ->assertSee('Facebook Messenger')
             ->assertSee('Instagram Direct')
