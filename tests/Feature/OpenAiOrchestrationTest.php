@@ -2212,6 +2212,20 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('catalog contains ISBN values', $instructions->invoke(app(OpenAiSalesOrchestrator::class), $agent));
     }
 
+    public function test_customer_facing_instructions_use_the_connected_business_first_person_voice(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $instructions = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'instructions');
+
+        $prompt = $instructions->invoke(app(OpenAiSalesOrchestrator::class), $agent);
+
+        $this->assertStringContainsString('embedded representative of the connected business', $prompt);
+        $this->assertStringContainsString('natural first-person business voice', $prompt);
+        $this->assertStringContainsString('you can order from us', $prompt);
+        $this->assertStringContainsString('Never describe the represented business as', $prompt);
+    }
+
     public function test_guardrail_allows_directing_a_customer_to_verified_website_checkout(): void
     {
         $this->seed();
