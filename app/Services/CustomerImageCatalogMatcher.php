@@ -63,7 +63,14 @@ class CustomerImageCatalogMatcher
             ->whereIn('products.id', $candidates->pluck('id')->map(fn ($id): int => (int) $id)->all())
             ->get()
             ->keyBy('id');
-        $exactIdentifierId = $this->exactIdentifierMatch($identity, $products);
+        $exactIdentifierId = $this->exactIdentifierMatch($identity, $products)
+            ?? $this->exactTextIdentityMatch($agent, $identity);
+        if ($exactIdentifierId !== null && ! $products->has($exactIdentifierId)) {
+            $exactProduct = $agent->customerProducts()->whereKey($exactIdentifierId)->first();
+            if ($exactProduct) {
+                $products->put($exactProduct->id, $exactProduct);
+            }
+        }
         $match = $exactIdentifierId !== null
             ? ['id' => $exactIdentifierId, 'type' => 'exact']
             : $this->verifyVisualIdentity($image, $identity, $products, $model, $usage);
@@ -205,6 +212,55 @@ class CustomerImageCatalogMatcher
         });
 
         return $matches->count() === 1 ? (int) $matches->first()->id : null;
+    }
+
+    private function exactTextIdentityMatch(Agent $agent, array $identity): ?int
+    {
+        if (($identity['identifying_text_readable'] ?? false) !== true
+            || blank($identity['exact_name'] ?? null)) {
+            return null;
+        }
+
+        $name = $this->normalizedTextIdentity((string) $identity['exact_name']);
+        if ($name === '') {
+            return null;
+        }
+
+        $matches = $agent->customerProducts()
+            ->where('is_active', true)
+            ->get(['products.id', 'products.name', 'products.metadata'])
+            ->filter(function (Product $product) use ($identity, $name): bool {
+                if ($this->normalizedTextIdentity((string) $product->name) !== $name) {
+                    return false;
+                }
+
+                return $this->visibleIdentityFieldAgrees($product, $identity, 'creator', ['creator', 'author'])
+                    && $this->visibleIdentityFieldAgrees($product, $identity, 'brand', ['brand', 'manufacturer'])
+                    && $this->visibleIdentityFieldAgrees($product, $identity, 'model', ['model'])
+                    && $this->visibleIdentityFieldAgrees($product, $identity, 'variant', ['variant', 'edition', 'size']);
+            });
+
+        return $matches->count() === 1 ? (int) $matches->first()->id : null;
+    }
+
+    private function visibleIdentityFieldAgrees(Product $product, array $identity, string $identityKey, array $metadataKeys): bool
+    {
+        $visible = $this->normalizedTextIdentity((string) ($identity[$identityKey] ?? ''));
+        if ($visible === '') {
+            return true;
+        }
+
+        $catalogValues = collect($metadataKeys)
+            ->map(fn (string $key): string => $this->normalizedTextIdentity((string) data_get($product->metadata, $key)))
+            ->filter()
+            ->unique();
+
+        return $catalogValues->isEmpty() || $catalogValues->contains($visible);
+    }
+
+    private function normalizedTextIdentity(string $value): string
+    {
+        return preg_replace('/\s+/u', ' ', Str::lower(trim($value))) ?? '';
     }
 
     /** @param Collection<int, Product> $products @param array<string, int> $usage */

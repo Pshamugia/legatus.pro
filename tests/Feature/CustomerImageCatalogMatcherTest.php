@@ -29,6 +29,18 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'metadata' => ['author' => 'გალაკტიონ ტაბიძე', 'product_url' => 'https://shop.example/books/2052'],
             'is_active' => true,
         ]);
+        $agent->products()->create([
+            'name' => 'არტისტული ყვავილები',
+            'sku' => 'ART-2052-OTHER',
+            'category' => 'პოეზია',
+            'description' => 'იმავე კრებულის სხვა გამოცემა.',
+            'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე პოეზია სხვა გამოცემა',
+            'price' => 18,
+            'stock' => 2,
+            'image' => 'https://catalog.example/artistuli-yvavilebi-other.jpg',
+            'metadata' => ['author' => 'გალაკტიონ ტაბიძე', 'product_url' => 'https://shop.example/books/2052-other'],
+            'is_active' => true,
+        ]);
         $this->fakeVision([
             $this->identity('არტისტული ყვავილები', 'გალაკტიონ ტაბიძე'),
             ['same_product' => true, 'matched_product_id' => $product->id, 'reason' => 'Visible title, author, and cover agree.'],
@@ -58,6 +70,36 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'this is not an OCR-only task',
             (string) data_get($openAiRequests[0]->data(), 'input.0.content.0.text'),
         );
+    }
+
+    public function test_unique_visible_title_and_creator_confirm_catalog_identity_without_a_second_visual_call(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'The Snake Skin',
+            'sku' => 'BOOK-1615',
+            'category' => 'Books',
+            'search_text' => 'The Snake Skin Grigol Robakidze Books',
+            'price' => 10,
+            'stock' => 0,
+            'image' => 'https://catalog.example/snake-skin.jpg',
+            'metadata' => ['author' => 'Grigol Robakidze', 'product_url' => 'https://shop.example/books/1615'],
+            'is_active' => true,
+        ]);
+        $this->fakeVision([$this->identity('The Snake Skin', 'Grigol Robakidze')]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent,
+            $conversation,
+            'https://scontent.xx.fbcdn.net/customer-photo.jpg',
+            'Do you have this book?',
+        );
+
+        $this->assertSame('unavailable', $result['status']);
+        $this->assertSame('exact', $result['match_type']);
+        $this->assertSame([$product->id], $result['product_ids']);
+        $this->assertSame(1, $result['usage']['requests']);
+        $this->assertStringContainsString('verified the exact product in our catalog', $result['text']);
     }
 
     public function test_product_without_readable_text_can_find_a_visually_similar_tenant_catalog_item(): void
@@ -110,6 +152,13 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე', 'price' => 14, 'stock' => 5,
             'image' => 'https://catalog.example/different-edition.jpg',
             'metadata' => ['author' => 'გალაკტიონ ტაბიძე', 'product_url' => 'https://shop.example/books/other'],
+            'is_active' => true,
+        ]);
+        $agent->products()->create([
+            'name' => 'არტისტული ყვავილები', 'sku' => 'ART-OTHER-2', 'category' => 'პოეზია',
+            'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე', 'price' => 16, 'stock' => 4,
+            'image' => 'https://catalog.example/another-edition.jpg',
+            'metadata' => ['author' => 'გალაკტიონ ტაბიძე', 'product_url' => 'https://shop.example/books/other-2'],
             'is_active' => true,
         ]);
         $this->fakeVision([
