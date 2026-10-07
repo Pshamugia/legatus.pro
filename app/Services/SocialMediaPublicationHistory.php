@@ -8,6 +8,7 @@ use App\Models\SocialMediaPost;
 use App\Models\SocialMediaPublicationCycle;
 use App\Models\SocialMediaPublicationIdentity;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -17,6 +18,11 @@ class SocialMediaPublicationHistory
     {
         $agent->socialMediaPosts()
             ->where('status', 'published')
+            ->whereNotExists(function ($query): void {
+                $query->selectRaw('1')
+                    ->from('social_publication_identities')
+                    ->whereColumn('social_publication_identities.social_media_post_id', 'social_media_posts.id');
+            })
             ->with('product')
             ->orderBy('id')
             ->chunkById(100, function ($posts): void {
@@ -24,6 +30,48 @@ class SocialMediaPublicationHistory
                     $this->rememberPublished($post, false);
                 }
             });
+    }
+
+    /**
+     * Resolve publication history for an entire catalog in two bounded queries
+     * instead of querying every product/provider pair individually.
+     *
+     * @param  Collection<int, Product>  $products
+     * @param  list<string>  $providers
+     * @return Collection<int, true> Product IDs keyed for constant-time lookup.
+     */
+    public function usedProductIdsOnAny(Agent $agent, Collection $products, array $providers): Collection
+    {
+        $providers = collect($providers)->map(fn ($provider): string => (string) $provider)->unique()->values();
+        if ($products->isEmpty() || $providers->isEmpty()) {
+            return collect();
+        }
+
+        $cycles = SocialMediaPublicationCycle::query()
+            ->where('agent_id', $agent->id)
+            ->whereIn('provider', $providers)
+            ->pluck('current_cycle', 'provider');
+        $usedKeys = SocialMediaPublicationIdentity::query()
+            ->where('agent_id', $agent->id)
+            ->where(function ($query) use ($providers, $cycles): void {
+                foreach ($providers as $provider) {
+                    $query->orWhere(function ($providerQuery) use ($provider, $cycles): void {
+                        $providerQuery->where('provider', $provider)
+                            ->where('cycle_number', (int) ($cycles[$provider] ?? 1));
+                    });
+                }
+            })
+            ->pluck('identity_key')
+            ->mapWithKeys(fn (string $key): array => [$key => true]);
+
+        return $products->unique('id')->filter(function (Product $product) use ($usedKeys): bool {
+            return collect($this->identityKeys(
+                $product,
+                (string) data_get($product->metadata, 'product_url'),
+                $product->catalogDesignImageUrl() ?: $product->publicImageUrl(),
+                $product->name,
+            ))->contains(fn (string $key): bool => isset($usedKeys[$key]));
+        })->mapWithKeys(fn (Product $product): array => [(int) $product->id => true]);
     }
 
     /** @param list<string> $providers */

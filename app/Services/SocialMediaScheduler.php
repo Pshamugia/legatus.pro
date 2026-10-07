@@ -38,14 +38,13 @@ class SocialMediaScheduler
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
-        $this->startNewCycleWhenExhausted($agent, $allProducts, $data['providers']);
+        $usedProductIds = $this->publicationHistory->usedProductIdsOnAny($agent, $allProducts->pluck('product'), $data['providers']);
+        if ($this->startNewCycleWhenExhausted($agent, $allProducts, $data['providers'], $usedProductIds)) {
+            $usedProductIds = collect();
+        }
         $products = $allProducts
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
-            ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
-                $agent,
-                $variant['product'],
-                $data['providers'],
-            ))
+            ->reject(fn (array $variant): bool => isset($usedProductIds[(int) $variant['product']->id]))
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
@@ -139,14 +138,13 @@ class SocialMediaScheduler
             ->whereNotNull('product_id')
             ->pluck('product_id')
             ->mapWithKeys(fn ($id): array => [(int) $id => true]);
-        $this->startNewCycleWhenExhausted($agent, $allProducts, $providers);
+        $usedProductIds = $this->publicationHistory->usedProductIdsOnAny($agent, $allProducts->pluck('product'), $providers);
+        if ($this->startNewCycleWhenExhausted($agent, $allProducts, $providers, $usedProductIds)) {
+            $usedProductIds = collect();
+        }
         $products = $allProducts
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
-            ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
-                $agent,
-                $variant['product'],
-                $providers,
-            ))
+            ->reject(fn (array $variant): bool => isset($usedProductIds[(int) $variant['product']->id]))
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $schedule->timezone)->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $schedule->timezone)->startOfDay();
@@ -576,7 +574,7 @@ class SocialMediaScheduler
      * has been used during the active cycle. In-flight claims never trigger a
      * reset, so concurrent workers cannot publish the same product twice.
      */
-    private function startNewCycleWhenExhausted(Agent $agent, Collection $products, array $providers): bool
+    private function startNewCycleWhenExhausted(Agent $agent, Collection $products, array $providers, ?Collection $usedProductIds = null): bool
     {
         if ($products->isEmpty()
             || ! $this->catalogCoverageIsComplete($agent)
@@ -584,11 +582,8 @@ class SocialMediaScheduler
             return false;
         }
 
-        $exhausted = $products->every(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
-            $agent,
-            $variant['product'],
-            $providers,
-        ));
+        $usedProductIds ??= $this->publicationHistory->usedProductIdsOnAny($agent, $products->pluck('product'), $providers);
+        $exhausted = $products->every(fn (array $variant): bool => isset($usedProductIds[(int) $variant['product']->id]));
         if (! $exhausted) {
             return false;
         }

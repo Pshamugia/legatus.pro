@@ -2484,13 +2484,16 @@ class SocialMediaSchedulerTest extends TestCase
         $this->actingAs($user)->get(route('social-media.index'))
             ->assertOk()
             ->assertSee('data-schedule-providers="'.$schedule->id.'"', false)
+            ->assertSee('data-schedule-edit-form', false)
+            ->assertSee('data-busy-label="Updating schedule…"', false)
+            ->assertSee('Updating future posts. Please keep this page open.')
             ->assertSee('Threads profile');
         $published = $schedule->posts()->orderBy('scheduled_for')->firstOrFail();
         $originalPublishedFor = $published->scheduled_for->copy();
         $published->update(['status' => 'published', 'published_at' => now()]);
         $newDate = CarbonImmutable::now('Asia/Tbilisi')->addDays(3)->toDateString();
 
-        $this->actingAs($user)->put(route('social-media.update', $schedule), [
+        $this->actingAs($user)->post(route('social-media.update', $schedule), [
             'starts_on' => $newDate,
             'ends_on' => $newDate,
             'providers' => ['facebook', 'threads'],
