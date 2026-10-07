@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\KnowledgeIngestionService;
 use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
+use App\Services\PublicProductAvailabilityVerifier;
 use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaAiPhotoEditor;
 use App\Services\SocialMediaImageDesigner;
@@ -1305,6 +1306,68 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertNothingPushed();
         Http::assertSentCount(1);
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'graph.facebook.test'));
+    }
+
+    public function test_live_product_page_replaces_contaminated_catalog_copy_with_its_real_description(): void
+    {
+        [, $agent] = $this->tenant('live-description-refresh');
+        $details = $this->product('ჭიათურა', 'Books', 1);
+        $details['description'] = 'Navigation cart delivery and unrelated full page text.';
+        $details['metadata']['product_url'] = 'https://example.com/books/chiatura/142';
+        $product = $agent->products()->create($details);
+        Http::fake([
+            'https://example.com/books/chiatura/142' => Http::response(
+                '<html><body><nav>Navigation and delivery</nav><h3><i class="bi"></i>აღწერა</h3><div class="description-card">ეკონომიკურ-გეოგრაფიული სამეცნიერო ნარკვევი ჭიათურის შესახებ</div><input id="maxquantity" value="1"><script type="application/ld+json">'.json_encode([
+                    '@context' => 'https://schema.org',
+                    '@type' => 'Product',
+                    'name' => 'ჭიათურა',
+                    'offers' => [
+                        '@type' => 'Offer',
+                        'url' => 'https://example.com/books/chiatura/142',
+                        'price' => '10.00',
+                        'priceCurrency' => 'GEL',
+                        'availability' => 'https://schema.org/InStock',
+                    ],
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'</script></body></html>',
+                200,
+                ['Content-Type' => 'text/html'],
+            ),
+        ]);
+
+        app(PublicProductAvailabilityVerifier::class)->verify($product);
+        $this->assertSame(
+            'ეკონომიკურ-გეოგრაფიული სამეცნიერო ნარკვევი ჭიათურის შესახებ',
+            $product->fresh()->description,
+        );
+    }
+
+    public function test_ai_copywriter_refuses_to_generate_from_a_title_without_a_verified_description(): void
+    {
+        [, $agent] = $this->tenant('ai-title-only-refusal');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('ჭიათურა', 'Books', 1);
+        $details['description'] = null;
+        $product = $agent->products()->create($details);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'simple',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => null, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+
+        try {
+            app(SocialMediaAiCopywriter::class)->generate($post);
+            $this->fail('A title-only AI caption must never be generated.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('will not write from the title alone', $exception->getMessage());
+        }
+
+        Http::assertNothingSent();
     }
 
     public function test_ai_copywriter_returns_product_specific_creative_copy_without_rendering_raw_category_fields(): void

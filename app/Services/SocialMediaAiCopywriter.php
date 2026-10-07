@@ -14,6 +14,9 @@ class SocialMediaAiCopywriter
     {
         $model = (string) config('services.openai.social_media_model', 'gpt-5.6-luna');
         $facts = $this->verifiedFacts($post);
+        if (blank(data_get($facts, 'description.value'))) {
+            throw new \RuntimeException('AI Copywriter requires a verified product description and will not write from the title alone.');
+        }
         $recentCaptions = $this->recentCaptions($post);
         $generation = $this->requestCaption($post, $facts, $model, $recentCaptions);
         $verification = $this->sanitizeCaption($post, $generation['caption'], $facts, $recentCaptions, $model);

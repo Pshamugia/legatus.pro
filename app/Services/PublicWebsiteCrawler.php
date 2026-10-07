@@ -289,13 +289,7 @@ class PublicWebsiteCrawler
             return;
         }
 
-        $dom = new \DOMDocument;
-        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
-        $xpath = new \DOMXPath($dom);
-        foreach ($xpath->query('//script|//style|//noscript|//svg|//nav|//footer') as $node) {
-            $node->parentNode?->removeChild($node);
-        }
-        $description = $this->productDescriptionFromHtml($html, $dom);
+        $description = $this->ingestion->productDescriptionFromHtml($html);
         if ($description === '') {
             return;
         }
@@ -318,20 +312,6 @@ class PublicWebsiteCrawler
             'search_text' => trim(implode(' ', array_filter([$product->search_text, $description]))),
             'metadata' => $metadata,
         ]);
-    }
-
-    private function productDescriptionFromHtml(string $html, \DOMDocument $dom): string
-    {
-        if (preg_match('/<h[1-6][^>]*>\s*(?:აღწერა|description|описание)\s*<\/h[1-6]>(.*?)(?=<h[1-6]\b|<footer\b|$)/isu', $html, $matches)) {
-            $section = preg_replace('/<script\b[^>]*>.*?<\/script>|<style\b[^>]*>.*?<\/style>/isu', ' ', $matches[1]) ?? '';
-            $text = html_entity_decode(strip_tags($section), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $text = preg_replace('/\s+/u', ' ', trim($text)) ?? '';
-            if (mb_strlen($text) >= 20) {
-                return Str::limit($text, 4000, '');
-            }
-        }
-
-        return Str::limit(preg_replace('/\s+/u', ' ', trim((string) $dom->textContent)) ?? '', 4000, '');
     }
 
     private function discoverLinks(

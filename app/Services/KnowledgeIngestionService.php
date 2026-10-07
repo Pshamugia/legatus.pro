@@ -607,6 +607,67 @@ class KnowledgeIngestionService
         return array_values($products);
     }
 
+    public function productDescriptionFromHtml(string $html): string
+    {
+        $dom = new \DOMDocument;
+        @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
+        $xpath = new \DOMXPath($dom);
+        $candidates = [];
+
+        // Prefer explicit product-description markup. These selectors are
+        // industry and language neutral and avoid treating the whole product
+        // page (navigation, price, delivery, and buttons) as a description.
+        foreach ($xpath->query(
+            '//*[@itemprop="description" or @data-product-description'
+            .' or contains(concat(" ", normalize-space(@class), " "), " product-description ")'
+            .' or contains(concat(" ", normalize-space(@class), " "), " description-card ")'
+            .' or @id="product-description" or @id="description"]',
+        ) as $node) {
+            $this->addDescriptionCandidate($candidates, $node->textContent);
+        }
+
+        // Some storefronts label the section with a heading that also
+        // contains an icon. Match its rendered text, then read the adjacent
+        // section instead of requiring a plain <h3>Description</h3> string.
+        foreach ($xpath->query('//h1|//h2|//h3|//h4|//h5|//h6|//dt') as $heading) {
+            $label = Str::lower($this->catalogText($heading->textContent, 80));
+            if (! in_array($label, ['description', 'აღწერა', 'описание'], true)) {
+                continue;
+            }
+
+            for ($node = $heading->nextSibling; $node !== null; $node = $node->nextSibling) {
+                if ($node instanceof \DOMElement && preg_match('/^h[1-6]$/i', $node->tagName)) {
+                    break;
+                }
+                $this->addDescriptionCandidate($candidates, $node->textContent);
+                if ($candidates !== []) {
+                    break;
+                }
+            }
+        }
+
+        foreach ($this->structuredProductsFromHtml($html) as $product) {
+            $this->addDescriptionCandidate($candidates, $product['description'] ?? null);
+        }
+
+        if ($candidates === []) {
+            return '';
+        }
+
+        usort($candidates, fn (string $left, string $right): int => mb_strlen($left) <=> mb_strlen($right));
+
+        return $candidates[0];
+    }
+
+    /** @param list<string> $candidates */
+    private function addDescriptionCandidate(array &$candidates, mixed $value): void
+    {
+        $text = $this->catalogText($value, 4000);
+        if (mb_strlen($text) >= 20) {
+            $candidates[] = $text;
+        }
+    }
+
     /**
      * Read common server-rendered product cards from a public catalogue or
      * search results page. This is a conservative fallback: name, URL, price,

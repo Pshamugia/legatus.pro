@@ -47,17 +47,17 @@ class PublicWebsiteCrawlerTest extends TestCase
                     ['Content-Type' => 'text/html'],
                 ),
                 'https://bukinistebi.ge/books/first/1' => Http::response(
-                    '<html><title>First Book</title><main><h1>First Book</h1><p>A philosophical novel about memory, identity, and freedom.</p></main></html>',
+                    '<html><title>First Book</title><main><h1>First Book</h1><div class="product-description">A philosophical novel about memory, identity, and freedom.</div></main></html>',
                     200,
                     ['Content-Type' => 'text/html'],
                 ),
                 'https://bukinistebi.ge/books/second/2' => Http::response(
-                    '<html><title>Second Book</title><main><h1>Second Book</h1><p>A detailed description of the second public catalog product.</p></main></html>',
+                    '<html><title>Second Book</title><main><h1>Second Book</h1><div class="product-description">A detailed description of the second public catalog product.</div></main></html>',
                     200,
                     ['Content-Type' => 'text/html'],
                 ),
                 'https://bukinistebi.ge/books/third/3' => Http::response(
-                    '<html><title>Third Book</title><main><h1>Third Book</h1><p>A detailed description of the third public catalog product.</p></main></html>',
+                    '<html><title>Third Book</title><main><h1>Third Book</h1><div class="product-description">A detailed description of the third public catalog product.</div></main></html>',
                     200,
                     ['Content-Type' => 'text/html'],
                 ),
@@ -255,7 +255,7 @@ class PublicWebsiteCrawlerTest extends TestCase
                     ['Content-Type' => 'text/html'],
                 ),
                 'https://bukinistebi.ge/books/catalog-book/1' => Http::response(
-                    '<html><title>Catalog Book</title><main><h1>Catalog Book</h1><p>The complete public product description comes from its detail URL.</p></main></html>',
+                    '<html><title>Catalog Book</title><body><nav>Delivery, cart, and navigation noise.</nav><main><h1>Catalog Book</h1><h3><i class="icon"></i>Description</h3><div class="description-card">The complete public product description comes from its detail URL.</div><h3>Details</h3><p>Unrelated specifications.</p></main></body></html>',
                     200,
                     ['Content-Type' => 'text/html'],
                 ),
@@ -272,7 +272,9 @@ class PublicWebsiteCrawlerTest extends TestCase
         );
 
         $product = $agent->products()->where('sku', 'C-1')->firstOrFail();
-        $this->assertStringContainsString('complete public product description', (string) $product->description);
+        $this->assertSame('The complete public product description comes from its detail URL.', $product->description);
+        $this->assertStringNotContainsString('navigation noise', (string) $product->description);
+        $this->assertStringNotContainsString('Unrelated specifications', (string) $product->description);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://bukinistebi.ge/books/catalog-book/1');
     }
 

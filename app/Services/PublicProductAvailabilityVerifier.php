@@ -26,6 +26,10 @@ class PublicProductAvailabilityVerifier
         try {
             $response = $this->ingestion->fetchPublicUrl($url, ['Accept' => 'text/html'], 6, 1);
             $body = $response->body();
+            $description = $this->ingestion->productDescriptionFromHtml($body);
+            if ($description !== '') {
+                $product->update(['description' => $description]);
+            }
             $origin = (parse_url($url, PHP_URL_SCHEME) ?: 'https').'://'.parse_url($url, PHP_URL_HOST);
             $available = $this->explicitPageAvailability($body);
 
