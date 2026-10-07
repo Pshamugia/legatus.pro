@@ -16,6 +16,7 @@ use App\Services\SocialMediaAiPhotoEditor;
 use App\Services\SocialMediaImageDesigner;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateRenderer;
+use App\Services\SocialMediaTemplateService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -404,7 +405,7 @@ class SocialMediaSchedulerTest extends TestCase
         $claimed = $agent->products()->create($this->product('Already Queued Product', 'General', 2));
         $replacement = $agent->products()->create($this->product('Unused Replacement', 'General', 2));
         $providers = ['facebook', 'instagram'];
-        $templates = app(\App\Services\SocialMediaTemplateService::class)->snapshots($agent, $providers);
+        $templates = app(SocialMediaTemplateService::class)->snapshots($agent, $providers);
         $earlierSchedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
             'categories' => [], 'providers' => $providers, 'timezone' => 'UTC',
@@ -1211,7 +1212,10 @@ class SocialMediaSchedulerTest extends TestCase
         $this->connections($agent);
         config()->set('services.openai.key', 'test-openai-key');
         config()->set('services.openai.social_media_model', 'gpt-5.6-luna');
-        $product = $agent->products()->create($this->product('Luna Product', 'General', 2));
+        $details = $this->product('Luna Product', 'General', 2);
+        $details['description'] = str_repeat('Verified public context. ', 35)
+            .'Distinctive closing detail about careful craftsmanship.';
+        $product = $agent->products()->create($details);
         $schedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
             'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
@@ -1224,7 +1228,7 @@ class SocialMediaSchedulerTest extends TestCase
             'image_url' => $product->publicImageUrl(), 'caption' => 'Prepared fallback caption',
             'ai_generation_attempted_at' => now()->subMinute(),
         ]);
-        $generated = 'A thoughtful post based on the verified product description.';
+        $generated = 'Verified public context meets a distinctive closing detail about careful craftsmanship.';
         $rendered = $generated."\n\n".data_get($product->metadata, 'product_url');
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()
@@ -1257,9 +1261,10 @@ class SocialMediaSchedulerTest extends TestCase
             && $request['model'] === 'gpt-5.6-luna'
             && data_get($request->data(), 'input.0.content.1.type') === 'input_image'
             && data_get($request->data(), 'text.format.schema.properties.caption.type') === 'string'
-            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'natural, original marketing copy inspired by this specific product'));
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'grounded primarily in the verified description')
+            && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Distinctive closing detail about careful craftsmanship.'));
         Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photos')
-            && str_contains((string) $request['caption'], 'A thoughtful post based on the verified product description.'));
+            && str_contains((string) $request['caption'], 'distinctive closing detail about careful craftsmanship.'));
     }
 
     public function test_failed_ai_generation_never_publishes_original_template_content_in_ai_mode(): void
@@ -1306,7 +1311,9 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [, $agent] = $this->tenant('product-specific-ai-copy');
         config()->set('services.openai.key', 'test-openai-key');
-        $product = $agent->products()->create($this->product('სტომატოლოგიურ დაავადებათა პროფილაქტიკა', 'Books', 4));
+        $details = $this->product('სტომატოლოგიურ დაავადებათა პროფილაქტიკა', 'Books', 4);
+        $details['description'] = 'წიგნი აღწერს კბილის ყოველდღიურ მოვლასა და დაავადებათა პროფილაქტიკის პრაქტიკულ გზებს.';
+        $product = $agent->products()->create($details);
         $schedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
             'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
@@ -1318,7 +1325,7 @@ class SocialMediaSchedulerTest extends TestCase
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
         ]);
-        $generated = 'კბილის ჯანმრთელობაზე ზრუნვა პატარა ნაბიჯებიდან იწყება 🦷📘'."\n\n"
+        $generated = 'კბილის ყოველდღიური მოვლა და დაავადებათა პროფილაქტიკის პრაქტიკული გზები — სასარგებლო საკითხავი ჯანმრთელობაზე ზრუნვისთვის. 🦷📘'."\n\n"
             .'გაიცანით წიგნი და შეიტყვეთ მეტი 👇';
         $rendered = $generated."\n\n".data_get($product->metadata, 'product_url');
         Http::fake([
@@ -1346,6 +1353,49 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertSent(fn ($request): bool => data_get($request->data(), 'text.format.schema.properties.caption.type') === 'string'
             && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Never output database-style labels')
             && str_contains((string) data_get($request->data(), 'input.0.content.0.text'), 'Verified evidence:'));
+    }
+
+    public function test_ai_copywriter_rewrites_title_based_invention_using_verified_description(): void
+    {
+        [, $agent] = $this->tenant('description-grounded-ai-copy');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('თეთრი ძაღლი', 'რომანი', 4);
+        $details['description'] = 'ავტობიოგრაფიული რომანი აღწერს ავტორის ამერიკაში ცხოვრებას და სამოქალაქო დაპირისპირების პერიოდს.';
+        $product = $agent->products()->create($details);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['instagram'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'instagram',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+        $invented = '„თეთრი ძაღლი“ მამაცი გმირის ამბავია, რომელიც სიკეთისა და იმედის სიმბოლოდ იქცევა. 🐕';
+        $grounded = 'ავტობიოგრაფიული რომანი ავტორის ამერიკაში ცხოვრებასა და სამოქალაქო დაპირისპირების პერიოდს გვაცნობს — რეალური გამოცდილებიდან შექმნილი საკითხავი. 📖';
+        $safeAudit = [
+            'supported' => true, 'unsupported_fragments' => [],
+            'distinct_from_recent' => true, 'similarity_reason' => '',
+            'core_identity_preserved' => true, 'identity_reason' => '',
+        ];
+        Http::fake(['https://api.openai.com/v1/responses' => Http::sequence()
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $invented], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($safeAudit)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $grounded], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($safeAudit)]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringContainsString($grounded, $caption);
+        $this->assertStringNotContainsString('სიკეთისა და იმედის სიმბოლოდ', $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'based on the title instead of the verified description',
+        ));
     }
 
     public function test_ai_copywriter_rewrites_a_caption_that_obscures_a_verified_product_type(): void
@@ -1436,7 +1486,9 @@ class SocialMediaSchedulerTest extends TestCase
     {
         [, $agent] = $this->tenant('ai-copy-retry');
         config()->set('services.openai.key', 'test-openai-key');
-        $product = $agent->products()->create($this->product('პანსიონატი', 'Books', 2));
+        $details = $this->product('პანსიონატი', 'Books', 2);
+        $details['description'] = 'რომანი მოგვითხრობს პანსიონატსა და მის მცხოვრებლებზე.';
+        $product = $agent->products()->create($details);
         $schedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
             'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
@@ -1449,8 +1501,7 @@ class SocialMediaSchedulerTest extends TestCase
             'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
         ]);
         $rejected = 'პიტერ ჰანდკეს ნობელის პრემიის მფლობელი რომანია.';
-        $safe = 'ზოგჯერ ერთი წიგნი საკმარისია, რომ ნაცნობ სივრცეს სხვა თვალით შეხედოთ. 📖'."\n\n"
-            .'გაეცანით „პანსიონატს“ და მის ამბავს.';
+        $safe = 'რომანი პანსიონატსა და მის მცხოვრებლებზე მოგვითხრობს — გაეცანით ამ სივრცეში განვითარებულ ამბავს. 📖';
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $rejected], JSON_UNESCAPED_UNICODE)]]]]])
@@ -1486,7 +1537,9 @@ class SocialMediaSchedulerTest extends TestCase
         [, $agent] = $this->tenant('ai-copy-diversity');
         config()->set('services.openai.key', 'test-openai-key');
         $previousProduct = $agent->products()->create($this->product('Previous Book', 'Books', 7));
-        $product = $agent->products()->create($this->product('Distinct Book', 'Books', 8));
+        $details = $this->product('Distinct Book', 'Books', 8);
+        $details['description'] = 'A verified public description built around an unexpected detail and the title’s individual character.';
+        $product = $agent->products()->create($details);
         $schedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 2,
             'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
@@ -1507,7 +1560,7 @@ class SocialMediaSchedulerTest extends TestCase
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
         ]);
-        $repetitive = 'Some books open a different way of seeing the world. Read this story and discover its atmosphere.';
+        $repetitive = 'Some books open a different way of seeing the world. Its verified description centres on an unexpected detail and individual character.';
         $distinct = 'Enter the story through its most unexpected detail. The verified description gives this title a character of its own, worth meeting without a borrowed formula.';
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()
@@ -1575,7 +1628,7 @@ class SocialMediaSchedulerTest extends TestCase
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'language' => 'English', 'caption' => 'Pending',
         ]);
-        $generated = 'A platform-ready view of this verified product, written with its own clear and grounded angle.';
+        $generated = 'A platform-ready view of this verified public description, written with its own clear and grounded angle.';
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()
                 ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $generated])]]]]])
@@ -1589,8 +1642,7 @@ class SocialMediaSchedulerTest extends TestCase
         $caption = app(SocialMediaAiCopywriter::class)->generate($instagram);
 
         $this->assertStringStartsWith($generated, $caption);
-        $generationRequest = Http::recorded()->first(fn (array $record): bool =>
-            data_get($record[0]->data(), 'text.format.name') === 'social_media_caption'
+        $generationRequest = Http::recorded()->first(fn (array $record): bool => data_get($record[0]->data(), 'text.format.name') === 'social_media_caption'
         );
         $prompt = (string) data_get($generationRequest[0]->data(), 'input.0.content.0.text');
         $this->assertStringContainsString($olderCaption, $prompt);
@@ -1602,7 +1654,9 @@ class SocialMediaSchedulerTest extends TestCase
         [, $agent] = $this->tenant('ai-copy-semantic-diversity');
         config()->set('services.openai.key', 'test-openai-key');
         $previousProduct = $agent->products()->create($this->product('Earlier Product', 'Objects', 9));
-        $product = $agent->products()->create($this->product('Current Product', 'Objects', 10));
+        $details = $this->product('Current Product', 'Objects', 10);
+        $details['description'] = 'A verified product description focused on one distinctive detail and clear character.';
+        $product = $agent->products()->create($details);
         $schedule = $agent->socialMediaSchedules()->create([
             'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 2,
             'categories' => [], 'providers' => ['instagram'], 'timezone' => 'UTC', 'status' => 'active',
@@ -1623,7 +1677,7 @@ class SocialMediaSchedulerTest extends TestCase
             'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
         ]);
-        $recycledStructure = 'What might this object reveal? Step into its particular mood. Come closer and explore it.';
+        $recycledStructure = 'What might this verified product description reveal? Step into its distinctive detail. Come closer and explore it.';
         $distinct = 'A single verified detail becomes the centre of this caption, leaving the product to speak without the familiar question-and-invitation sequence.';
         Http::fake([
             'https://api.openai.com/v1/responses' => Http::sequence()

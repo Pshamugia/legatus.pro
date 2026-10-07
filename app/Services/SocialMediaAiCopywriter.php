@@ -19,8 +19,10 @@ class SocialMediaAiCopywriter
         $verification = $this->sanitizeCaption($post, $generation['caption'], $facts, $recentCaptions, $model);
         $diversityFailure = $this->diversityFailure($verification['caption'], $recentCaptions, $verification);
         $identityFailure = $this->identityFailure($verification);
+        $groundingFailure = $this->descriptionGroundingFailure($verification['caption'], $facts);
+        $meaningfulFailure = ! $this->hasMeaningfulCopy($verification['caption']);
 
-        if (! $this->hasMeaningfulCopy($verification['caption']) || $diversityFailure !== null || $identityFailure !== null) {
+        if ($meaningfulFailure || $diversityFailure !== null || $identityFailure !== null || $groundingFailure !== null) {
             $retry = $this->requestCaption(
                 $post,
                 $facts,
@@ -28,9 +30,11 @@ class SocialMediaAiCopywriter
                 $recentCaptions,
                 $identityFailure !== null
                     ? 'The previous draft obscured or misrepresented the product’s verified nature: '.$identityFailure.' Write a new caption that makes its actual type, form, or purpose clear from the source description without inventing contents or benefits.'
-                    : ($diversityFailure === null
+                    : ($meaningfulFailure
                         ? 'The previous draft lost its meaningful copy during factual review. Write a completely new, product-specific caption using only the verified evidence and omit every uncertain attribute.'
-                        : 'The previous draft was too similar to earlier posts: '.$diversityFailure.' Use a fundamentally different opening, narrative angle, sentence construction, progression, and invitation. Do not merely replace words with synonyms.'),
+                        : ($groundingFailure !== null
+                            ? 'The previous draft was based on the title instead of the verified description: '.$groundingFailure.' Rewrite it around concrete details that are actually present in the description. Beautify and adapt those details for social media, but do not invent a plot, theme, symbolism, benefit, or product property.'
+                            : 'The previous draft was too similar to earlier posts: '.$diversityFailure.' Use a fundamentally different opening, narrative angle, sentence construction, progression, and invitation. Do not merely replace words with synonyms.')),
             );
             $retryVerification = $this->sanitizeCaption($post, $retry['caption'], $facts, $recentCaptions, $model);
             $generation['input_tokens'] += $retry['input_tokens'];
@@ -46,7 +50,8 @@ class SocialMediaAiCopywriter
 
         if (! $this->hasMeaningfulCopy($verification['caption'])
             || $this->diversityFailure($verification['caption'], $recentCaptions, $verification) !== null
-            || $this->identityFailure($verification) !== null) {
+            || $this->identityFailure($verification) !== null
+            || $this->descriptionGroundingFailure($verification['caption'], $facts) !== null) {
             throw new \RuntimeException('AI Copywriter could not produce grounded, structurally distinct product-specific copy.');
         }
 
@@ -135,7 +140,7 @@ class SocialMediaAiCopywriter
 Write one {$platform}
 Tone: {$tone}
 Language: {$language}.
-Write the complete caption as natural, original marketing copy inspired by this specific product. Make its verified type, form, or purpose clear to a reader; do not let an evocative title or mood replace what the item actually is. Capture the distinctive subject, idea, use, or mood supported by the verified description instead of announcing a generic catalog item. When the description is brief, use only the detail it supports and keep the copy concise: do not invent themes, contents, or benefits or pad it with abstract sentences to reach a length. Use a few relevant emojis naturally and finish with a clear invitation. Put any hashtags on a separate final line.
+Write the complete caption as natural, original marketing copy grounded primarily in the verified description; the title identifies the product but is not a source from which to guess its contents. Select at least two concrete, distinctive details from the description, preserve their factual meaning, and reshape them into fluent social-media copy instead of copying the full description or presenting a specification list. Make its verified type, form, or purpose clear to a reader; do not let an evocative title or mood replace what the item actually is. Capture only a distinctive subject, idea, use, or mood explicitly supported by the verified description. When the description is brief, use only the detail it supports and keep the copy concise: do not invent themes, contents, symbolism, plot, benefits, or abstract claims to reach a length. Use a few relevant emojis naturally and finish with a clear invitation. Put any hashtags on a separate final line.
 Every product must have its own creative concept and composition. The recent captions below are negative references, not style examples: do not reuse their opening words, hook formula, sentence-by-sentence scaffold, rhetorical progression, emoji placement, closing invitation, or hashtag pattern. Do not preserve an earlier structure while merely swapping product details or synonyms. Silently choose a different product-specific angle and a visibly different opening and paragraph structure before writing.
 Never use stock phrases such as "a new choice from our catalog", "new from our catalog", or "discover this product". Never output database-style labels or a specification list such as "Category:", "Price:", or a generic taxonomy value such as "Books" merely to fill space.
 Use only the verified evidence below. Do not invent or substitute a person, author, brand, maker, origin, material, size, weight, date, price, benefit, award, availability, delivery term, review, or other product detail. Treat the image only as visual inspiration and never infer factual claims from it. Do not include a URL; the server appends the exact verified product link.
@@ -188,7 +193,7 @@ PROMPT;
         }
         $clean = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $value)) ?? '');
         if ($clean !== '') {
-            $facts[$key] = ['label' => $label, 'value' => Str::limit($clean, 700, '…')];
+            $facts[$key] = ['label' => $label, 'value' => Str::limit($clean, 1600, '…')];
         }
     }
 
@@ -206,7 +211,7 @@ PROMPT;
                 'role' => 'user',
                 'content' => [[
                     'type' => 'input_text',
-                    'text' => 'Perform three independent audits. First, audit the proposed social caption only for concrete, checkable product claims. Faithful paraphrase of the verified description, expressive framing, mood, rhetorical questions, invitations, and relevant hashtags are allowed and must not be rejected merely because they are not verbatim. Reject a full sentence or line only when it states a concrete product fact unsupported by or contradictory to the verified evidence, including an invented identity, creator, brand, manufacturer, price, material, dimensions, origin, date, award, availability, benefit, or specification. Return each rejected sentence or line character-for-character in unsupported_fragments; never return partial words and never rewrite safe creative copy. Second, compare the proposed caption with the recent captions. Set distinct_from_recent to false when it repeats an opening formula, hook construction, sentence-by-sentence scaffold, rhetorical progression, or closing pattern even if product nouns and adjectives were replaced with synonyms. Shared verified facts, isolated common words, URLs, and hashtags alone do not make a caption similar. Give a concise similarity_reason when it is not distinct, otherwise return an empty string. Third, verify that a reader can tell the product’s central type, form, or purpose established by the verified description or genre. Do not mistake an evocative title for the product type. Mark core_identity_preserved false when the caption omits or obscures that nature so it could reasonably be understood as another kind of product; for example, a poetry collection must not read like a set of academic essays, and a candle must not read like skincare. A natural paraphrase is fine; raw category labels are not required. If the source provides no specific product type, do not invent one and mark identity preserved unless the caption itself implies a contradictory type. Provide identity_reason only when false. Do not infer new facts. Verified evidence: '.json_encode($facts, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'. Recent captions: '.json_encode(array_slice($recentCaptions, 0, 12), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'. Proposed caption: '.json_encode($caption, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                    'text' => 'Perform three independent audits. First, audit the proposed social caption only for concrete, checkable product claims. A faithful paraphrase of the verified description, rhetorical framing, invitations, and relevant hashtags are allowed, but product-specific claims about contents, plot, themes, symbolism, mood, purpose, benefits, or qualities must be traceable to the verified evidence. The product title alone never supports an inference about its contents. Reject a full sentence or line when it states or strongly implies a product fact unsupported by or contradictory to the verified evidence, including an invented identity, creator, brand, manufacturer, price, material, dimensions, origin, date, award, availability, plot, theme, symbolism, benefit, or specification. Return each rejected sentence or line character-for-character in unsupported_fragments; never return partial words and never rewrite safe creative copy. Second, compare the proposed caption with the recent captions. Set distinct_from_recent to false when it repeats an opening formula, hook construction, sentence-by-sentence scaffold, rhetorical progression, or closing pattern even if product nouns and adjectives were replaced with synonyms. Shared verified facts, isolated common words, URLs, and hashtags alone do not make a caption similar. Give a concise similarity_reason when it is not distinct, otherwise return an empty string. Third, verify that a reader can tell the product’s central type, form, or purpose established by the verified description or genre. Do not mistake an evocative title for the product type. Mark core_identity_preserved false when the caption omits or obscures that nature so it could reasonably be understood as another kind of product; for example, a poetry collection must not read like a set of academic essays, and a candle must not read like skincare. A natural paraphrase is fine; raw category labels are not required. If the source provides no specific product type, do not invent one and mark identity preserved unless the caption itself implies a contradictory type. Provide identity_reason only when false. Do not infer new facts. Verified evidence: '.json_encode($facts, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'. Recent captions: '.json_encode(array_slice($recentCaptions, 0, 12), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'. Proposed caption: '.json_encode($caption, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ]],
             ]],
             'text' => ['format' => [
@@ -332,6 +337,54 @@ PROMPT;
         return $verification['core_identity_preserved']
             ? null
             : ($verification['identity_reason'] ?: 'The central product type was not clear.');
+    }
+
+    /** @param array<string, array{label: string, value: string}> $facts */
+    private function descriptionGroundingFailure(string $caption, array $facts): ?string
+    {
+        $description = (string) data_get($facts, 'description.value', '');
+        if ($description === '') {
+            return null;
+        }
+
+        $otherEvidence = collect($facts)
+            ->except('description')
+            ->pluck('value')
+            ->implode(' ');
+        $otherRoots = array_fill_keys($this->wordRoots($otherEvidence), true);
+        $descriptionRoots = collect($this->wordRoots($description))
+            ->reject(fn (string $root): bool => isset($otherRoots[$root]))
+            ->unique()
+            ->values();
+
+        // When the source itself has fewer than two independent details, the
+        // semantic factual audit remains the safety gate. A rich description,
+        // however, may not be replaced with copy inferred from the title.
+        if ($descriptionRoots->count() < 2) {
+            return null;
+        }
+
+        $captionRoots = array_fill_keys($this->wordRoots($caption), true);
+        $matches = $descriptionRoots
+            ->filter(fn (string $root): bool => isset($captionRoots[$root]))
+            ->count();
+
+        return $matches >= 2
+            ? null
+            : 'The caption must preserve at least two distinct details from the verified description, not merely repeat or reinterpret the title.';
+    }
+
+    /** @return list<string> */
+    private function wordRoots(string $text): array
+    {
+        preg_match_all('/[\pL\pN]+/u', mb_strtolower(strip_tags($text)), $matches);
+
+        return collect($matches[0] ?? [])
+            ->filter(fn (string $word): bool => mb_strlen($word) >= 5)
+            ->map(fn (string $word): string => mb_substr($word, 0, 5))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function captionBody(string $caption): string

@@ -92,7 +92,7 @@ class PublishSocialMediaPost implements ShouldQueue
             if ($post->ai_generated_at === null) {
                 $title = (string) ($localized['name'] ?? $product->name);
                 $descriptionValue = $product->socialDescription($post->language, $post->description);
-                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 700, '…');
+                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 1600, '…');
                 $post->update([
                     'title' => $title,
                     'description' => $description ?: null,
@@ -130,7 +130,7 @@ class PublishSocialMediaPost implements ShouldQueue
                 // Never erase the immutable description prepared for this post
                 // when a later language sync leaves its localized field blank.
                 $descriptionValue = $product->socialDescription($post->language, $post->description);
-                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 700, '…');
+                $description = Str::limit(preg_replace('/\s+/u', ' ', trim(strip_tags((string) $descriptionValue))) ?? '', 1600, '…');
                 $renderProduct = clone $product;
                 $renderProduct->name = $title;
                 $renderProduct->category = $localized['category'] ?? $product->category;

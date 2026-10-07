@@ -491,7 +491,7 @@ class SocialMediaScheduler
         $title = (string) ($localized['name'] ?? $product->name);
         $descriptionValue = $product->socialDescription($language);
         $description = trim(strip_tags((string) $descriptionValue));
-        $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 700, '…');
+        $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 1600, '…');
 
         $renderProduct = clone $product;
         $renderProduct->name = $title;
