@@ -26,9 +26,18 @@ class WidgetController extends Controller
         $configuredLauncherLabel = trim((string) data_get($agent->settings, 'widget_launcher_label', ''));
         $launcherLabel = $configuredLauncherLabel !== ''
             ? $configuredLauncherLabel
-            : (string) Lang::get('widget.launcher_label', [], $widgetLocale);
+            : (string) Lang::get(
+                data_get($agent->settings, 'assistant_mode') === 'platform_support'
+                    ? 'widget.platform_launcher_label'
+                    : 'widget.launcher_label',
+                [],
+                $widgetLocale,
+            );
         $launcherOpen = (string) Lang::get('widget.launcher_open', ['label' => $launcherLabel], $widgetLocale);
-        $frameTitle = (string) Lang::get('widget.frame_title', [
+        $frameTitle = (string) Lang::get(
+            data_get($agent->settings, 'assistant_mode') === 'platform_support'
+                ? 'widget.platform_frame_title'
+                : 'widget.frame_title', [
             'assistant' => $assistantName,
             'business' => $businessName,
         ], $widgetLocale);
@@ -54,7 +63,10 @@ class WidgetController extends Controller
  launcher.append(mark,label);root.appendChild(launcher);
  var frame=document.createElement('iframe');frame.title=frameTitle;frame.id='legatus-frame';frame.src=frameUrl;frame.allow='clipboard-write';root.appendChild(frame);
  var css=document.createElement('style');css.textContent='#legatus-widget-root{position:fixed;right:22px;bottom:22px;z-index:2147483000;font-family:Arial,sans-serif}#legatus-launcher{border:0;background:var(--legatus-widget-primary);color:var(--legatus-widget-primary-foreground);border-radius:999px;padding:10px 17px 10px 10px;max-width:min(330px,calc(100vw - 44px));display:flex;align-items:center;gap:9px;box-shadow:0 12px 35px #142c2460;cursor:pointer}#legatus-launcher span{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--legatus-widget-accent);color:var(--legatus-widget-accent-foreground);font-weight:800}#legatus-launcher b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#legatus-frame{display:none;position:absolute;right:0;bottom:64px;width:min(390px,calc(100vw - 28px));height:min(680px,calc(100vh - 105px));border:0;border-radius:22px;background:white;box-shadow:0 24px 80px #142c244d}#legatus-widget-root.open #legatus-frame{display:block}@media(max-width:480px){#legatus-widget-root{right:14px;bottom:14px}#legatus-frame{position:fixed;inset:12px;width:calc(100vw - 24px);height:calc(100vh - 88px)}}';
- document.head.appendChild(css);document.body.appendChild(root);document.getElementById('legatus-launcher').onclick=function(){root.classList.toggle('open')};
+ function open(){root.classList.add('open')}function close(){root.classList.remove('open')}function toggle(){root.classList.toggle('open')}
+ window.LegatusWidget={open:open,close:close,toggle:toggle};
+ document.head.appendChild(css);document.body.appendChild(root);document.getElementById('legatus-launcher').onclick=toggle;
+ if(window.LegatusWidgetRequestedOpen){window.LegatusWidgetRequestedOpen=false;open()}
  window.addEventListener('message',function(e){if(e.origin===frameOrigin&&(e.data==='legatus:close'||e.data==='nia:close'))root.classList.remove('open')});
 })();
 JS;

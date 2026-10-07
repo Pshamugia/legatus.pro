@@ -12,7 +12,10 @@
         $agent->hasCustomAssistantName() ? 'introduction_custom' : 'introduction_default',
         ['assistant' => $assistantName, 'business' => $agent->business_name],
     );
-    $initialGreeting = $widgetTranslate('greeting', ['introduction' => $assistantIntroduction]);
+    $platformSupport = data_get($agent->settings, 'assistant_mode') === 'platform_support';
+    $initialGreeting = $platformSupport
+        ? $widgetTranslate('platform_greeting')
+        : $widgetTranslate('greeting', ['introduction' => $assistantIntroduction]);
     $widgetTheme = $agent->widgetTheme();
 @endphp
 <!doctype html>
@@ -31,8 +34,8 @@
         <span class="avatar">{{ mb_strtoupper(mb_substr($assistantName, 0, 1)) }}</span>
         <div class="identity">
             <b>{{ $assistantName }} · {{ $agent->business_name }}</b>
-            <small id="conversation-status">{{ $widgetCopy['status'] }}</small>
-            <span class="powered">{{ $widgetCopy['powered_by'] }}</span>
+            <small id="conversation-status">{{ $platformSupport ? $widgetCopy['platform_status'] : $widgetCopy['status'] }}</small>
+            <span class="powered">{{ $platformSupport ? $widgetCopy['platform_powered'] : $widgetCopy['powered_by'] }}</span>
         </div>
         <span class="head-actions">
             <button class="head-action" id="new-conversation" type="button" aria-label="{{ $widgetCopy['new_conversation_aria'] }}" title="{{ $widgetCopy['new_conversation'] }}">↻</button>
@@ -43,8 +46,14 @@
         <div class="bubble">{{ $initialGreeting }}</div>
     </main>
     <div class="suggest">
-        <button type="button" data-q="{{ $widgetCopy['personal_advice_prompt'] }}">✨ {{ $widgetCopy['personal_advice'] }}</button>
-        <button type="button" data-q="{{ $widgetCopy['delivery_prompt'] }}">🚚 {{ $widgetCopy['delivery'] }}</button>
+        @if($platformSupport)
+            <button type="button" data-q="{{ $widgetCopy['platform_about_prompt'] }}">✨ {{ $widgetCopy['platform_about'] }}</button>
+            <button type="button" data-q="{{ $widgetCopy['platform_pricing_prompt'] }}">$ {{ $widgetCopy['platform_pricing'] }}</button>
+            <button type="button" data-q="{{ $widgetCopy['platform_channels_prompt'] }}">↗ {{ $widgetCopy['platform_channels'] }}</button>
+        @else
+            <button type="button" data-q="{{ $widgetCopy['personal_advice_prompt'] }}">✨ {{ $widgetCopy['personal_advice'] }}</button>
+            <button type="button" data-q="{{ $widgetCopy['delivery_prompt'] }}">🚚 {{ $widgetCopy['delivery'] }}</button>
+        @endif
     </div>
     <form class="composer" id="form">
         <input id="input" required autocomplete="off" placeholder="{{ $widgetCopy['message_placeholder'] }}" aria-label="{{ $widgetCopy['message'] }}">
@@ -67,6 +76,7 @@
     const input = document.querySelector('#input');
     const sendButton = document.querySelector('#send');
     const assistantName = @json($assistantName);
+    const platformSupport = @json($platformSupport);
     const widgetCopy = @json($widgetCopy);
 
     function phrase(key, replacements = {}) {
@@ -288,7 +298,9 @@
     function setConversationStatus(status) {
         const label = document.querySelector('#conversation-status');
         if (!label) return;
-        label.textContent = status === 'human' ? phrase('status_human') : phrase('status');
+        label.textContent = status === 'human'
+            ? phrase('status_human')
+            : phrase(platformSupport ? 'platform_status' : 'status');
     }
 
     async function pollHistory() {

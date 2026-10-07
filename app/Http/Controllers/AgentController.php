@@ -6,19 +6,25 @@ use App\Jobs\CrawlPublicWebsite;
 use App\Models\Agent;
 use App\Models\Lead;
 use App\Services\KnowledgeIngestionService;
+use App\Services\LegatusSupportAssistant;
 use App\Services\TenantContext;
 use App\Support\WidgetTheme;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 
 class AgentController extends Controller
 {
-    public function landing()
+    public function landing(LegatusSupportAssistant $support)
     {
         $demoAgent = Agent::where('is_active', true)->where('slug', 'legatus-demo')->first();
+        $supportAgent = $support->findActive();
+        $supportWidgetUrl = $supportAgent
+            ? URL::signedRoute('widget.install.script', ['agent' => $supportAgent->getKey()])
+            : null;
 
-        return view('landing', compact('demoAgent'));
+        return view('landing', compact('demoAgent', 'supportAgent', 'supportWidgetUrl'));
     }
 
     public function dashboard(TenantContext $tenant)

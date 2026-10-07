@@ -2,7 +2,7 @@
 
 return [
     'meta' => ['title' => 'Legatus — AI Assistant for Your Business', 'description' => 'Legatus answers customers, prepares content, and manages publishing on Facebook and Instagram.'],
-    'nav' => ['communication' => 'Communication', 'social' => 'Social media', 'annual' => 'Annual offer', 'how' => 'How it works', 'pricing' => 'Pricing', 'setup' => 'Business setup', 'sign_in' => 'Sign in'],
+    'nav' => ['communication' => 'Communication', 'social' => 'Social media', 'annual' => 'Annual offer', 'how' => 'How it works', 'pricing' => 'Pricing', 'ask' => 'Ask Legatus', 'setup' => 'Business setup', 'sign_in' => 'Sign in'],
     'cta' => ['start' => 'Start using Legatus', 'start_short' => 'Start now', 'see_how' => 'See how it works', 'annual' => 'Choose the annual plan — get a free store', 'final' => 'Bring Legatus into your business'],
     'hero' => [
         'label' => 'AI assistant for your business', 'title' => 'Your business stays active — even while you rest.',
@@ -53,6 +53,16 @@ return [
         'one_title' => 'Introduce your business', 'one_body' => 'Share your products, prices, stock, terms, and brand style.',
         'two_title' => 'Connect channels and set a schedule', 'two_body' => 'Enable Legatus on Facebook, Instagram, WhatsApp, and your website. Choose when posts should be published.',
         'three_title' => 'Review and manage', 'three_body' => 'Legatus answers customers and publishes content. You monitor its work and adjust instructions whenever needed.',
+    ],
+    'assistant' => [
+        'label' => 'Talk to the product',
+        'title' => 'Not sure whether Legatus fits your business? Ask Legatus.',
+        'body' => 'The official Legatus guide explains features, plans, supported channels, setup, and what the platform can realistically do for your business.',
+        'example_one' => 'Which plan fits my business?',
+        'example_two' => 'Can it work with my website and Instagram?',
+        'example_three' => 'How do I connect my catalog?',
+        'cta' => 'Open Legatus chat',
+        'fallback' => 'Contact support',
     ],
     'final' => [
         'title' => 'Your time should not be spent on every answer and every post.', 'body' => 'Hand recurring questions, post preparation, and publishing over to Legatus.', 'rest' => 'Spend your time on new products, orders, business growth — or simply resting.', 'statement' => 'You run the business. Legatus handles daily communication.', 'annual_note' => 'Choose the one-year plan and we will build your online store at no extra cost.',

@@ -21,6 +21,7 @@ class LegatusCommandsTest extends TestCase
 
         foreach ([
             'legatus:bootstrap-demo-tenant',
+            'legatus:bootstrap-support-assistant',
             'legatus:eval',
             'legatus:sync-knowledge',
             'legatus:verify-openai',
