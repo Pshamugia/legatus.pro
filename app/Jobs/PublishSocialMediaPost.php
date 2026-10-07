@@ -76,7 +76,12 @@ class PublishSocialMediaPost implements ShouldQueue
             ->where('product_id', $post->product_id)
             ->where('status', 'published')
             ->whereKeyNot($post->id)
-            ->exists() || $publicationHistory->wasUsedOnAny($post->agent, $product, [$post->provider]);
+            ->exists() || $publicationHistory->wasUsedOnAny(
+                $post->agent,
+                $product,
+                [$post->provider],
+                $post->id,
+            );
         if ($alreadyPublished) {
             $post->update([
                 'status' => 'skipped',

@@ -75,7 +75,7 @@ class SocialMediaPublicationHistory
     }
 
     /** @param list<string> $providers */
-    public function wasUsedOnAny(Agent $agent, Product $product, array $providers): bool
+    public function wasUsedOnAny(Agent $agent, Product $product, array $providers, ?int $exceptPostId = null): bool
     {
         $keys = $this->identityKeys(
             $product,
@@ -85,7 +85,12 @@ class SocialMediaPublicationHistory
         );
 
         return $keys !== [] && collect($providers)->unique()->contains(
-            fn (string $provider): bool => $this->currentIdentityQuery($agent, $provider, $keys)->exists(),
+            fn (string $provider): bool => $this->currentIdentityQuery($agent, $provider, $keys)
+                ->when($exceptPostId !== null, fn ($query) => $query->where(function ($identityQuery) use ($exceptPostId): void {
+                    $identityQuery->whereNull('social_media_post_id')
+                        ->orWhere('social_media_post_id', '!=', $exceptPostId);
+                }))
+                ->exists(),
         );
     }
 
@@ -139,7 +144,12 @@ class SocialMediaPublicationHistory
                     ->get();
 
                 $cycleNumber = $this->cycleNumber($post->agent_id, $post->provider);
-                if ($existing->contains(fn (SocialMediaPublicationIdentity $identity): bool => $identity->cycle_number === $cycleNumber)) {
+                $currentCycleIdentities = $existing->filter(
+                    fn (SocialMediaPublicationIdentity $identity): bool => $identity->cycle_number === $cycleNumber,
+                );
+                if ($currentCycleIdentities->contains(
+                    fn (SocialMediaPublicationIdentity $identity): bool => $identity->social_media_post_id !== $post->id,
+                )) {
                     return false;
                 }
 

@@ -312,6 +312,68 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('This product was already published on this channel.', $duplicate->fresh()->failure_reason);
     }
 
+    public function test_instagram_retry_reuses_its_own_identity_claim_instead_of_skipping_itself(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('instagram-own-claim-retry');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Retryable Instagram Product', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['instagram']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'instagram',
+            'status' => 'queued',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'Verified retry caption',
+        ]);
+        $history = app(\App\Services\SocialMediaPublicationHistory::class);
+
+        Http::fake([
+            'https://graph.facebook.test/*/media*' => Http::sequence()
+                ->push(['error' => ['message' => 'Temporary Instagram failure']], 500)
+                ->push(['id' => 'retry-container'])
+                ->push(['id' => 'retry-instagram-post']),
+        ]);
+
+        try {
+            (new PublishSocialMediaPost($post->id))->handle(
+                app(MetaGraphClient::class),
+                app(SocialMediaTemplateRenderer::class),
+            );
+            $this->fail('The first Instagram request should fail and remain retryable.');
+        } catch (\Throwable) {
+            $post->refresh();
+            $this->assertSame('queued', $post->status);
+            $this->assertSame(1, $post->attempts);
+            $this->assertTrue($history->wasUsedOnAny($agent, $product, ['instagram']));
+            $this->assertFalse($history->wasUsedOnAny($agent, $product, ['instagram'], $post->id));
+        }
+
+        (new PublishSocialMediaPost($post->id))->handle(
+            app(MetaGraphClient::class),
+            app(SocialMediaTemplateRenderer::class),
+        );
+
+        $post->refresh();
+        $this->assertSame('published', $post->status);
+        $this->assertSame('retry-instagram-post', $post->provider_post_id);
+        $this->assertSame(2, $post->attempts);
+        $this->assertDatabaseMissing('social_publication_identities', [
+            'social_media_post_id' => $post->id,
+            'status' => 'claimed',
+        ]);
+        $this->assertDatabaseHas('social_publication_identities', [
+            'social_media_post_id' => $post->id,
+            'status' => 'published',
+            'provider_post_id' => 'retry-instagram-post',
+        ]);
+    }
+
     public function test_product_that_sells_out_after_scheduling_is_skipped_before_publish(): void
     {
         [$user, $agent] = $this->tenant('publish-time-stock-guard');
