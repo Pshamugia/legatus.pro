@@ -8,6 +8,7 @@ use App\Models\KnowledgeChunk;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\LegatusSupportAssistant;
+use App\Services\SalesToolbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\Http;
@@ -47,8 +48,45 @@ class LegatusSupportAssistantTest extends TestCase
         $this->assertDatabaseCount('agents', 1);
         $this->assertDatabaseCount('billing_access_grants', 1);
         $this->assertDatabaseCount('knowledge_sources', 1);
-        $this->assertDatabaseCount('knowledge_chunks', 6);
+        $this->assertDatabaseCount('knowledge_chunks', 12);
         $this->assertTrue(KnowledgeChunk::where('content', 'like', '%$30%')->exists());
+    }
+
+    public function test_landing_refreshes_a_stale_support_guide_before_showing_the_widget(): void
+    {
+        $agent = app(LegatusSupportAssistant::class)->bootstrap();
+        $source = $agent->knowledgeSources()->firstOrFail();
+        $source->update(['content_hash' => str_repeat('0', 64)]);
+        $source->chunks()->where('title', 'like', 'Plans and pricing%')->delete();
+
+        $this->get('/')->assertOk();
+
+        $source->refresh();
+        $this->assertNotSame(str_repeat('0', 64), $source->content_hash);
+        $this->assertSame(12, $source->chunks()->count());
+        $this->assertTrue($source->chunks()->where('content', 'like', '%$30%')->exists());
+    }
+
+    public function test_pricing_quick_action_finds_the_exact_verified_plan_details_without_embeddings(): void
+    {
+        config(['services.openai.key' => null]);
+        $agent = app(LegatusSupportAssistant::class)->bootstrap();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'support-pricing-visitor',
+            'status' => 'ai',
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_knowledge', [
+            'query' => 'რა გეგმები და ფასები აქვს Legatus-ს?',
+            '_source_scope' => 'business',
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('lexical', $result['method']);
+        $this->assertNotEmpty($result['results']);
+        $evidence = collect($result['results'])->pluck('excerpt')->implode(' ');
+        $this->assertStringContainsString('$30', $evidence);
+        $this->assertStringContainsString('$576', $evidence);
     }
 
     public function test_landing_embeds_the_official_support_widget_and_opens_it_from_the_page(): void
@@ -100,7 +138,7 @@ class LegatusSupportAssistantTest extends TestCase
                     'delivery_request_type' => 'none',
                     'is_human_request' => false,
                     'is_business_knowledge_request' => true,
-                    'knowledge_query' => 'რა ღირს Legatus Chat?',
+                    'knowledge_query' => 'რა გეგმები და ფასები აქვს Legatus-ს?',
                     'knowledge_scope' => 'business',
                     'is_catalog_follow_up' => false,
                     'catalog_scope_action' => 'none',
@@ -120,7 +158,7 @@ class LegatusSupportAssistantTest extends TestCase
             ->push(['id' => 'support-price-answer', 'output' => [[
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
-                    'text' => 'ჩვენი Legatus Chat გეგმა თვეში $30 ღირს.',
+                    'text' => 'ჩვენ გვაქვს ორი პაკეტი: Legatus Chat ღირს $30 თვეში, $162 ექვს თვეში ან $288 წელიწადში; Chat + Social — $60, $324 ან $576 შესაბამის პერიოდებზე.',
                     'intent' => 'discovery',
                     'confidence' => .99,
                     'handoff' => false,
@@ -135,15 +173,45 @@ class LegatusSupportAssistantTest extends TestCase
                         'amount' => 30,
                         'quantity' => null,
                         'reference' => 'Plans and pricing',
+                    ], [
+                        'type' => 'policy',
+                        'product_id' => null,
+                        'amount' => 162,
+                        'quantity' => null,
+                        'reference' => 'Plans and pricing',
+                    ], [
+                        'type' => 'policy',
+                        'product_id' => null,
+                        'amount' => 288,
+                        'quantity' => null,
+                        'reference' => 'Plans and pricing',
+                    ], [
+                        'type' => 'policy',
+                        'product_id' => null,
+                        'amount' => 60,
+                        'quantity' => null,
+                        'reference' => 'Plans and pricing',
+                    ], [
+                        'type' => 'policy',
+                        'product_id' => null,
+                        'amount' => 324,
+                        'quantity' => null,
+                        'reference' => 'Plans and pricing',
+                    ], [
+                        'type' => 'policy',
+                        'product_id' => null,
+                        'amount' => 576,
+                        'quantity' => null,
+                        'reference' => 'Plans and pricing',
                     ]],
                 ], JSON_UNESCAPED_UNICODE)]],
             ]], 'usage' => []]);
 
         $response = $this->postJson("/demo/{$agent->slug}/message", [
-            'message' => 'რა ღირს Legatus Chat?',
+            'message' => 'რა გეგმები და ფასები აქვს Legatus-ს?',
         ])->assertOk()->assertJsonPath('handoff', false);
 
-        $this->assertSame('ჩვენი Legatus Chat გეგმა თვეში $30 ღირს.', $response->json('text'));
+        $this->assertSame('ჩვენ გვაქვს ორი პაკეტი: Legatus Chat ღირს $30 თვეში, $162 ექვს თვეში ან $288 წელიწადში; Chat + Social — $60, $324 ან $576 შესაბამის პერიოდებზე.', $response->json('text'));
         $this->assertContains('search_knowledge', $response->json('tools_used'));
         $this->assertNotContains('search_products', $response->json('tools_used'));
         $this->assertSame('completed', AgentRun::where('agent_id', $agent->id)->latest('id')->value('status'));
