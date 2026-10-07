@@ -31,7 +31,7 @@ return [
         'closing' => 'You no longer need to prepare every post from scratch. You set the direction and schedule — Legatus handles the daily work.',
     ],
     'images' => [
-        'title' => 'A post-ready image that preserves the real look of your product.', 'truth' => 'Customers should see the product they will actually receive.', 'preparation' => 'Legatus prepares your images for social media while preserving the product’s real appearance and important details.', 'closing' => 'Your product stays true to life — and is presented better in the post.',
+        'title' => 'Use the product photo unchanged — or enhance it with AI Photo Editor.', 'truth' => 'You choose: Legatus can publish the catalog photo directly, without any visual changes.', 'preparation' => 'When you want a more distinctive post, AI Photo Editor creates a social-ready setting while keeping the product itself, its real appearance, and important details unchanged.', 'closing' => 'A direct photo or an AI-enhanced setting — either way, customers see the product they will actually receive.',
     ],
     'annual' => [
         'label' => 'Annual plan offer', 'title' => 'One annual plan. Your online store and AI assistant together.', 'intro' => 'Is your business only on Facebook and Instagram? You can leave the creation of your own online store to us.',
@@ -61,7 +61,7 @@ return [
         'post_ready' => 'AI post ready', 'auto_publishing' => 'Auto publishing', 'product' => 'Product', 'product_selected' => 'Catalog item selected',
         'content_ready' => 'Copy and visual prepared', 'publish' => 'Publish', 'social_inbox' => 'Social inbox', 'new' => 'new', 'reply_ready' => 'AI reply prepared',
         'business_brain' => 'Business brain', 'ready_to_answer' => 'Ready to answer', 'products' => 'Products', 'prices' => 'Prices', 'stock' => 'Stock', 'brand_voice' => 'Brand voice',
-        'original' => 'Original', 'social_ready' => 'Social ready',
+        'original' => 'Unchanged photo', 'social_ready' => 'AI Photo Editor',
     ],
     'footer' => ['support' => 'Questions or support?', 'terms' => 'Terms of Service', 'privacy' => 'Privacy Policy', 'refunds' => 'Refund Policy'],
 ];
