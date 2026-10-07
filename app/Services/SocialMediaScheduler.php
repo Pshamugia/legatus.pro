@@ -121,35 +121,10 @@ class SocialMediaScheduler
             $existingSnapshots,
             $this->templates->snapshots($agent, $missingSnapshotProviders),
         );
-        $this->publicationHistory->backfill($agent);
-        $allProducts = $this->eligibleProductVariants(
-            $agent,
-            $schedule->categories ?? [],
-            $schedule->languages ?? [],
-            $providers,
-        )->unique(fn (array $variant): int => (int) $variant['product']->id)->values();
-        $previouslyPosted = $agent->socialMediaPosts()
-            ->whereIn('provider', $providers)
-            ->whereIn('status', ['scheduled', 'preparing', 'queued'])
-            ->where(function ($query) use ($schedule): void {
-                $query->where('social_media_schedule_id', '!=', $schedule->id)
-                    ->orWhereIn('status', ['queued', 'published']);
-            })
-            ->whereNotNull('product_id')
-            ->pluck('product_id')
-            ->mapWithKeys(fn ($id): array => [(int) $id => true]);
-        $usedProductIds = $this->publicationHistory->usedProductIdsOnAny($agent, $allProducts->pluck('product'), $providers);
-        if ($this->startNewCycleWhenExhausted($agent, $allProducts, $providers, $usedProductIds)) {
-            $usedProductIds = collect();
-        }
-        $products = $allProducts
-            ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
-            ->reject(fn (array $variant): bool => isset($usedProductIds[(int) $variant['product']->id]))
-            ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $schedule->timezone)->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $schedule->timezone)->startOfDay();
 
-        return DB::transaction(function () use ($schedule, $agent, $data, $providers, $templateSnapshots, $products, $starts, $ends): SocialMediaSchedule {
+        return DB::transaction(function () use ($schedule, $agent, $data, $providers, $templateSnapshots, $starts, $ends): SocialMediaSchedule {
             $lockedSchedule = SocialMediaSchedule::query()->whereKey($schedule->id)->lockForUpdate()->firstOrFail();
             if ($lockedSchedule->copy_mode === 'ai') {
                 Agent::query()->whereKey($agent->id)->lockForUpdate()->firstOrFail();
@@ -170,7 +145,6 @@ class SocialMediaScheduler
                 'template_snapshots' => $templateSnapshots,
             ]);
 
-            $productIndex = 0;
             $nowUtc = CarbonImmutable::now('UTC');
             for ($day = $starts; $day->lte($ends); $day = $day->addDay()) {
                 $remainingAiProducts = $lockedSchedule->copy_mode === 'ai'
@@ -183,26 +157,17 @@ class SocialMediaScheduler
                     if ($slot->lte($nowUtc) || isset($immutableSlots[$slot->format('Y-m-d H:i:s')])) {
                         continue;
                     }
-                    $variant = $products->get($productIndex);
-                    if ($variant) {
-                        $productIndex++;
-                    }
                     $copyMode = $remainingAiProducts > 0 ? 'ai' : 'original';
                     if ($copyMode === 'ai') {
                         $remainingAiProducts--;
                     }
                     foreach ($providers as $provider) {
-                        $lockedSchedule->posts()->create($variant
-                            ? $this->postAttributes(
-                                $agent,
-                                $variant['product'],
-                                $provider,
-                                $slot,
-                                $templateSnapshots[$provider],
-                                $variant['language'],
-                                $copyMode,
-                            )
-                            : $this->pendingProductAttributes($agent, $provider, $slot, $copyMode));
+                        // Editing must stay a bounded database operation. Product
+                        // selection, storefront verification and image rendering
+                        // are deliberately deferred to PrepareSocialMediaSlot.
+                        $lockedSchedule->posts()->create(
+                            $this->pendingProductAttributes($agent, $provider, $slot, $copyMode),
+                        );
                     }
                 }
             }

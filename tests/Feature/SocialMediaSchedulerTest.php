@@ -2510,6 +2510,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame('published', $published->fresh()->status);
         $this->assertTrue($published->fresh()->scheduled_for->equalTo($originalPublishedFor));
         $this->assertSame(4, $schedule->posts()->where('status', 'scheduled')->count());
+        $this->assertSame(0, $schedule->posts()->where('status', 'scheduled')->whereNotNull('product_id')->count());
         $this->assertSame(
             [
                 CarbonImmutable::parse("{$newDate} 11:15", 'Asia/Tbilisi')->utc()->format('Y-m-d H:i:s'),
