@@ -139,7 +139,10 @@ class LegatusSupportAssistantTest extends TestCase
                     'is_human_request' => false,
                     'is_business_knowledge_request' => true,
                     'knowledge_query' => 'რა გეგმები და ფასები აქვს Legatus-ს?',
-                    'knowledge_scope' => 'business',
+                    // Reproduce the production classifier decision: pricing
+                    // was categorized as terms even though the platform's
+                    // complete official guide is stored as business knowledge.
+                    'knowledge_scope' => 'terms',
                     'is_catalog_follow_up' => false,
                     'catalog_scope_action' => 'none',
                     'recommendation_scope' => 'none',
@@ -214,7 +217,11 @@ class LegatusSupportAssistantTest extends TestCase
         $this->assertSame('ჩვენ გვაქვს ორი პაკეტი: Legatus Chat ღირს $30 თვეში, $162 ექვს თვეში ან $288 წელიწადში; Chat + Social — $60, $324 ან $576 შესაბამის პერიოდებზე.', $response->json('text'));
         $this->assertContains('search_knowledge', $response->json('tools_used'));
         $this->assertNotContains('search_products', $response->json('tools_used'));
-        $this->assertSame('completed', AgentRun::where('agent_id', $agent->id)->latest('id')->value('status'));
+        $run = AgentRun::where('agent_id', $agent->id)->latest('id')->firstOrFail();
+        $this->assertSame('completed', $run->status);
+        $knowledgeSearch = collect($run->tools_used)->firstWhere('name', 'search_knowledge');
+        $this->assertSame('business', data_get($knowledgeSearch, 'arguments._source_scope'));
+        $this->assertNotEmpty(data_get($knowledgeSearch, 'result.results'));
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/responses')
             && str_contains((string) data_get($request->data(), 'instructions'), 'official Legatus product guide'));

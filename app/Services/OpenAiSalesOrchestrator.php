@@ -311,9 +311,7 @@ class OpenAiSalesOrchestrator
         $businessKnowledge = null;
         if (($catalogContext['is_business_knowledge_request'] ?? false) === true) {
             $knowledgeQuery = trim((string) ($catalogContext['knowledge_query'] ?? ''));
-            $knowledgeScope = in_array(($catalogContext['knowledge_scope'] ?? null), ['business', 'terms'], true)
-                ? (string) $catalogContext['knowledge_scope']
-                : 'business';
+            $knowledgeScope = $this->knowledgeScope($agent, $catalogContext['knowledge_scope'] ?? null);
             $arguments = [
                 'query' => $knowledgeQuery !== '' ? $knowledgeQuery : $message,
                 '_source_scope' => $knowledgeScope,
@@ -1792,6 +1790,21 @@ class OpenAiSalesOrchestrator
         }
 
         return $resolved;
+    }
+
+    private function knowledgeScope(Agent $agent, mixed $requestedScope): string
+    {
+        // The platform assistant's official guide is intentionally maintained
+        // as one complete business source. Pricing and commercial terms are
+        // part of that guide, so a model-selected tenant terms scope must not
+        // hide the verified platform documentation from retrieval.
+        if (data_get($agent->settings, 'assistant_mode') === 'platform_support') {
+            return 'business';
+        }
+
+        return in_array($requestedScope, ['business', 'terms'], true)
+            ? (string) $requestedScope
+            : 'business';
     }
 
     private function explicitQuotedCatalogIdentity(string $message): ?string
