@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Agent;
 use App\Models\Organization;
 use App\Models\PaddleSubscription;
+use App\Services\LegatusSupportAssistant;
 use App\Services\OpenAiCostEstimator;
 use App\Services\RunwayClient;
 use Illuminate\Http\RedirectResponse;
@@ -102,6 +104,50 @@ class SuperAdminController extends Controller
         $runway = $this->runwaySummary($runwayClient);
 
         return view('super-admin.index', compact('organizations', 'metrics', 'runway', 'environment', 'search'));
+    }
+
+    public function supportConversations(Request $request): View
+    {
+        $agent = Agent::query()
+            ->where('slug', LegatusSupportAssistant::AGENT_SLUG)
+            ->first();
+        $status = $request->string('status')->toString();
+        $search = trim($request->string('search')->toString());
+        $query = $agent?->conversations()
+            ->where('channel', '!=', 'eval')
+            ->withCount('messages')
+            ->with(['messages' => fn ($messages) => $messages->latest('id')->limit(1)])
+            ->when(in_array($status, ['ai', 'human', 'closed'], true), fn ($conversations) => $conversations->where('status', $status))
+            ->when($search !== '', fn ($conversations) => $conversations->whereHas(
+                'messages',
+                fn ($messages) => $messages->where('content', 'like', "%{$search}%"),
+            ))
+            ->latest('last_message_at')
+            ->latest('id');
+
+        $conversations = $query?->paginate(25)->withQueryString();
+        $selected = null;
+        if ($agent && $request->filled('conversation')) {
+            $selected = $agent->conversations()
+                ->where('channel', '!=', 'eval')
+                ->with(['messages' => fn ($messages) => $messages->orderBy('id')])
+                ->find((int) $request->query('conversation'));
+            abort_unless($selected, 404);
+        } elseif ($agent && $conversations?->isNotEmpty()) {
+            $selected = $agent->conversations()
+                ->with(['messages' => fn ($messages) => $messages->orderBy('id')])
+                ->find($conversations->first()->id);
+        }
+
+        $metrics = [
+            'total' => $agent?->conversations()->where('channel', '!=', 'eval')->count() ?? 0,
+            'today' => $agent?->conversations()->where('channel', '!=', 'eval')->where('created_at', '>=', now()->startOfDay())->count() ?? 0,
+            'needs_human' => $agent?->conversations()->where('channel', '!=', 'eval')->where('status', 'human')->count() ?? 0,
+        ];
+
+        return view('super-admin.support-conversations', compact(
+            'agent', 'conversations', 'selected', 'metrics', 'status', 'search',
+        ));
     }
 
     public function grantAccess(Request $request, Organization $organization): RedirectResponse

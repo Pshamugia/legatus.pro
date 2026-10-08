@@ -103,6 +103,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/super-admin', [SuperAdminController::class, 'index'])
         ->middleware(RequireSuperAdmin::class)
         ->name('super-admin.index');
+    Route::get('/super-admin/support-conversations', [SuperAdminController::class, 'supportConversations'])
+        ->middleware(RequireSuperAdmin::class)
+        ->name('super-admin.support-conversations');
     Route::post('/super-admin/businesses/{organization}/complimentary-access', [SuperAdminController::class, 'grantAccess'])
         ->middleware([RequireSuperAdmin::class, 'throttle:30,1'])
         ->name('super-admin.access.grant');

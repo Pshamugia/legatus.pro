@@ -6,6 +6,7 @@ use App\Models\AgentRun;
 use App\Models\Organization;
 use App\Models\PaddleSubscription;
 use App\Models\User;
+use App\Services\LegatusSupportAssistant;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -194,5 +195,44 @@ class SuperAdminTest extends TestCase
             ->assertOk()
             ->assertSee('Runway balance')
             ->assertSee('Unavailable');
+    }
+
+    public function test_only_super_admin_can_read_isolated_legatus_support_conversations(): void
+    {
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        $regular = User::factory()->create(['email' => 'owner@example.com']);
+        $support = app(LegatusSupportAssistant::class)->bootstrap();
+        $conversation = $support->conversations()->create([
+            'visitor_id' => 'private-support-visitor',
+            'channel' => 'widget',
+            'status' => 'ai',
+            'last_message_at' => now(),
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'How does Legatus pricing work?']);
+        $conversation->messages()->create(['role' => 'assistant', 'content' => 'Here are the verified Legatus plans.']);
+
+        $otherOrganization = Organization::create(['name' => 'Other Business', 'slug' => 'other-business']);
+        $otherAgent = $otherOrganization->agents()->create([
+            'name' => 'Other Assistant', 'slug' => 'other-assistant', 'business_name' => 'Other Business',
+            'channels' => ['web'], 'settings' => [],
+        ]);
+        $otherConversation = $otherAgent->conversations()->create([
+            'visitor_id' => 'other-private-visitor', 'channel' => 'widget', 'status' => 'ai', 'last_message_at' => now(),
+        ]);
+        $otherConversation->messages()->create(['role' => 'customer', 'content' => 'Other tenant secret']);
+
+        $this->get(route('super-admin.support-conversations'))->assertRedirect(route('login'));
+        $this->actingAs($regular)->get(route('super-admin.support-conversations'))->assertForbidden();
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Support conversations');
+        $this->actingAs($admin)->get(route('super-admin.support-conversations', ['conversation' => $conversation->id]))
+            ->assertOk()
+            ->assertSee('How does Legatus pricing work?')
+            ->assertSee('Here are the verified Legatus plans.')
+            ->assertDontSee('Other tenant secret')
+            ->assertDontSee('private-support-visitor');
+        $this->actingAs($admin)->get(route('super-admin.support-conversations', ['conversation' => $otherConversation->id]))
+            ->assertNotFound();
     }
 }
