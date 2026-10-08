@@ -13,11 +13,14 @@ use App\Services\AiReelSourceImageStorage;
 use App\Services\MetaGraphClient;
 use App\Services\ReelCreditService;
 use App\Services\ReelMusicService;
+use App\Services\ReelVideoEditor;
 use App\Services\RunwayClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -280,9 +283,11 @@ class AiReelsTest extends TestCase
         [$user, $agent] = $this->tenant('saved-custom-reel');
         $this->connections($agent);
         Storage::disk('local')->put('reels/saved.mp4', 'video');
+        Storage::disk('local')->put('reels/original-saved.mp4', 'original-video');
         $reel = $agent->aiReels()->create([
             'mode' => 'custom', 'providers' => ['facebook', 'instagram'],
             'status' => 'awaiting_approval', 'video_path' => 'reels/saved.mp4',
+            'original_video_path' => 'reels/original-saved.mp4', 'video_duration_ms' => 3400,
             'caption' => 'Generated caption',
         ]);
         foreach (['facebook', 'instagram'] as $provider) {
@@ -317,6 +322,9 @@ class AiReelsTest extends TestCase
         $this->assertSame('Final saved caption 🚀 #Publish', $reel->caption);
         $this->assertNotNull($reel->approved_at);
         $this->assertNotNull($reel->scheduled_for);
+        $this->assertNull($reel->original_video_path);
+        Storage::disk('local')->assertMissing('reels/original-saved.mp4');
+        Storage::disk('local')->assertExists('reels/saved.mp4');
     }
 
     public function test_reel_caption_is_sent_to_facebook_and_instagram(): void
@@ -378,6 +386,8 @@ class AiReelsTest extends TestCase
         $this->assertStringContainsString('https://shop.example/products/caption-product', $copy['caption']);
         Http::assertSent(fn ($request): bool => str_contains((string) $request['input'], '2 to 5 relevant emojis')
             && str_contains((string) $request['input'], '2 to 5 relevant hashtags')
+            && str_contains((string) $request['input'], 'preserve any lettering already printed on the reference product exactly as shown')
+            && str_contains((string) $request['input'], 'finish on natural product footage rather than a title card or invented brand mark')
             && str_contains((string) $request['input'], 'do not invent claims'));
     }
 
@@ -804,6 +814,143 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseMissing('ai_reels', ['id' => $reel->id]);
         Storage::disk('local')->assertMissing('reels/remove-preview.mp4');
         $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+    }
+
+    public function test_business_can_trim_an_unapproved_custom_reel_without_spending_another_credit(): void
+    {
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('trim-custom-reel');
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-trim-preview');
+        Storage::disk('local')->put('reels/original-preview.mp4', 'original-video');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'video_path' => 'reels/original-preview.mp4', 'duration_seconds' => 5, 'credit_cost' => 1,
+        ]);
+        app(ReelCreditService::class)->debit($organization, 1, 'custom-reel:'.$reel->id);
+        $editor = \Mockery::mock(ReelVideoEditor::class);
+        $editor->shouldReceive('trim')->once()->withArgs(fn (AiReel $candidate, float $start, float $end) => $candidate->is($reel) && $start === 1.2 && $end === 4.6)->andReturn([
+            'path' => 'reels/trimmed-preview.mp4', 'duration_ms' => 3400,
+        ]);
+        $this->app->instance(ReelVideoEditor::class, $editor);
+
+        $this->actingAs($user)->post(route('ai-reels.trim', $reel), [
+            'trim_start' => '1.2', 'trim_end' => '4.6',
+        ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHas('reel_success', 'Reel trimmed. Review the updated video before publishing.');
+
+        $reel->refresh();
+        $this->assertSame('reels/trimmed-preview.mp4', $reel->video_path);
+        $this->assertSame('reels/original-preview.mp4', $reel->original_video_path);
+        $this->assertSame(3400, $reel->video_duration_ms);
+        $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+        Storage::disk('local')->assertExists('reels/original-preview.mp4');
+
+        $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertOk()
+            ->assertSee('Trim / cut video')
+            ->assertSee('Preview selection')
+            ->assertSee('Trimming video…')
+            ->assertSee(route('ai-reels.trim', $reel), false)
+            ->assertSee(route('ai-reels.restore', $reel), false)
+            ->assertSee('3.4 seconds');
+    }
+
+    public function test_reel_video_editor_uses_ffmpeg_for_an_exact_compatible_trim(): void
+    {
+        Storage::fake('local');
+        [, $agent] = $this->tenant('ffmpeg-trim');
+        Storage::disk('local')->put('reels/source.mp4', 'source-video');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'video_path' => 'reels/source.mp4', 'duration_seconds' => 5,
+        ]);
+        config()->set('reel_music.ffmpeg_binary', '/home/legatusp/bin/ffmpeg');
+        Process::fake(function ($process) {
+            File::put($process->command[array_key_last($process->command)], 'trimmed-video');
+
+            return Process::result();
+        });
+
+        $edited = app(ReelVideoEditor::class)->trim($reel, 1.2, 4.6);
+
+        $this->assertSame(3400, $edited['duration_ms']);
+        Storage::disk('local')->assertExists($edited['path']);
+        Process::assertRan(fn ($process) => $process->command[0] === '/home/legatusp/bin/ffmpeg'
+            && in_array('1.200', $process->command, true)
+            && in_array('3.400', $process->command, true)
+            && in_array('libx264', $process->command, true)
+            && in_array('veryfast', $process->command, true)
+            && in_array('1', $process->command, true)
+            && in_array('yuv420p', $process->command, true)
+            && in_array('0:a?', $process->command, true));
+    }
+
+    public function test_trim_failure_returns_a_visible_form_error_without_replacing_the_video(): void
+    {
+        Storage::fake('local');
+        [$user, $agent] = $this->tenant('failed-trim');
+        Storage::disk('local')->put('reels/original.mp4', 'original-video');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'video_path' => 'reels/original.mp4', 'duration_seconds' => 5,
+        ]);
+        $editor = \Mockery::mock(ReelVideoEditor::class);
+        $editor->shouldReceive('trim')->once()->andThrow(new \RuntimeException('FFmpeg failed'));
+        $this->app->instance(ReelVideoEditor::class, $editor);
+
+        $this->actingAs($user)->post(route('ai-reels.trim', $reel), [
+            'trim_start' => 0, 'trim_end' => 4,
+        ])->assertSessionHasErrors([
+            'trim_end' => 'The video could not be trimmed. Please try again.',
+        ]);
+
+        $this->assertSame('reels/original.mp4', $reel->fresh()->video_path);
+        Storage::disk('local')->assertExists('reels/original.mp4');
+    }
+
+    public function test_business_can_restore_the_original_unapproved_reel(): void
+    {
+        Storage::fake('local');
+        [$user, $agent] = $this->tenant('restore-custom-reel');
+        Storage::disk('local')->put('reels/original-preview.mp4', 'original-video');
+        Storage::disk('local')->put('reels/trimmed-preview.mp4', 'trimmed-video');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'saved',
+            'video_path' => 'reels/trimmed-preview.mp4', 'original_video_path' => 'reels/original-preview.mp4',
+            'duration_seconds' => 5, 'video_duration_ms' => 3400,
+        ]);
+
+        $this->actingAs($user)->post(route('ai-reels.restore', $reel))
+            ->assertRedirect(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertSessionHas('reel_success', 'The original Reel was restored.');
+
+        $reel->refresh();
+        $this->assertSame('reels/original-preview.mp4', $reel->video_path);
+        $this->assertNull($reel->original_video_path);
+        $this->assertNull($reel->video_duration_ms);
+        Storage::disk('local')->assertMissing('reels/trimmed-preview.mp4');
+        Storage::disk('local')->assertExists('reels/original-preview.mp4');
+    }
+
+    public function test_trim_rejects_another_tenants_reel_and_invalid_bounds(): void
+    {
+        [$user, $agent] = $this->tenant('trim-own-reel');
+        [, $otherAgent] = $this->tenant('trim-other-reel');
+        $ownReel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'video_path' => 'reels/own.mp4', 'duration_seconds' => 5,
+        ]);
+        $otherReel = $otherAgent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'awaiting_approval',
+            'video_path' => 'reels/other.mp4', 'duration_seconds' => 5,
+        ]);
+
+        $this->actingAs($user)->post(route('ai-reels.trim', $otherReel), [
+            'trim_start' => 0, 'trim_end' => 4,
+        ])->assertNotFound();
+        $this->actingAs($user)->post(route('ai-reels.trim', $ownReel), [
+            'trim_start' => 4.8, 'trim_end' => 5,
+        ])->assertSessionHasErrors(['trim_start']);
     }
 
     public function test_business_cannot_remove_another_tenants_preview(): void

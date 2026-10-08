@@ -9,6 +9,7 @@ use App\Services\AiReelScheduler;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
 use App\Services\ReelMusicService;
+use App\Services\ReelVideoEditor;
 use App\Services\RunwayClient;
 use App\Services\TenantContext;
 use Illuminate\Http\JsonResponse;
@@ -187,12 +188,17 @@ class AiReelController extends Controller
         abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
         abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && $reel->video_path, 422);
         $caption = $this->validatedCaption($request);
+        $originalVideoPath = $reel->original_video_path;
         $reel->update([
             'caption' => $caption,
             'status' => 'ready',
             'approved_at' => now(),
             'scheduled_for' => now(),
+            'original_video_path' => null,
         ]);
+        if (filled($originalVideoPath) && $originalVideoPath !== $reel->video_path) {
+            Storage::disk('local')->delete($originalVideoPath);
+        }
 
         return back()->with('reel_success', 'Reel approved. It is queued for Facebook and Instagram publishing.');
     }
@@ -211,6 +217,74 @@ class AiReelController extends Controller
 
         return redirect()->route('ai-reels.index', ['tab' => 'custom'])
             ->with('reel_success', 'Reel saved for later. Nothing was published.');
+    }
+
+    public function trim(Request $request, AiReel $reel, TenantContext $tenant, ReelVideoEditor $editor)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
+        abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && $reel->video_path && ! $reel->approved_at, 422);
+
+        $sourceDuration = ($reel->video_duration_ms ?? ($reel->duration_seconds * 1000)) / 1000;
+        $data = $request->validate([
+            'trim_start' => ['required', 'numeric', 'min:0', 'max:'.max(0, $sourceDuration - 0.5)],
+            'trim_end' => ['required', 'numeric', 'min:0.5', 'max:'.$sourceDuration, 'gt:trim_start'],
+        ]);
+        $start = round((float) $data['trim_start'], 3);
+        $end = round((float) $data['trim_end'], 3);
+        if (($end - $start) < 0.5) {
+            throw ValidationException::withMessages(['trim_end' => 'Keep at least 0.5 seconds of the Reel.']);
+        }
+
+        $previousVideoPath = $reel->video_path;
+        $originalVideoPath = $reel->original_video_path ?: $previousVideoPath;
+        try {
+            $edited = $editor->trim($reel, $start, $end);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            throw ValidationException::withMessages([
+                'trim_end' => 'The video could not be trimmed. Please try again.',
+            ]);
+        }
+        try {
+            $reel->update([
+                'video_path' => $edited['path'],
+                'original_video_path' => $originalVideoPath,
+                'video_duration_ms' => $edited['duration_ms'],
+            ]);
+        } catch (\Throwable $exception) {
+            Storage::disk('local')->delete($edited['path']);
+
+            throw $exception;
+        }
+        if ($previousVideoPath !== $originalVideoPath) {
+            Storage::disk('local')->delete($previousVideoPath);
+        }
+
+        return redirect()->route('ai-reels.index', ['tab' => 'custom'])
+            ->with('reel_success', 'Reel trimmed. Review the updated video before publishing.');
+    }
+
+    public function restore(AiReel $reel, TenantContext $tenant)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($reel->agent_id === $tenant->agent()->id && $reel->mode === 'custom', 404);
+        abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && $reel->original_video_path && ! $reel->approved_at, 422);
+        abort_unless(Storage::disk('local')->exists($reel->original_video_path), 422);
+
+        $trimmedPath = $reel->video_path;
+        $reel->update([
+            'video_path' => $reel->original_video_path,
+            'original_video_path' => null,
+            'video_duration_ms' => null,
+        ]);
+        if ($trimmedPath !== $reel->video_path) {
+            Storage::disk('local')->delete($trimmedPath);
+        }
+
+        return redirect()->route('ai-reels.index', ['tab' => 'custom'])
+            ->with('reel_success', 'The original Reel was restored.');
     }
 
     public function cancel(AiReel $reel, TenantContext $tenant, RunwayClient $runway, ReelCreditService $credits, AiReelSourceImageStorage $images)
@@ -262,10 +336,9 @@ class AiReelController extends Controller
         abort_unless(in_array($reel->status, ['awaiting_approval', 'saved'], true) && ! $reel->approved_at, 422);
 
         $videoPath = $reel->video_path;
+        $originalVideoPath = $reel->original_video_path;
         $images->delete($reel);
-        if (filled($videoPath)) {
-            Storage::disk('local')->delete($videoPath);
-        }
+        Storage::disk('local')->delete(array_values(array_unique(array_filter([$videoPath, $originalVideoPath]))));
         $reel->delete();
 
         return redirect()->route('ai-reels.index', ['tab' => 'custom'])

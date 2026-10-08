@@ -14,6 +14,7 @@ class AiReel extends Model
         'providers' => 'array',
         'duration_seconds' => 'integer',
         'credit_cost' => 'integer',
+        'video_duration_ms' => 'integer',
         'scheduled_for' => 'datetime',
         'generated_at' => 'datetime',
         'approved_at' => 'datetime',

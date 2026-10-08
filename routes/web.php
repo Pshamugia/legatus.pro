@@ -221,6 +221,10 @@ Route::middleware('auth')->group(function () {
             ->middleware('throttle:20,1')->name('ai-reels.approve');
         Route::post('/app/ai-reels/{reel}/save', [AiReelController::class, 'save'])
             ->middleware('throttle:20,1')->name('ai-reels.save');
+        Route::post('/app/ai-reels/{reel}/trim', [AiReelController::class, 'trim'])
+            ->middleware('throttle:20,1')->name('ai-reels.trim');
+        Route::post('/app/ai-reels/{reel}/restore', [AiReelController::class, 'restore'])
+            ->middleware('throttle:20,1')->name('ai-reels.restore');
         Route::post('/app/ai-reels/{reel}/cancel', [AiReelController::class, 'cancel'])
             ->middleware('throttle:20,1')->name('ai-reels.cancel');
         Route::delete('/app/ai-reels/{reel}', [AiReelController::class, 'destroy'])
