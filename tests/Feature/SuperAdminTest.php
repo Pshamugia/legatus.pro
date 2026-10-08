@@ -230,6 +230,8 @@ class SuperAdminTest extends TestCase
             ->assertOk()
             ->assertSee('How does Legatus pricing work?')
             ->assertSee('Here are the verified Legatus plans.')
+            ->assertSee('data-scroll-region="conversation-messages"', false)
+            ->assertSee('.messages{flex:1;min-height:0;', false)
             ->assertDontSee('Other tenant secret')
             ->assertDontSee('private-support-visitor');
         $this->actingAs($admin)->get(route('super-admin.support-conversations', ['conversation' => $otherConversation->id]))
