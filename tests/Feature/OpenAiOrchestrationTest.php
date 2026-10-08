@@ -2141,6 +2141,29 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('repeated the previous assistant answer', $reason);
     }
 
+    public function test_repeating_the_same_question_may_receive_the_same_verified_answer_without_handoff(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'repeat-question-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $question = 'რომელ საკომუნიკაციო და გამოსაქვეყნებელ არხებს უჭერს მხარს Legatus?';
+        $answer = 'Facebook, Instagram და Threads დაკავშირების შემდეგ მხარდაჭერილია.';
+        $conversation->messages()->create(['role' => 'customer', 'content' => $question]);
+        $conversation->messages()->create(['role' => 'assistant', 'content' => $answer]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => $question]);
+
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $reason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => $answer, 'intent' => 'discovery', 'confidence' => .99,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ], collect());
+
+        $this->assertNull($reason);
+    }
+
     public function test_guardrail_rejects_an_offer_to_place_an_order_and_collect_checkout_data(): void
     {
         $this->seed();

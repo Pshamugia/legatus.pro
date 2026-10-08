@@ -2162,9 +2162,19 @@ class OpenAiSalesOrchestrator
             ->where('role', 'assistant')
             ->latest('id')
             ->value('content');
+        $recentCustomerTexts = $conversation->messages()
+            ->where('role', 'customer')
+            ->latest('id')
+            ->limit(2)
+            ->pluck('content')
+            ->map(fn ($content): string => Str::squish((string) $content));
+        $customerRepeatedSameRequest = $recentCustomerTexts->count() === 2
+            && $recentCustomerTexts->first() !== ''
+            && $recentCustomerTexts->first() === $recentCustomerTexts->last();
         if (is_string($previousAssistantText)
             && Str::squish($previousAssistantText) !== ''
-            && Str::squish($previousAssistantText) === Str::squish((string) ($data['text'] ?? ''))) {
+            && Str::squish($previousAssistantText) === Str::squish((string) ($data['text'] ?? ''))
+            && ! $customerRepeatedSameRequest) {
             return 'The response merely repeated the previous assistant answer instead of handling the new dialogue turn.';
         }
 
