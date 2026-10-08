@@ -21,7 +21,10 @@ class AgentController extends Controller
         $demoAgent = Agent::where('is_active', true)->where('slug', 'legatus-demo')->first();
         $supportAgent = $support->findActive();
         $supportWidgetUrl = $supportAgent
-            ? URL::signedRoute('widget.install.script', ['agent' => $supportAgent->getKey()])
+            ? URL::signedRoute('widget.install.script', [
+                'agent' => $supportAgent->getKey(),
+                'lang' => app()->getLocale(),
+            ])
             : null;
 
         return view('landing', compact('demoAgent', 'supportAgent', 'supportWidgetUrl'));

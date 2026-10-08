@@ -139,6 +139,35 @@ class LegatusSupportAssistantTest extends TestCase
             ->assertSee('Ask Legatus');
     }
 
+    public function test_landing_language_choice_is_passed_to_the_support_launcher_and_frame(): void
+    {
+        config([
+            'app.url' => 'https://legatus.example',
+            'legatus.widget_country_server_key' => 'GEOIP_COUNTRY_CODE',
+            'legatus.widget_country_lookup_url' => null,
+        ]);
+        app(LegatusSupportAssistant::class)->bootstrap();
+
+        $landing = $this->withSession(['ui_locale' => 'en'])
+            ->withServerVariables(['GEOIP_COUNTRY_CODE' => 'GE'])
+            ->get('/')
+            ->assertOk()
+            ->assertHeader('Content-Language', 'en');
+
+        preg_match('/<script src="([^"]*\/widget\/install\/[^\"]+)" async><\/script>/', $landing->getContent(), $matches);
+        $this->assertCount(2, $matches);
+        $scriptUrl = html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5);
+        $this->assertStringContainsString('lang=en', $scriptUrl);
+
+        $launcher = $this->withServerVariables(['GEOIP_COUNTRY_CODE' => 'GE'])
+            ->get($scriptUrl)
+            ->assertOk()
+            ->assertHeader('Content-Language', 'en');
+
+        $this->assertStringContainsString('launcherLabel="Ask Legatus"', $launcher->getContent());
+        $this->assertStringContainsString('lang=en', $launcher->getContent());
+    }
+
     public function test_platform_widget_uses_product_guide_copy_instead_of_store_shopping_prompts(): void
     {
         $agent = app(LegatusSupportAssistant::class)->bootstrap();
