@@ -89,6 +89,34 @@ class LegatusSupportAssistantTest extends TestCase
         $this->assertStringContainsString('$576', $evidence);
     }
 
+    public function test_channel_and_overview_quick_actions_retrieve_complete_social_publishing_facts(): void
+    {
+        config(['services.openai.key' => null]);
+        $agent = app(LegatusSupportAssistant::class)->bootstrap();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'support-channel-visitor',
+            'status' => 'ai',
+        ]);
+
+        foreach ([
+            'რომელ საკომუნიკაციო და გამოსაქვეყნებელ არხებს უჭერს მხარს Legatus?',
+            'როგორ მუშაობს Legatus ბიზნესისთვის?',
+        ] as $query) {
+            $result = app(SalesToolbox::class)->execute('search_knowledge', [
+                'query' => $query,
+                '_source_scope' => 'business',
+            ], $agent, $conversation);
+
+            $this->assertTrue($result['ok']);
+            $this->assertSame('lexical', $result['method']);
+            $evidence = collect($result['results'])->pluck('excerpt')->implode(' ');
+            $this->assertStringContainsString('Facebook', $evidence);
+            $this->assertStringContainsString('Instagram', $evidence);
+            $this->assertStringContainsString('Threads', $evidence);
+            $this->assertStringContainsString('ავტომატ', $evidence);
+        }
+    }
+
     public function test_landing_embeds_the_official_support_widget_and_opens_it_from_the_page(): void
     {
         config(['app.url' => 'http://localhost']);
@@ -224,6 +252,7 @@ class LegatusSupportAssistantTest extends TestCase
         $this->assertNotEmpty(data_get($knowledgeSearch, 'result.results'));
 
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/responses')
-            && str_contains((string) data_get($request->data(), 'instructions'), 'official Legatus product guide'));
+            && str_contains((string) data_get($request->data(), 'instructions'), 'official Legatus product guide')
+            && str_contains((string) data_get($request->data(), 'instructions'), 'automated product publishing'));
     }
 }

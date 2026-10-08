@@ -595,7 +595,7 @@ class SalesToolbox
             }
         });
 
-        $results = $q->limit(5)
+        $results = $q->limit(50)
             ->get(['id', 'kind', 'title', 'content', 'metadata'])
             ->map(function ($chunk) use ($terms): array {
                 $haystack = Str::lower(implode(' ', [$chunk->title, $chunk->content]));
@@ -608,9 +608,17 @@ class SalesToolbox
                     'excerpt' => Str::limit($chunk->content, 700),
                     'metadata' => $chunk->metadata,
                     'matched_terms' => $matchedTerms->all(),
+                    '_match_count' => $matchedTerms->count(),
                 ];
             })
             ->filter(fn (array $result) => $result['matched_terms'] !== [])
+            ->sortByDesc('_match_count')
+            ->take(5)
+            ->map(function (array $result): array {
+                unset($result['_match_count']);
+
+                return $result;
+            })
             ->values()
             ->all();
 
