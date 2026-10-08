@@ -46,7 +46,8 @@ class AiReelsTest extends TestCase
         $response->assertOk()
             ->assertSee('Create AI Reels')
             ->assertSee('$1–$3 per generated Reel')
-            ->assertSee('select its instrumental background music')
+            ->assertSee('add instrumental background music or keep the video silent')
+            ->assertSee('No music — keep video silent')
             ->assertSee('CC0 Public Domain license')
             ->assertSee('Bright &amp; upbeat — City Sunshine', false)
             ->assertSee('Bright &amp; upbeat — Motions', false)
@@ -442,6 +443,48 @@ class AiReelsTest extends TestCase
         $this->assertDatabaseCount('ai_reels', 0);
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         Queue::assertNothingPushed();
+    }
+
+    public function test_custom_reel_can_be_created_without_background_music(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('silent-custom-reel');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-silent-custom');
+
+        $this->actingAs($user)->post(route('ai-reels.custom.store'), [
+            'prompt' => 'Create a clean product video with slow movement and natural daylight.',
+            'music_track' => ReelMusicService::NO_MUSIC,
+            'providers' => ['facebook'],
+        ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']));
+
+        $this->assertSame(ReelMusicService::NO_MUSIC, AiReel::query()->sole()->music_track);
+        Queue::assertPushed(GenerateAiReel::class, 1);
+    }
+
+    public function test_schedule_can_generate_all_reels_without_background_music(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('silent-reel-schedule');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Silent Product'));
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-silent-schedule');
+
+        $this->actingAs($user)->post(route('ai-reels.schedules.store'), [
+            'reel_count' => 1,
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'duration_seconds' => 5,
+            'music_track' => ReelMusicService::NO_MUSIC,
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+            'timing_mode' => 'auto',
+            'ai_tone' => 'creative',
+        ])->assertRedirect(route('ai-reels.index'));
+
+        $this->assertDatabaseHas('ai_reel_schedules', ['music_track' => ReelMusicService::NO_MUSIC]);
+        $this->assertSame(ReelMusicService::NO_MUSIC, AiReel::query()->sole()->music_track);
+        Queue::assertPushed(GenerateAiReel::class, 1);
     }
 
     public function test_custom_reel_can_use_a_private_uploaded_image_instead_of_the_website_image(): void
@@ -873,6 +916,55 @@ class AiReelsTest extends TestCase
         $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
         $this->assertSame('generation_failed', $reel->fresh()->status);
         $this->assertSame('Reel music preparation failed: FFmpeg unavailable', $reel->fresh()->last_error);
+    }
+
+    public function test_no_music_skips_ffmpeg_preflight_and_preserves_runway_video(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [, $agent] = $this->tenant('silent-reel-generation');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'music_track' => ReelMusicService::NO_MUSIC,
+        ]);
+        $music = \Mockery::mock(ReelMusicService::class);
+        $music->shouldNotReceive('ensureAvailable');
+        $music->shouldNotReceive('mix');
+        $writer = \Mockery::mock(AiReelPromptWriter::class);
+        $writer->shouldReceive('write')->once()->andReturn([
+            'prompt' => 'A silent vertical product video.',
+            'caption' => 'A grounded product caption.',
+        ]);
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('create')->once()->with('A silent vertical product video.', null, 5)->andReturn('silent-task');
+
+        (new GenerateAiReel($reel->id))->handle(
+            $writer,
+            $runway,
+            app(ReelCreditService::class),
+            app(AiReelSourceImageStorage::class),
+            $music,
+        );
+
+        $reel->refresh();
+        $this->assertSame('generating', $reel->status);
+        $this->assertSame('silent-task', $reel->runway_task_id);
+
+        $runway->shouldReceive('task')->once()->with('silent-task')->andReturn([
+            'status' => 'SUCCEEDED', 'output' => ['https://runway.test/silent.mp4'],
+        ]);
+        $runway->shouldReceive('download')->once()->with('https://runway.test/silent.mp4')->andReturn('unaltered-runway-video');
+
+        (new PollAiReelGeneration($reel->id))->handle(
+            $runway,
+            app(ReelCreditService::class),
+            app(AiReelSourceImageStorage::class),
+            $music,
+        );
+
+        $reel->refresh();
+        $this->assertSame('awaiting_approval', $reel->status);
+        $this->assertSame('unaltered-runway-video', Storage::disk('local')->get($reel->video_path));
     }
 
     public function test_runway_request_failure_is_identified_and_refunded(): void

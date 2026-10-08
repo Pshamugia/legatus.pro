@@ -78,7 +78,7 @@ class AiReelController extends Controller
         $data = $request->validate([
             'reel_count' => ['required', 'integer', 'min:1', 'max:365'],
             'duration_seconds' => ['required', 'integer', Rule::in([5, 10, 15])],
-            'music_track' => ['required', 'string', Rule::in(array_keys(config('reel_music.tracks', [])))],
+            'music_track' => ['required', 'string', Rule::in([ReelMusicService::NO_MUSIC, ...array_keys(config('reel_music.tracks', []))])],
             'starts_on' => ['required', 'date', 'after_or_equal:today'], 'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
             'categories' => ['nullable', 'array'], 'categories.*' => ['string', 'max:255'],
             'languages' => ['nullable', 'array'], 'languages.*' => ['string', 'max:150'],
@@ -112,7 +112,7 @@ class AiReelController extends Controller
             'prompt' => ['required', 'string', 'min:20', 'max:3000'], 'reference_url' => ['nullable', 'url', 'max:2000'],
             'caption' => ['nullable', 'string', 'max:2200'],
             'duration_seconds' => ['required', 'integer', Rule::in([5, 10, 15])],
-            'music_track' => ['required', 'string', Rule::in(array_keys(config('reel_music.tracks', [])))],
+            'music_track' => ['required', 'string', Rule::in([ReelMusicService::NO_MUSIC, ...array_keys(config('reel_music.tracks', []))])],
             'source_image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:min_width=640,min_height=640,max_width=8000,max_height=8000'],
             'providers' => ['required', 'array', 'min:1'], 'providers.*' => [Rule::in(['facebook', 'instagram'])],
         ]);

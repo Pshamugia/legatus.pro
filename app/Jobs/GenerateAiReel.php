@@ -45,15 +45,17 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
         }
         $reel->refresh();
 
-        try {
-            $music->ensureAvailable((string) $reel->music_track);
-        } catch (\Throwable $exception) {
-            if ($this->finishRequestedCancellation($reel, $images)) {
+        if (ReelMusicService::hasMusic($reel->music_track)) {
+            try {
+                $music->ensureAvailable((string) $reel->music_track);
+            } catch (\Throwable $exception) {
+                if ($this->finishRequestedCancellation($reel, $images)) {
+                    return;
+                }
+                $this->failGeneration($reel, $credits, $images, 'Reel music preparation failed', $exception);
+
                 return;
             }
-            $this->failGeneration($reel, $credits, $images, 'Reel music preparation failed', $exception);
-
-            return;
         }
 
         try {

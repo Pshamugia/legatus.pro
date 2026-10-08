@@ -10,8 +10,19 @@ use Illuminate\Support\Str;
 
 class ReelMusicService
 {
+    public const NO_MUSIC = 'none';
+
+    public static function hasMusic(?string $trackId): bool
+    {
+        return filled($trackId) && $trackId !== self::NO_MUSIC;
+    }
+
     public function ensureAvailable(string $trackId): void
     {
+        if (! self::hasMusic($trackId)) {
+            return;
+        }
+
         $track = $this->track($trackId);
         $process = Process::timeout(10)->run([(string) config('reel_music.ffmpeg_binary', 'ffmpeg'), '-version']);
         throw_unless($process->successful(), new \RuntimeException('FFmpeg is not available for Reel music processing.'));
@@ -21,6 +32,10 @@ class ReelMusicService
 
     public function mix(string $videoContents, string $trackId, int $duration): string
     {
+        if (! self::hasMusic($trackId)) {
+            return $videoContents;
+        }
+
         $track = $this->track($trackId);
         $this->ensureAvailable($trackId);
         $musicPath = $this->cachedTrack($trackId, (string) $track['url']);

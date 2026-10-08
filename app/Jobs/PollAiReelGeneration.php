@@ -49,7 +49,9 @@ class PollAiReelGeneration implements ShouldQueue
         }
         try {
             $contents = $runway->download((string) data_get($task, 'output.0'));
-            $contents = $music->mix($contents, (string) $reel->music_track, (int) $reel->duration_seconds);
+            if (ReelMusicService::hasMusic($reel->music_track)) {
+                $contents = $music->mix($contents, (string) $reel->music_track, (int) $reel->duration_seconds);
+            }
             $filename = hash('sha256', $reel->id.'|'.$reel->runway_task_id.'|'.Str::random(32)).'.mp4';
             $path = 'reels/'.$filename;
             Storage::disk('local')->put($path, $contents);
