@@ -752,6 +752,33 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertNull(data_get($agent->fresh()->settings, 'social_preview_product_url'));
     }
 
+    public function test_stale_saved_preview_url_is_replaced_with_the_active_rendered_product_before_template_save(): void
+    {
+        [$user, $agent] = $this->tenant('stale-preview-url');
+        $activeUrl = 'https://shop.example/books/current-preview/2312';
+        $attributes = $this->product('Current Preview Product', 'Books', 2);
+        $attributes['metadata']['product_url'] = $activeUrl;
+        $agent->products()->create($attributes);
+        $agent->update(['settings' => [
+            'social_preview_product_url' => 'https://shop.example/books/removed-preview/2492',
+        ]]);
+
+        $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->assertSee('value="'.$activeUrl.'"', false)
+            ->assertDontSee('value="https://shop.example/books/removed-preview/2492"', false);
+
+        $this->actingAs($user)->put(route('social-media.templates.update'), [
+            'preview_product_url' => $activeUrl,
+            'templates' => [
+                'facebook' => ['body_template' => '{product_title} {product_url}', 'image_style' => 'three_d'],
+                'instagram' => ['body_template' => '{product_title} {product_url}', 'image_style' => 'three_d'],
+            ],
+        ])->assertRedirect(route('social-media.index'))->assertSessionHasNoErrors();
+
+        $this->assertSame($activeUrl, data_get($agent->fresh()->settings, 'social_preview_product_url'));
+    }
+
     public function test_bukinistebi_preview_product_is_pinned_automatically_during_deployment(): void
     {
         [, $agent] = $this->tenant('bukinistebi-preview-deployment');

@@ -46,7 +46,7 @@
                 @method('PUT')
                 <label class="preview-product-setting" for="preview-product-url">
                     <span><strong>Live preview product URL</strong><small>Pin one synchronized product so every design is compared against the same original photo.</small></span>
-                    <input id="preview-product-url" type="url" name="preview_product_url" value="{{ old('preview_product_url', data_get($agent->settings, 'social_preview_product_url')) }}" placeholder="https://your-store.example/product" @disabled(!$canManage)>
+                    <input id="preview-product-url" type="url" name="preview_product_url" value="{{ old('preview_product_url', $previewProductUrl) }}" placeholder="https://your-store.example/product" @disabled(!$canManage)>
                 </label>
                 <div class="template-actions-row">
                     <div class="platform-tabs" role="tablist" aria-label="Post template channel">

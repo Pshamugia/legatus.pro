@@ -118,7 +118,15 @@ class SocialMediaController extends Controller
                 }];
             })->all();
 
-        return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'publishedFacebookPosts', 'canManage', 'templates', 'previewProduct'));
+        // A previously pinned product may disappear from the active catalog
+        // after a later synchronization. Keep the form aligned with the
+        // product that is actually rendered so saving unrelated template
+        // changes is not blocked by an invisible stale selection.
+        $previewProductUrl = $configuredPreviewProduct
+            ? $configuredPreviewUrl
+            : ($sample ? $previewProduct['url'] : '');
+
+        return view('social-media', compact('agent', 'connections', 'categories', 'languages', 'schedules', 'upcoming', 'publishedFacebookPosts', 'canManage', 'templates', 'previewProduct', 'previewProductUrl'));
     }
 
     public function store(Request $request, TenantContext $tenant, SocialMediaScheduler $scheduler)
