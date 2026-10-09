@@ -280,7 +280,7 @@ class SocialMediaSchedulerTest extends TestCase
             && data_get($request->data(), 'content.media.id') === 'urn:li:image:image-1');
     }
 
-    public function test_legacy_duplicate_is_skipped_before_it_can_be_published_again(): void
+    public function test_legacy_duplicate_releases_the_undelivered_slot_for_a_replacement(): void
     {
         [$user, $agent] = $this->tenant('publish-time-duplicate-guard');
         $this->connections($agent);
@@ -308,8 +308,8 @@ class SocialMediaSchedulerTest extends TestCase
             app(SocialMediaTemplateRenderer::class),
         );
 
-        $this->assertSame('skipped', $duplicate->fresh()->status);
-        $this->assertSame('This product was already published on this channel.', $duplicate->fresh()->failure_reason);
+        $this->assertSame('scheduled', $duplicate->fresh()->status);
+        $this->assertStringContainsString('slot will try the next eligible product', (string) $duplicate->fresh()->failure_reason);
     }
 
     public function test_instagram_retry_reuses_its_own_identity_claim_instead_of_skipping_itself(): void
@@ -374,7 +374,7 @@ class SocialMediaSchedulerTest extends TestCase
         ]);
     }
 
-    public function test_product_that_sells_out_after_scheduling_is_skipped_before_publish(): void
+    public function test_product_that_sells_out_after_scheduling_releases_the_slot_before_publish(): void
     {
         [$user, $agent] = $this->tenant('publish-time-stock-guard');
         $this->connections($agent);
@@ -397,11 +397,8 @@ class SocialMediaSchedulerTest extends TestCase
             app(SocialMediaTemplateRenderer::class),
         );
 
-        $this->assertSame('skipped', $post->fresh()->status);
-        $this->assertSame(
-            'The public product is no longer active, in stock, or publishable on this channel.',
-            $post->fresh()->failure_reason,
-        );
+        $this->assertSame('scheduled', $post->fresh()->status);
+        $this->assertStringContainsString('slot will try the next eligible product', (string) $post->fresh()->failure_reason);
     }
 
     public function test_live_sold_out_product_is_replaced_in_the_same_due_slot(): void
@@ -2491,6 +2488,95 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
     }
 
+    public function test_product_that_becomes_invalid_after_preparation_releases_the_whole_slot_for_replacement(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('replace-invalid-queued-slot');
+        $this->connections($agent);
+        $invalid = $agent->products()->create($this->product('Invalid After Queue', 'General', 2));
+        $replacement = $agent->products()->create($this->product('Healthy Replacement', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram']);
+        $dueAt = now('UTC')->subMinute();
+        foreach (['facebook', 'instagram'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $invalid->id, 'provider' => $provider,
+                'status' => 'queued', 'scheduled_for' => $dueAt, 'title' => $invalid->name,
+                'description' => $invalid->description,
+                'product_url' => data_get($invalid->metadata, 'product_url'),
+                'image_url' => $invalid->publicImageUrl(), 'caption' => 'Prepared caption',
+            ]);
+        }
+        $invalid->update(['stock' => 0]);
+
+        $first = $schedule->posts()->where('provider', 'facebook')->firstOrFail();
+        (new PublishSocialMediaPost($first->id))->handle(
+            app(MetaGraphClient::class),
+            app(SocialMediaTemplateRenderer::class),
+        );
+
+        $this->assertTrue($schedule->posts()->get()->every(fn ($post): bool => $post->status === 'scheduled'));
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('1 social slot queued for preparation.')->assertSuccessful();
+        $preparation = Queue::pushed(PrepareSocialMediaSlot::class)->last();
+        $this->assertNotNull($preparation);
+        $preparation->handle(app(SocialMediaScheduler::class));
+
+        $slot = $schedule->posts()->where('scheduled_for', $dueAt)->get();
+        $this->assertTrue($slot->every(fn ($post): bool => $post->status === 'queued'));
+        $this->assertSame([$replacement->id], $slot->pluck('product_id')->unique()->values()->all());
+        Queue::assertPushed(PublishSocialMediaPost::class, 2);
+    }
+
+    public function test_dispatcher_recovers_safe_stale_queued_posts_and_closes_ambiguous_attempts(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('recover-stale-queued-posts');
+        $product = $agent->products()->create($this->product('Queued Recovery Product', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $safe = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'attempts' => 0, 'scheduled_for' => now('UTC')->subMinutes(20),
+            'title' => $product->name, 'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Safe queued caption',
+        ]);
+        $ambiguous = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'attempts' => 1, 'scheduled_for' => now('UTC')->subMinutes(19),
+            'title' => $product->name, 'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Ambiguous queued caption',
+        ]);
+        $safe->forceFill(['updated_at' => now('UTC')->subMinutes(15)])->saveQuietly();
+        $ambiguous->forceFill(['updated_at' => now('UTC')->subMinutes(15)])->saveQuietly();
+
+        $this->artisan('legatus:dispatch-social-posts')->assertSuccessful();
+
+        Queue::assertPushed(PublishSocialMediaPost::class, fn ($job): bool => $job->postId === $safe->id);
+        $this->assertSame('queued', $safe->fresh()->status);
+        $this->assertStringContainsString('queued again automatically', (string) $safe->fresh()->failure_reason);
+        $this->assertSame('failed', $ambiguous->fresh()->status);
+        $this->assertStringContainsString('could not be confirmed', (string) $ambiguous->fresh()->failure_reason);
+    }
+
+    public function test_publish_job_terminal_failure_never_leaves_a_queued_claim_behind(): void
+    {
+        [, $agent] = $this->tenant('terminal-publish-failure');
+        $product = $agent->products()->create($this->product('Terminal Failure Product', 'General', 3));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name, 'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Queued caption',
+        ]);
+
+        (new PublishSocialMediaPost($post->id))->failed(new \RuntimeException('Connection unavailable'));
+
+        $this->assertSame('failed', $post->fresh()->status);
+        $this->assertStringContainsString('worker stopped', (string) $post->fresh()->failure_reason);
+    }
+
     public function test_due_multi_channel_slot_replaces_an_already_published_product_before_queueing(): void
     {
         Queue::fake();
@@ -2786,7 +2872,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame(0, $agent->socialMediaPosts()->where('copy_mode', 'original')->count());
     }
 
-    public function test_queued_post_is_skipped_when_its_product_is_no_longer_available(): void
+    public function test_queued_post_is_released_when_its_product_is_no_longer_available(): void
     {
         [, $agent] = $this->tenant('stale-product');
         $this->connections($agent);
@@ -2804,7 +2890,7 @@ class SocialMediaSchedulerTest extends TestCase
 
         (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
 
-        $this->assertDatabaseHas('social_media_posts', ['id' => $post->id, 'status' => 'skipped']);
+        $this->assertDatabaseHas('social_media_posts', ['id' => $post->id, 'status' => 'scheduled']);
         Http::assertNothingSent();
     }
 

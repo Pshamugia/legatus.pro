@@ -10,17 +10,26 @@ use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaPublicationHistory;
 use App\Services\SocialMediaTemplateRenderer;
 use App\Services\ThreadsClient;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
-class PublishSocialMediaPost implements ShouldQueue
+class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
     public int $tries = 3;
 
+    public int $uniqueFor = 600;
+
     public function __construct(public int $postId) {}
+
+    public function uniqueId(): string
+    {
+        return 'social-post:'.$this->postId;
+    }
 
     public function handle(
         MetaGraphClient $meta,
@@ -52,19 +61,19 @@ class PublishSocialMediaPost implements ShouldQueue
             && $this->publicHttpUrl($currentUrl)
             && (! in_array($post->provider, ['instagram', 'threads', 'linkedin'], true) || $this->publicHttpUrl($currentImage));
         if (! $productIsPublishable) {
-            $post->update([
-                'status' => 'skipped',
-                'failure_reason' => 'The public product is no longer active, in stock, or publishable on this channel.',
-            ]);
+            $reason = 'The public product is no longer active, in stock, or publishable on this channel.';
+            if (! $this->releaseUndeliveredSlotForReplacement($post, $reason)) {
+                $post->update(['status' => 'skipped', 'failure_reason' => $reason]);
+            }
 
             return;
         }
 
         if ($availability->verify($product) === false) {
-            $post->update([
-                'status' => 'skipped',
-                'failure_reason' => 'The public product page confirms that this product is currently out of stock.',
-            ]);
+            $reason = 'The public product page confirms that this product is currently out of stock.';
+            if (! $this->releaseUndeliveredSlotForReplacement($post, $reason)) {
+                $post->update(['status' => 'skipped', 'failure_reason' => $reason]);
+            }
 
             return;
         }
@@ -83,10 +92,10 @@ class PublishSocialMediaPost implements ShouldQueue
                 $post->id,
             );
         if ($alreadyPublished) {
-            $post->update([
-                'status' => 'skipped',
-                'failure_reason' => 'This product was already published on this channel.',
-            ]);
+            $reason = 'This product was already published on this channel.';
+            if (! $this->releaseUndeliveredSlotForReplacement($post, $reason)) {
+                $post->update(['status' => 'skipped', 'failure_reason' => $reason]);
+            }
 
             return;
         }
@@ -171,10 +180,10 @@ class PublishSocialMediaPost implements ShouldQueue
         }
 
         if (! $publicationHistory->claim($post)) {
-            $post->update([
-                'status' => 'skipped',
-                'failure_reason' => 'This product was already claimed or published on this channel.',
-            ]);
+            $reason = 'This product was already claimed or published on this channel.';
+            if (! $this->releaseUndeliveredSlotForReplacement($post, $reason)) {
+                $post->update(['status' => 'skipped', 'failure_reason' => $reason]);
+            }
 
             return;
         }
@@ -223,6 +232,45 @@ class PublishSocialMediaPost implements ShouldQueue
             ]);
             throw $exception;
         }
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        SocialMediaPost::query()
+            ->whereKey($this->postId)
+            ->where('status', 'queued')
+            ->update([
+                'status' => 'failed',
+                'failure_reason' => Str::limit(
+                    'The publishing worker stopped before delivery was confirmed. '.($exception?->getMessage() ?: 'Unknown publishing error.'),
+                    2000,
+                    '',
+                ),
+            ]);
+    }
+
+    private function releaseUndeliveredSlotForReplacement(SocialMediaPost $post, string $reason): bool
+    {
+        return DB::transaction(function () use ($post, $reason): bool {
+            $slotPosts = SocialMediaPost::query()
+                ->where('social_media_schedule_id', $post->social_media_schedule_id)
+                ->where('scheduled_for', $post->scheduled_for)
+                ->lockForUpdate()
+                ->get();
+
+            if ($slotPosts->isEmpty()
+                || $slotPosts->contains(fn (SocialMediaPost $slotPost): bool => $slotPost->status === 'published' || $slotPost->attempts > 0)
+                || $slotPosts->contains(fn (SocialMediaPost $slotPost): bool => ! in_array($slotPost->status, ['scheduled', 'preparing', 'queued'], true))) {
+                return false;
+            }
+
+            SocialMediaPost::query()->whereIn('id', $slotPosts->pluck('id'))->update([
+                'status' => 'scheduled',
+                'failure_reason' => Str::limit('Product skipped before delivery; the slot will try the next eligible product. '.$reason, 2000, ''),
+            ]);
+
+            return true;
+        });
     }
 
     private function publicHttpUrl(string $url): bool

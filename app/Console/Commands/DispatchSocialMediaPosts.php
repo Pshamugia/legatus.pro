@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\PrepareSocialMediaSlot;
+use App\Jobs\PublishSocialMediaPost;
 use App\Jobs\PublishSocialMediaStory;
 use App\Models\SocialMediaPost;
 use Illuminate\Console\Command;
@@ -49,6 +50,40 @@ class DispatchSocialMediaPosts extends Command
                 'status' => 'scheduled',
                 'failure_reason' => 'A stale preparation claim was recovered automatically.',
             ]);
+
+        // A queued job may be lost before the publish worker starts. A stale
+        // row with zero delivery attempts is safe to enqueue again. Once a
+        // provider attempt began, delivery may be ambiguous, so fail closed
+        // instead of risking a duplicate post. Either outcome releases later
+        // product slots from an orphaned queued claim.
+        SocialMediaPost::query()
+            ->where('status', 'queued')
+            ->where('updated_at', '<=', now('UTC')->subMinutes(10))
+            ->orderBy('id')
+            ->limit(100)
+            ->get(['id', 'attempts', 'updated_at'])
+            ->each(function (SocialMediaPost $post): void {
+                if ($post->attempts > 0) {
+                    SocialMediaPost::query()->whereKey($post->id)->where('status', 'queued')->update([
+                        'status' => 'failed',
+                        'failure_reason' => 'A stale publishing attempt could not be confirmed. Verify the native channel before retrying.',
+                    ]);
+
+                    return;
+                }
+
+                $claimed = SocialMediaPost::query()
+                    ->whereKey($post->id)
+                    ->where('status', 'queued')
+                    ->where('updated_at', $post->updated_at)
+                    ->update([
+                        'updated_at' => now('UTC'),
+                        'failure_reason' => 'A lost publishing job was queued again automatically.',
+                    ]);
+                if ($claimed === 1) {
+                    PublishSocialMediaPost::dispatch((int) $post->id)->onQueue('channels');
+                }
+            });
 
         $posts = SocialMediaPost::query()
             ->with('schedule.agent')
