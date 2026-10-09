@@ -23,6 +23,89 @@ class OpenAiOrchestrationTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_short_book_intake_offer_uses_prior_customer_turns_and_verified_business_knowledge(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'business', 'name' => 'წიგნების ჩაბარება',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'წიგნების ჩაბარება',
+            'content' => 'წიგნების ჩაბარებისთვის რამდენიმე ფოტო და საკონტაქტო ტელეფონი მოგვწერეთ. ინფორმაცია ადმინისტრატორს გადაეცემა და სურვილის შემთხვევაში დაგიკავშირდებიან.',
+            'content_hash' => hash('sha256', 'book-intake-orchestration'),
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'book-intake-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'წიგნებს ყიდულობთ?']);
+        $conversation->messages()->create(['role' => 'assistant', 'content' => 'ვერ დავადასტურე, ვიბარებთ თუ არა წიგნებს.']);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'ვყიდი წიგნებს']);
+        $conversation->messages()->create(['role' => 'assistant', 'content' => 'სამწუხაროდ, მომხმარებლებისგან წიგნებს არ ვიბარებთ.']);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'book-intake-context', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_human_request' => false,
+                    'is_business_knowledge_request' => false,
+                    'knowledge_query' => null,
+                    'knowledge_scope' => null,
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'recommendation_query' => null,
+                    'recommendation_category' => null,
+                    'recommendation_occasion' => null,
+                    'resolved_query' => null,
+                    'resolved_queries' => [],
+                    'referenced_product_id' => null,
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['data' => []])
+            ->push(['id' => 'book-intake-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'დიახ, თუ წიგნების ჩაბარება გსურთ, გამოგვიგზავნეთ რამდენიმე ფოტო და საკონტაქტო ტელეფონი. ინფორმაციას ადმინისტრატორს გადავცემთ და სურვილის შემთხვევაში დაგიკავშირდებიან.',
+                    'intent' => 'discovery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'policy', 'product_id' => null, 'amount' => null,
+                        'quantity' => null, 'reference' => 'წიგნების ჩაბარება',
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, 'თუ გაინტერესებთ');
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertStringContainsString('გამოგვიგზავნეთ რამდენიმე ფოტო', $reply['text']);
+        $this->assertStringNotContainsString('09:00', $reply['text']);
+        $run = AgentRun::where('conversation_id', $conversation->id)->latest('id')->firstOrFail();
+        $knowledgeCall = collect($run->tools_used)->firstWhere('name', 'search_knowledge');
+        $this->assertNotEmpty(data_get($knowledgeCall, 'result.results'));
+        $this->assertStringContainsString('წიგნებს ყიდულობთ?', data_get($knowledgeCall, 'arguments.query'));
+        $this->assertStringContainsString('თუ გაინტერესებთ', data_get($knowledgeCall, 'arguments.query'));
+        $this->assertStringNotContainsString('ვერ დავადასტურე', data_get($knowledgeCall, 'arguments.query'));
+        $this->assertStringNotContainsString('სამწუხაროდ', data_get($knowledgeCall, 'arguments.query'));
+        Http::assertSentCount(4);
+    }
+
     public function test_business_location_question_uses_verified_knowledge_instead_of_asking_an_unanswerable_city_question(): void
     {
         $this->seed();

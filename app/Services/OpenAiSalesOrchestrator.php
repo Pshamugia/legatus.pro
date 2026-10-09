@@ -389,13 +389,21 @@ class OpenAiSalesOrchestrator
             $knowledgeQuery = data_get($agent->settings, 'assistant_mode') === 'platform_support'
                 ? $message
                 : $conversation->messages()
-                    ->whereIn('role', ['customer', 'assistant', 'human'])
+                    // A prior AI draft may itself be the reason this recovery
+                    // search is needed. Search the customer's actual intent
+                    // across turns instead of feeding an earlier unsupported
+                    // answer back into tenant knowledge retrieval.
+                    ->whereIn('role', ['customer', 'human'])
                     ->latest('id')
                     ->limit(6)
                     ->get(['content'])
                     ->reverse()
                     ->pluck('content')
-                    ->push($message)
+                    ->map(fn ($content): string => PrivacyRedactor::text((string) $content))
+                    ->when(
+                        fn ($turns): bool => trim((string) $turns->last()) !== trim($message),
+                        fn ($turns) => $turns->push($message),
+                    )
                     ->filter()
                     ->implode("\n");
             $arguments = ['query' => $knowledgeQuery, '_source_scope' => 'business'];

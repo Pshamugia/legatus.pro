@@ -163,6 +163,31 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertStringNotContainsString('9999', json_encode($result));
     }
 
+    public function test_business_knowledge_is_searchable_across_inflected_customer_wording_without_embeddings(): void
+    {
+        config(['services.openai.key' => null]);
+        [$agent, , $conversation] = $this->context();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'business', 'name' => 'წიგნების ჩაბარება',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'წიგნების ჩაბარება',
+            'content' => 'წიგნების ჩაბარებისთვის რამდენიმე ფოტო და საკონტაქტო ტელეფონი მოგვწერეთ.',
+            'content_hash' => hash('sha256', 'book-intake-knowledge'),
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_knowledge', [
+            'query' => "წიგნებს ყიდულობთ?\nვყიდი წიგნებს\nთუ გაინტერესებთ",
+            '_source_scope' => 'business',
+        ], $agent, $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame('lexical', $result['method']);
+        $this->assertSame('წიგნების ჩაბარება', $result['results'][0]['title']);
+        $this->assertStringContainsString('საკონტაქტო ტელეფონი', $result['results'][0]['excerpt']);
+    }
+
     public function test_lead_requires_and_records_server_verified_consent_message(): void
     {
         [$agent, , $conversation] = $this->context();

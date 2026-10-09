@@ -583,10 +583,11 @@ class SalesToolbox
             return ['ok' => false, 'error' => 'The knowledge question did not contain a specific searchable subject.'];
         }
 
-        $q = KnowledgeChunk::where('agent_id', $agent->id);
+        $baseQuery = KnowledgeChunk::where('agent_id', $agent->id);
         if ($targetSourceIds->isNotEmpty()) {
-            $q->whereIn('knowledge_source_id', $targetSourceIds);
+            $baseQuery->whereIn('knowledge_source_id', $targetSourceIds);
         }
+        $q = clone $baseQuery;
         $q->where(function ($query) use ($terms) {
             foreach ($terms as $term) {
                 $pattern = '%'.Str::lower($term).'%';
@@ -595,11 +596,17 @@ class SalesToolbox
             }
         });
 
-        $results = $q->limit(50)
-            ->get(['id', 'kind', 'title', 'content', 'metadata'])
-            ->map(function ($chunk) use ($terms): array {
-                $haystack = Str::lower(implode(' ', [$chunk->title, $chunk->content]));
-                $matchedTerms = $terms->filter(fn ($term) => Str::contains($haystack, $term))->values();
+        $rank = function (Collection $chunks) use ($terms): array {
+            return $chunks->map(function ($chunk) use ($terms): array {
+                $tokens = collect(preg_split(
+                    '/[^\p{L}\p{N}]+/u',
+                    Str::lower(implode(' ', [$chunk->title, $chunk->content])),
+                    -1,
+                    PREG_SPLIT_NO_EMPTY,
+                ) ?: [])->unique()->values();
+                $matchedTerms = $terms
+                    ->filter(fn ($term): bool => $this->knowledgeTermMatches((string) $term, $tokens))
+                    ->values();
 
                 return [
                     'chunk_id' => $chunk->id,
@@ -621,6 +628,19 @@ class SalesToolbox
             })
             ->values()
             ->all();
+        };
+
+        $results = $rank($q->limit(50)->get(['id', 'kind', 'title', 'content', 'metadata']));
+
+        if ($results === []) {
+            // Embeddings may still be queued or temporarily unavailable after
+            // a manual knowledge edit. Scan a bounded tenant-only candidate
+            // set with Unicode-safe near-token matching so inflected or lightly
+            // misspelled wording can still reach the verified source.
+            $candidateLimit = max(50, min(2000, (int) config('legatus.semantic_candidate_limit', 2000)));
+            $results = $rank($baseQuery->latest('id')->limit($candidateLimit)
+                ->get(['id', 'kind', 'title', 'content', 'metadata']));
+        }
 
         if ($results === []) {
             return [
@@ -633,6 +653,29 @@ class SalesToolbox
         }
 
         return ['ok' => true, 'method' => 'lexical', 'results' => $results];
+    }
+
+    private function knowledgeTermMatches(string $queryTerm, Collection $candidateTokens): bool
+    {
+        $queryTerm = Str::lower(trim($queryTerm));
+        if ($queryTerm === '') {
+            return false;
+        }
+
+        return $candidateTokens->contains(function ($candidateToken) use ($queryTerm): bool {
+            $candidateToken = Str::lower(trim((string) $candidateToken));
+            if ($candidateToken === $queryTerm) {
+                return true;
+            }
+
+            $maximumLength = max(mb_strlen($queryTerm), mb_strlen($candidateToken));
+            if ($maximumLength < 5 || mb_substr($queryTerm, 0, 2) !== mb_substr($candidateToken, 0, 2)) {
+                return false;
+            }
+
+            return $this->utf8Distance($queryTerm, $candidateToken)
+                <= min(2, max(1, (int) floor($maximumLength * .25)));
+        });
     }
 
     private function preferences(Conversation $c, array $a): array
