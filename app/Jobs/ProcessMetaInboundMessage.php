@@ -29,9 +29,11 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
     private const META_SPLIT_MEDIA_WINDOW_SECONDS = 15;
 
+    public const TIMEOUT_SECONDS = 150;
+
     public int $tries = 3;
 
-    public int $timeout = 75;
+    public int $timeout = self::TIMEOUT_SECONDS;
 
     public int $uniqueFor = 600;
 
@@ -352,6 +354,16 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             ];
         }
 
+        // Image recognition can take long enough for an operator to answer in
+        // Meta meanwhile. Human ownership always wins: discard the late AI
+        // result before it can become a contradictory customer reply.
+        $conversation->refresh();
+        if ($conversation->status === 'human') {
+            $this->finishImageRecords($record, $imageRecord, 'human', []);
+
+            return;
+        }
+
         $assistant = $conversation->messages()->firstOrCreate(
             ['request_id' => $this->derivedRequestId('image-recognition', $imageRecord->idempotency_key)],
             ['role' => 'assistant', 'content' => $result['text'], 'confidence' => in_array($result['status'], ['available', 'unavailable', 'not_found'], true) ? 1 : .8, 'metadata' => [
@@ -539,6 +551,10 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
         $record = ChannelMessage::query()->find($this->channelMessageId);
         if ($record) {
+            $originalText = trim((string) data_get($record->payload, 'text', ''));
+            $isImage = $record->message_type === 'attachment'
+                && collect(data_get($record->payload, 'attachments', []))
+                    ->contains(fn ($attachment): bool => data_get($attachment, 'type') === 'image');
             $preserved = $this->preserveWithoutPausingAi($record, $reason);
             $updates = [
                 'status' => 'failed',
@@ -549,6 +565,60 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 $updates['payload'] = $this->minimalPayload($record);
             }
             $record->update($updates);
+            if ($preserved) {
+                $record->refresh();
+                $this->replyAfterFinalFailure($record, $originalText, $isImage);
+            }
+        }
+    }
+
+    private function replyAfterFinalFailure(ChannelMessage $record, string $text, bool $isImage): void
+    {
+        try {
+            $record->loadMissing(['connection.agent', 'conversation']);
+            $connection = $record->connection;
+            $conversation = $record->conversation;
+            if (! $connection || ! $connection->isActive() || ! $conversation || $conversation->status === 'human') {
+                return;
+            }
+
+            $recentFailureReply = $conversation->messages()
+                ->where('role', 'assistant')
+                ->where('created_at', '>=', now()->subSeconds(30))
+                ->latest('id')
+                ->get()
+                ->first(fn (Message $message): bool => (bool) data_get($message->metadata, 'automatic_processing_failure'));
+            if ($recentFailureReply) {
+                return;
+            }
+
+            $context = $conversation->messages()->latest('id')->limit(8)->pluck('content')->implode("\n");
+            $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $text."\n".$context) === 1;
+            $reply = match (true) {
+                $georgian && $isImage => 'ფოტოს დამუშავება ამჯერად ტექნიკური შეფერხების გამო ვერ მოვასწარი. შეგიძლიათ თავიდან გამოგვიგზავნოთ და ხელახლა შევამოწმებ.',
+                $georgian => 'პასუხის მომზადება ტექნიკური შეფერხების გამო ვერ მოვასწარი. გთხოვთ, შეტყობინება თავიდან გამოგვიგზავნოთ.',
+                $isImage => 'I could not finish processing the photo because of a technical issue. Please send it again and I will check it again.',
+                default => 'I could not finish preparing the reply because of a technical issue. Please send your message again.',
+            };
+            $assistant = $conversation->messages()->firstOrCreate(
+                ['request_id' => $this->derivedRequestId('processing-failure', $record->idempotency_key)],
+                ['role' => 'assistant', 'content' => $reply, 'confidence' => 1, 'metadata' => [
+                    'automatic_processing_failure' => true,
+                    'image_recognition_failed' => $isImage,
+                ]],
+            );
+
+            $conversation->refresh();
+            if ($conversation->status === 'human') {
+                $assistant->delete();
+
+                return;
+            }
+
+            $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
+            app(ChannelMessageDispatcher::class)->dispatch($assistant);
+        } catch (\Throwable $exception) {
+            report($exception);
         }
     }
 
@@ -600,20 +670,25 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     ['request_id' => $locked->idempotency_key],
                     ['role' => 'customer', 'content' => $safeText, 'metadata' => $metadata],
                 );
-                $conversation->update([
+                $conversationUpdates = [
                     'channel_connection_id' => $connection->id,
                     'external_thread_id' => $senderId,
-                    'status' => 'ai',
-                    'assigned_to' => null,
-                    'priority' => 'normal',
-                    'intent' => null,
-                    'handoff_reason' => null,
-                    'handoff_summary' => null,
-                    'suggested_reply' => null,
-                    'outcome' => null,
-                    'resolved_at' => null,
                     'last_message_at' => now(),
-                ]);
+                ];
+                if ($conversation->status !== 'human') {
+                    $conversationUpdates += [
+                        'status' => 'ai',
+                        'assigned_to' => null,
+                        'priority' => 'normal',
+                        'intent' => null,
+                        'handoff_reason' => null,
+                        'handoff_summary' => null,
+                        'suggested_reply' => null,
+                        'outcome' => null,
+                        'resolved_at' => null,
+                    ];
+                }
+                $conversation->update($conversationUpdates);
                 $locked->update([
                     'conversation_id' => $conversation->id,
                     'message_id' => $customerMessage->id,

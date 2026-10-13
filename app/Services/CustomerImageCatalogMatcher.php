@@ -458,7 +458,10 @@ class CustomerImageCatalogMatcher
             ->acceptJson()
             ->connectTimeout((int) config('services.openai.connect_timeout', 5))
             ->timeout(max(30, (int) config('services.openai.timeout', 30)))
-            ->retry(2, 300, throw: false);
+            // The inbound queue job must retain enough time to store and send
+            // a deterministic fallback. A second full Vision attempt can
+            // otherwise consume the entire job timeout before cleanup runs.
+            ->retry(1, 300, throw: false);
     }
 
     private function publicHttpsUrl(?string $url): bool

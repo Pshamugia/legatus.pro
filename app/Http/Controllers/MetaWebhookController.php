@@ -226,6 +226,17 @@ class MetaWebhookController extends Controller
                 'resolved_at' => null,
                 'last_message_at' => now(),
             ]);
+            $conversation->channelMessages()
+                ->where('direction', 'outbound')
+                ->whereIn('status', ['queued', 'retrying'])
+                ->whereHas('message', fn ($query) => $query->where('role', 'assistant'))
+                ->get()
+                ->each(fn (ChannelMessage $pending) => $pending->update([
+                    'status' => 'ignored',
+                    'failure_reason' => 'AI reply suppressed because a human operator controls the conversation.',
+                    'payload' => ['role' => 'assistant', 'content_removed' => true],
+                    'processed_at' => now(),
+                ]));
             $delivery->update([
                 'conversation_id' => $conversation->id,
                 'message_id' => $message->id,

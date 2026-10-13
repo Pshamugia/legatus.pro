@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
+use App\Services\CustomerImageCatalogMatcher;
 use App\Services\MetaGraphClient;
 use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -471,6 +472,7 @@ class MetaTransportTest extends TestCase
 
     public function test_final_inbound_job_failure_preserves_customer_request_before_payload_minimization(): void
     {
+        Queue::fake();
         $connection = $this->connection('facebook', 'page-final-failure');
         $inbound = $connection->channelMessages()->create([
             'direction' => 'inbound',
@@ -496,9 +498,97 @@ class MetaTransportTest extends TestCase
         $customer = $inbound->message()->firstOrFail();
         $this->assertSame('Email me at [email redacted] when ready.', $customer->content);
         $this->assertSame($inbound->idempotency_key, $customer->request_id);
+        $assistant = $customer->conversation->messages()->where('role', 'assistant')->sole();
+        $this->assertTrue((bool) data_get($assistant->metadata, 'automatic_processing_failure'));
+        $this->assertDatabaseHas('channel_messages', [
+            'message_id' => $assistant->id,
+            'direction' => 'outbound',
+            'status' => 'queued',
+        ]);
 
         (new ProcessMetaInboundMessage($inbound->id))->failed(new \RuntimeException('duplicate callback'));
         $this->assertSame(1, $customer->conversation->messages()->where('request_id', $inbound->idempotency_key)->count());
+        $this->assertSame(1, $customer->conversation->messages()->where('role', 'assistant')->count());
+    }
+
+    public function test_final_inbound_failure_never_returns_a_human_controlled_conversation_to_ai(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-human-failure');
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'meta:facebook:'.$connection->id.':human-failure-customer',
+            'external_thread_id' => 'human-failure-customer',
+            'channel' => 'facebook',
+            'status' => 'human',
+            'assigned_to' => 'Meta inbox',
+        ]);
+        $inbound = $connection->channelMessages()->create([
+            'conversation_id' => $conversation->id,
+            'direction' => 'inbound',
+            'provider_message_id' => 'human-failure-mid',
+            'provider_sender_id' => 'human-failure-customer',
+            'provider_recipient_id' => 'page-human-failure',
+            'message_type' => 'attachment',
+            'status' => 'processing',
+            'payload' => ['text' => '[Customer sent an image.]', 'attachments' => [['type' => 'image']]],
+            'received_at' => now(),
+        ]);
+
+        (new ProcessMetaInboundMessage($inbound->id))->failed(new \RuntimeException('worker timed out'));
+
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame('Meta inbox', $conversation->fresh()->assigned_to);
+        $this->assertDatabaseMissing('messages', [
+            'conversation_id' => $conversation->id,
+            'role' => 'assistant',
+        ]);
+    }
+
+    public function test_operator_takeover_during_image_recognition_discards_the_late_ai_reply(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-image-human-race');
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'image-human-race-mid',
+            'provider_sender_id' => 'image-human-race-customer',
+            'provider_recipient_id' => 'page-image-human-race',
+            'message_type' => 'attachment',
+            'status' => 'received',
+            'payload' => [
+                'text' => 'Do you have this product?',
+                'attachments' => [['type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/product.jpg']],
+            ],
+            'received_at' => now(),
+        ]);
+        $matcher = \Mockery::mock(CustomerImageCatalogMatcher::class);
+        $matcher->shouldReceive('resolve')->once()->andReturnUsing(function ($agent, $conversation): array {
+            $conversation->update(['status' => 'human', 'assigned_to' => 'Meta inbox']);
+
+            return [
+                'status' => 'not_found',
+                'text' => 'Late and now contradictory AI reply.',
+                'products' => [],
+                'product_ids' => [],
+                'tools_used' => [],
+                'model' => 'test-vision',
+                'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'requests' => 1],
+            ];
+        });
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+            $matcher,
+        );
+
+        $conversation = $connection->conversations()->sole();
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame('processed', $inbound->fresh()->status);
+        $this->assertSame('human', data_get($inbound->fresh()->payload, 'image_recognition_status'));
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
     }
 
     public function test_attachment_only_and_ungrounded_postback_events_are_preserved_without_pausing_ai(): void
@@ -1004,6 +1094,41 @@ class MetaTransportTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_native_human_echo_immediately_cancels_a_pending_ai_reply(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-echo-cancel');
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'meta:facebook:'.$connection->id.':customer-echo-cancel',
+            'external_thread_id' => 'customer-echo-cancel',
+            'channel' => 'facebook',
+            'status' => 'ai',
+        ]);
+        $assistant = $conversation->messages()->create(['role' => 'assistant', 'content' => 'Late AI reply']);
+        $pending = app(ChannelMessageDispatcher::class)->dispatch($assistant);
+        $payload = [
+            'object' => 'page',
+            'entry' => [[
+                'id' => 'page-echo-cancel',
+                'messaging' => [[
+                    'sender' => ['id' => 'page-echo-cancel'],
+                    'recipient' => ['id' => 'customer-echo-cancel'],
+                    'timestamp' => 1784512800000,
+                    'message' => ['mid' => 'native-cancel-mid', 'is_echo' => true, 'text' => 'We do not have this edition.'],
+                ]],
+            ]],
+        ];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $this->metaWebhook($body, 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret'))->assertOk();
+
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame('ignored', $pending->fresh()->status);
+        $this->assertStringContainsString('human operator controls', $pending->fresh()->failure_reason);
+        $this->assertTrue((bool) data_get($pending->fresh()->payload, 'content_removed'));
+    }
+
     public function test_app_echo_does_not_create_a_human_message_and_late_echo_cannot_downgrade_delivery(): void
     {
         Queue::fake();
@@ -1241,7 +1366,9 @@ class MetaTransportTest extends TestCase
             'candidates' => [['external_account_id' => 'expired', 'access_token' => 'expired-secret']],
             'expires_at' => now()->subMinute(),
         ]);
-        DB::table('channel_messages')->whereIn('id', [$inbound->id, $outbound->id, $processing->id, $sending->id])
+        DB::table('channel_messages')->whereIn('id', [$inbound->id, $processing->id])
+            ->update(['updated_at' => now()->subMinutes(4)]);
+        DB::table('channel_messages')->whereIn('id', [$outbound->id, $sending->id])
             ->update(['updated_at' => now()->subMinutes(2)]);
 
         $this->artisan('legatus:dispatch-channel-outbox')->assertSuccessful()->expectsOutput('Dispatched 3 eligible channel message(s).');

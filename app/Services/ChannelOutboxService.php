@@ -19,7 +19,12 @@ class ChannelOutboxService
 
         return $lock->get(function (): ChannelOutboxSweepResult {
             MetaOAuthSelection::query()->where('expires_at', '<=', now())->delete();
-            $cutoff = now()->subSeconds(max(60, (int) config('meta.outbox_stale_seconds', 60)));
+            $staleSeconds = max(60, (int) config('meta.outbox_stale_seconds', 60));
+            $outboundCutoff = now()->subSeconds($staleSeconds);
+            $inboundCutoff = now()->subSeconds(max(
+                $staleSeconds,
+                ProcessMetaInboundMessage::TIMEOUT_SECONDS + 60,
+            ));
             $batch = max(1, min(500, (int) config('meta.outbox_batch_size', 100)));
 
             // A worker that disappeared while a Meta send was in-flight leaves
@@ -28,7 +33,7 @@ class ChannelOutboxService
             ChannelMessage::query()
                 ->where('direction', 'outbound')
                 ->where('status', 'sending')
-                ->where('updated_at', '<=', $cutoff)
+                ->where('updated_at', '<=', $outboundCutoff)
                 ->orderBy('id')
                 ->limit($batch)
                 ->get()
@@ -45,12 +50,15 @@ class ChannelOutboxService
                 });
 
             $messages = ChannelMessage::query()
-                ->where('updated_at', '<=', $cutoff)
-                ->where(function ($query): void {
-                    $query->where(function ($inbound): void {
-                        $inbound->where('direction', 'inbound')->whereIn('status', ['received', 'processing']);
-                    })->orWhere(function ($outbound): void {
-                        $outbound->where('direction', 'outbound')->whereIn('status', ['queued', 'retrying']);
+                ->where(function ($query) use ($inboundCutoff, $outboundCutoff): void {
+                    $query->where(function ($inbound) use ($inboundCutoff): void {
+                        $inbound->where('direction', 'inbound')
+                            ->whereIn('status', ['received', 'processing'])
+                            ->where('updated_at', '<=', $inboundCutoff);
+                    })->orWhere(function ($outbound) use ($outboundCutoff): void {
+                        $outbound->where('direction', 'outbound')
+                            ->whereIn('status', ['queued', 'retrying'])
+                            ->where('updated_at', '<=', $outboundCutoff);
                     });
                 })
                 ->orderBy('id')
