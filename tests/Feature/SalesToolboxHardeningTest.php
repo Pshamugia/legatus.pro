@@ -106,6 +106,33 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertArrayNotHasKey('earliest', $result);
     }
 
+    public function test_bilingual_delivery_policy_returns_a_natural_single_language_customer_message(): void
+    {
+        [$agent, , $conversation] = $this->context();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery information',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery policy',
+            'content' => 'თბილისი: 5 ლარი / 2 სამუშაო დღე რეგიონი: 7 ლარი / 3-5 სამუშაო დღე Tbilisi: 5 GEL / 2 business days Regions: 7 GEL / 3-5 business days',
+            'content_hash' => hash('sha256', 'natural-bilingual-delivery'),
+        ]);
+
+        $georgian = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'თბილისი', 'language' => 'ka',
+        ], $agent, $conversation);
+        $english = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'Tbilisi', 'language' => 'en',
+        ], $agent, $conversation);
+
+        $this->assertStringStartsWith('დიახ, მიტანის სერვისი გვაქვს.', $georgian['customer_message']);
+        $this->assertStringNotContainsString('business days', $georgian['customer_message']);
+        $this->assertStringNotContainsString('ბიზნესის მიერ მითითებული', $georgian['customer_message']);
+        $this->assertStringStartsWith('Yes, we offer delivery.', $english['customer_message']);
+        $this->assertStringNotContainsString('სამუშაო დღე', $english['customer_message']);
+    }
+
     public function test_custom_business_delivery_knowledge_is_authoritative_for_delivery_tool(): void
     {
         [$agent, , $conversation] = $this->context();

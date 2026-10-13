@@ -1216,9 +1216,10 @@ class SalesToolbox
         }
 
         $isManual = $manualDeliverySourceIds->contains($chunk->knowledge_source_id);
+        $localizedExcerpt = $this->policyExcerptForLanguage($excerpt, $language);
         $customerMessage = $language === 'en'
-            ? ($isManual ? "According to the business delivery information: {$excerpt}" : "According to the delivery information published on the business website: {$excerpt}")
-            : ($isManual ? "ბიზნესის მიერ მითითებული მიწოდების პირობების მიხედვით: {$excerpt}" : "ბიზნესის საიტზე გამოქვეყნებული მიწოდების პირობების მიხედვით: {$excerpt}");
+            ? "Yes, we offer delivery. {$localizedExcerpt}"
+            : "დიახ, მიტანის სერვისი გვაქვს. {$localizedExcerpt}";
         $url = data_get($chunk->metadata, 'url')
             ?? data_get($chunk->metadata, 'source_url')
             ?? data_get($chunk->metadata, 'canonical_url');
@@ -1235,6 +1236,20 @@ class SalesToolbox
                 'checked_at' => $chunk->updated_at?->toIso8601String(),
             ]),
         ];
+    }
+
+    private function policyExcerptForLanguage(string $excerpt, string $language): string
+    {
+        $unwantedScript = $language === 'en' ? '\x{10A0}-\x{10FF}' : '\p{Latin}';
+        $pattern = '/['.$unwantedScript.'\d\s:;,.\/\-–—()]+/u';
+        $localized = preg_replace_callback($pattern, function (array $match) use ($unwantedScript): string {
+            preg_match_all('/['.$unwantedScript.']/u', $match[0], $letters);
+
+            return count($letters[0] ?? []) >= 10 ? ' ' : $match[0];
+        }, $excerpt) ?? $excerpt;
+        $localized = Str::squish($localized);
+
+        return $localized !== '' ? $localized : $excerpt;
     }
 
     private function lead(Agent $agent, Conversation $c, array $a): array

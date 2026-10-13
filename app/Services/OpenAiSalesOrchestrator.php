@@ -2194,6 +2194,11 @@ class OpenAiSalesOrchestrator
         $successful = $used->filter(fn ($call) => ($call['result']['ok'] ?? false) === true);
         $successfulNames = $successful->pluck('name')->unique()->values();
         $text = (string) ($data['text'] ?? '');
+        if (($data['intent'] ?? null) === 'delivery'
+            && $successfulNames->contains('calculate_delivery')
+            && ($reason = $this->mixedLanguageResponseReason((string) $recentCustomerTexts->first(), $text))) {
+            return $reason;
+        }
         $isClarification = ($data['intent'] ?? null) === 'clarification';
         $clarificationTool = $data['clarification_next_tool'] ?? null;
         $clarificationInput = $data['clarification_missing_input'] ?? null;
@@ -2334,6 +2339,31 @@ class OpenAiSalesOrchestrator
         }
         if (($data['handoff'] ?? false) === true) {
             return $data['escalation_reason'] ?? 'The model requested human review.';
+        }
+
+        return null;
+    }
+
+    private function mixedLanguageResponseReason(string $customerText, string $responseText): ?string
+    {
+        $customerText = preg_replace('~https?://\S+~u', ' ', $customerText) ?? $customerText;
+        $responseText = preg_replace('~https?://\S+~u', ' ', $responseText) ?? $responseText;
+        $customerGeorgian = preg_match_all('/[\x{10A0}-\x{10FF}]/u', $customerText);
+        $customerLatin = preg_match_all('/\p{Latin}/u', $customerText);
+        $responseGeorgian = preg_match_all('/[\x{10A0}-\x{10FF}]/u', $responseText);
+        $responseLatin = preg_match_all('/\p{Latin}/u', $responseText);
+
+        if ($customerGeorgian >= 2
+            && $customerGeorgian > $customerLatin
+            && $responseGeorgian >= 5
+            && $responseLatin >= 20) {
+            return 'The response duplicated substantial facts in another language even though the customer did not request a translation.';
+        }
+        if ($customerLatin >= 2
+            && $customerLatin > $customerGeorgian
+            && $responseLatin >= 5
+            && $responseGeorgian >= 20) {
+            return 'The response duplicated substantial facts in another language even though the customer did not request a translation.';
         }
 
         return null;

@@ -377,6 +377,14 @@ class OpenAiOrchestrationTest extends TestCase
         ]);
         config(['services.openai.key' => 'test-key']);
         $naturalReply = 'კი, მიტანის სერვისი გვაქვს 😊 თბილისში ღირებულება 5 ლარია და დაახლოებით 2 სამუშაო დღე სჭირდება, რეგიონებში კი — 7 ლარი და 3–5 სამუშაო დღე.';
+        $roboticReply = 'ბიზნესის მიერ მითითებული მიწოდების პირობების მიხედვით. თბილისი: 5 ლარი / 2 სამუშაო დღე რეგიონი: 7 ლარი / 3-5 სამუშაო დღე Tbilisi: 5 GEL / 2 business days Regions: 7 GEL / 3-5 business days';
+        $deliveryClaims = [[
+            'type' => 'delivery', 'product_id' => null, 'amount' => 5,
+            'quantity' => null, 'reference' => 'Delivery policy',
+        ], [
+            'type' => 'delivery', 'product_id' => null, 'amount' => 7,
+            'quantity' => null, 'reference' => 'Delivery policy',
+        ]];
 
         Http::fakeSequence()
             ->push(['results' => [['flagged' => false]]])
@@ -405,6 +413,21 @@ class OpenAiOrchestrationTest extends TestCase
                     'expects_complete_set' => false,
                 ], JSON_UNESCAPED_UNICODE)]],
             ]], 'usage' => []])
+            ->push(['id' => 'robotic-delivery-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => $roboticReply,
+                    'intent' => 'delivery',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null,
+                    'clarification_missing_input' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => $deliveryClaims,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
             ->push(['id' => 'natural-delivery-answer', 'output' => [[
                 'type' => 'message',
                 'content' => [['type' => 'output_text', 'text' => json_encode([
@@ -417,13 +440,7 @@ class OpenAiOrchestrationTest extends TestCase
                     'clarification_missing_input' => null,
                     'product_ids' => [],
                     'sources' => [],
-                    'factual_claims' => [[
-                        'type' => 'delivery', 'product_id' => null, 'amount' => 5,
-                        'quantity' => null, 'reference' => 'Delivery policy',
-                    ], [
-                        'type' => 'delivery', 'product_id' => null, 'amount' => 7,
-                        'quantity' => null, 'reference' => 'Delivery policy',
-                    ]],
+                    'factual_claims' => $deliveryClaims,
                 ], JSON_UNESCAPED_UNICODE)]],
             ]], 'usage' => []]);
 
@@ -438,7 +455,9 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString('Business days', $response->json('text'));
         $this->assertStringNotContainsString('პირობების მიხედვით', $response->json('text'));
         $this->assertContains('calculate_delivery', $response->json('tools_used'));
+        $this->assertContains('guardrail_repair', $response->json('tools_used'));
         $this->assertNotContains('server_guardrail', $response->json('tools_used'));
+        Http::assertSentCount(4);
     }
 
     public function test_semantic_delivery_intent_understands_natural_arrival_wording_without_keyword_rules(): void
