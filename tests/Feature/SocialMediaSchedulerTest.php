@@ -1547,6 +1547,49 @@ class SocialMediaSchedulerTest extends TestCase
         ));
     }
 
+    public function test_ai_copywriter_rewrites_an_abbreviated_quoted_title_from_the_verified_description(): void
+    {
+        [, $agent] = $this->tenant('exact-quoted-reference-ai-copy');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('ფილოსოფია და ცხოვრება', 'ფილოსოფიური', 8);
+        $details['description'] = 'წიგნში შესულია ზურაბ კაკაბაძის „ფილოსოფია და ცხოვრება“ და მისი უკანასკნელი წერილი — „ბუნების დაცვის ერთი უცნობი ასპექტის შესახებ“. წერილი გარემოსადმი მომხმარებლურ დამოკიდებულებაზე გვაფრთხილებს.';
+        $product = $agent->products()->create($details);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'creative',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'Georgian',
+        ]);
+        $abbreviated = 'ზურაბ კაკაბაძის წიგნში შესულია უკანასკნელი წერილი — „ბუნების დაცვის...“ 🌿';
+        $complete = 'ზურაბ კაკაბაძის წიგნში შესული წერილი „ბუნების დაცვის ერთი უცნობი ასპექტის შესახებ“ გარემოსადმი მომხმარებლურ დამოკიდებულებაზე გვაფრთხილებს. 🌿';
+        $safeAudit = [
+            'supported' => true, 'unsupported_fragments' => [],
+            'distinct_from_recent' => true, 'similarity_reason' => '',
+            'core_identity_preserved' => true, 'identity_reason' => '',
+        ];
+        Http::fake(['https://api.openai.com/v1/responses' => Http::sequence()
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $abbreviated], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($safeAudit)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $complete], JSON_UNESCAPED_UNICODE)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($safeAudit)]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringContainsString('„ბუნების დაცვის ერთი უცნობი ასპექტის შესახებ“', $caption);
+        $this->assertStringNotContainsString('„ბუნების დაცვის...“', $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'abbreviated a verified title, name, brand, model, or other exact reference',
+        ));
+    }
+
     public function test_ai_copywriter_rewrites_a_caption_that_obscures_a_verified_product_type(): void
     {
         [, $agent] = $this->tenant('poetry-identity-copy');

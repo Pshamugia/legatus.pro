@@ -23,21 +23,24 @@ class SocialMediaAiCopywriter
         $diversityFailure = $this->diversityFailure($verification['caption'], $recentCaptions, $verification);
         $identityFailure = $this->identityFailure($verification);
         $groundingFailure = $this->descriptionGroundingFailure($verification['caption'], $facts);
+        $protectedReferenceFailure = $this->protectedReferenceFailure($verification['caption'], $facts);
         $meaningfulFailure = ! $this->hasMeaningfulCopy($verification['caption']);
 
-        if ($meaningfulFailure || $diversityFailure !== null || $identityFailure !== null || $groundingFailure !== null) {
+        if ($meaningfulFailure || $diversityFailure !== null || $identityFailure !== null || $groundingFailure !== null || $protectedReferenceFailure !== null) {
             $retry = $this->requestCaption(
                 $post,
                 $facts,
                 $model,
                 $recentCaptions,
-                $identityFailure !== null
+                $protectedReferenceFailure !== null
+                    ? 'The previous draft abbreviated a verified title, name, brand, model, or other exact reference: '.$protectedReferenceFailure.' Write a new caption. If you mention a verified reference, reproduce its complete wording exactly; otherwise omit it. Never shorten an exact reference with an ellipsis or partial quote.'
+                    : ($identityFailure !== null
                     ? 'The previous draft obscured or misrepresented the product’s verified nature: '.$identityFailure.' Write a new caption that makes its actual type, form, or purpose clear from the source description without inventing contents or benefits.'
                     : ($meaningfulFailure
                         ? 'The previous draft lost its meaningful copy during factual review. Write a completely new, product-specific caption using only the verified evidence and omit every uncertain attribute.'
                         : ($groundingFailure !== null
                             ? 'The previous draft was based on the title instead of the verified description: '.$groundingFailure.' Rewrite it around concrete details that are actually present in the description. Beautify and adapt those details for social media, but do not invent a plot, theme, symbolism, benefit, or product property.'
-                            : 'The previous draft was too similar to earlier posts: '.$diversityFailure.' Use a fundamentally different opening, narrative angle, sentence construction, progression, and invitation. Do not merely replace words with synonyms.')),
+                            : 'The previous draft was too similar to earlier posts: '.$diversityFailure.' Use a fundamentally different opening, narrative angle, sentence construction, progression, and invitation. Do not merely replace words with synonyms.'))),
             );
             $retryVerification = $this->sanitizeCaption($post, $retry['caption'], $facts, $recentCaptions, $model);
             $generation['input_tokens'] += $retry['input_tokens'];
@@ -54,7 +57,8 @@ class SocialMediaAiCopywriter
         if (! $this->hasMeaningfulCopy($verification['caption'])
             || $this->diversityFailure($verification['caption'], $recentCaptions, $verification) !== null
             || $this->identityFailure($verification) !== null
-            || $this->descriptionGroundingFailure($verification['caption'], $facts) !== null) {
+            || $this->descriptionGroundingFailure($verification['caption'], $facts) !== null
+            || $this->protectedReferenceFailure($verification['caption'], $facts) !== null) {
             throw new \RuntimeException('AI Copywriter could not produce grounded, structurally distinct product-specific copy.');
         }
 
@@ -147,6 +151,7 @@ Write the complete caption as natural, original marketing copy grounded primaril
 Every product must have its own creative concept and composition. The recent captions below are negative references, not style examples: do not reuse their opening words, hook formula, sentence-by-sentence scaffold, rhetorical progression, emoji placement, closing invitation, or hashtag pattern. Do not preserve an earlier structure while merely swapping product details or synonyms. Silently choose a different product-specific angle and a visibly different opening and paragraph structure before writing.
 Never use stock phrases such as "a new choice from our catalog", "new from our catalog", or "discover this product". Never output database-style labels or a specification list such as "Category:", "Price:", or a generic taxonomy value such as "Books" merely to fill space.
 Use only the verified evidence below. Do not invent or substitute a person, author, brand, maker, origin, material, size, weight, date, price, benefit, award, availability, delivery term, review, or other product detail. Treat the image only as visual inspiration and never infer factual claims from it. Do not include a URL; the server appends the exact verified product link.
+Titles, names, brands, models, SKUs, ISBNs, and text enclosed in quotation marks are exact references. You may omit an exact reference, but if you mention it, reproduce its complete verified wording without paraphrasing, shortening, partial quotation, or an ellipsis.
 
 Business: {$post->agent->business_name}
 Product title: {$post->title}
@@ -375,6 +380,69 @@ PROMPT;
         return $matches >= 2
             ? null
             : 'The caption must preserve at least two distinct details from the verified description, not merely repeat or reinterpret the title.';
+    }
+
+    /** @param array<string, array{label: string, value: string}> $facts */
+    private function protectedReferenceFailure(string $caption, array $facts): ?string
+    {
+        $protected = collect(['title', 'author', 'creator', 'brand', 'manufacturer', 'model', 'sku', 'isbn'])
+            ->map(fn (string $key): string => trim((string) data_get($facts, $key.'.value', '')))
+            ->filter();
+
+        foreach ($facts as $fact) {
+            $value = (string) ($fact['value'] ?? '');
+            preg_match_all('/„([^“]+)“|“([^”]+)”|«([^»]+)»|"([^"]+)"/u', $value, $matches, PREG_SET_ORDER);
+            foreach ($matches as $match) {
+                $protected->push(collect(array_slice($match, 1))->first(fn ($part): bool => trim((string) $part) !== ''));
+            }
+        }
+
+        $normalizedCaption = $this->normalizeProtectedReference($caption);
+        preg_match_all('/„([^“]+)“|“([^”]+)”|«([^»]+)»|"([^"]+)"/u', $caption, $quotedMatches, PREG_SET_ORDER);
+        $quotedMentions = collect($quotedMatches)->map(function (array $match): string {
+            $mention = collect(array_slice($match, 1))->first(fn ($part): bool => trim((string) $part) !== '');
+
+            return $this->normalizeProtectedReference((string) $mention);
+        })->filter();
+
+        foreach ($protected->map(fn ($reference): string => $this->normalizeProtectedReference((string) $reference))->filter()->unique() as $reference) {
+            if (Str::contains($normalizedCaption, $reference)) {
+                continue;
+            }
+
+            $referenceWords = $this->words($reference);
+            if (count($referenceWords) < 2) {
+                continue;
+            }
+            $prefixWordCount = count($referenceWords) >= 3 ? 2 : 1;
+            $prefix = implode(' ', array_slice($referenceWords, 0, $prefixWordCount));
+            if (mb_strlen($prefix) < 5) {
+                continue;
+            }
+
+            $quotedAbbreviation = $quotedMentions->first(function (string $mention) use ($reference, $prefix): bool {
+                $mention = rtrim($mention, '.… ');
+
+                return $mention !== ''
+                    && Str::startsWith($reference, $mention)
+                    && Str::startsWith($mention, $prefix);
+            });
+            $ellipsisAbbreviation = preg_match(
+                '/(?<![\p{L}\p{N}])'.preg_quote($prefix, '/').'\s*(?:…|\.{3})/u',
+                $normalizedCaption,
+            ) === 1;
+
+            if ($quotedAbbreviation !== null || $ellipsisAbbreviation) {
+                return 'The complete verified reference is "'.$reference.'".';
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeProtectedReference(string $value): string
+    {
+        return mb_strtolower(trim(preg_replace('/\s+/u', ' ', strip_tags($value)) ?? ''));
     }
 
     /** @return list<string> */
