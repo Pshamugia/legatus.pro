@@ -34,6 +34,37 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertStringContainsString('თბილისი', $georgian['customer_message']);
     }
 
+    public function test_free_delivery_minimum_is_tenant_scoped_verified_policy(): void
+    {
+        [$agent, , $conversation] = $this->context();
+        $settings = $agent->settings;
+        data_set($settings, 'delivery_policy.free_delivery_minimum', 60);
+        $agent->update(['settings' => $settings]);
+        $otherAgent = $agent->replicate();
+        $otherAgent->slug = 'toolbox-hardening-other';
+        $otherAgent->settings = array_merge($otherAgent->settings ?? [], [
+            'delivery_policy' => array_diff_key(
+                data_get($otherAgent->settings, 'delivery_policy', []),
+                ['free_delivery_minimum' => true],
+            ),
+        ]);
+        $otherAgent->save();
+        $otherConversation = $otherAgent->conversations()->create(['visitor_id' => 'other', 'status' => 'ai']);
+
+        $configured = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'Tbilisi', 'language' => 'en',
+        ], $agent->fresh(), $conversation);
+        $other = app(SalesToolbox::class)->execute('calculate_delivery', [
+            'city' => 'Tbilisi', 'language' => 'en',
+        ], $otherAgent, $otherConversation);
+
+        $this->assertSame(60.0, $configured['free_delivery_minimum']);
+        $this->assertStringContainsString('60', $configured['customer_message']);
+        $this->assertStringContainsString('Delivery is free', $configured['customer_message']);
+        $this->assertArrayNotHasKey('free_delivery_minimum', $other);
+        $this->assertStringNotContainsString('Delivery is free', $other['customer_message']);
+    }
+
     public function test_delivery_fails_closed_when_tenant_policy_is_missing(): void
     {
         [$agent, , $conversation] = $this->context();
@@ -48,6 +79,9 @@ class SalesToolboxHardeningTest extends TestCase
     public function test_published_website_delivery_policy_overrides_seeded_date_estimates(): void
     {
         [$agent, , $conversation] = $this->context();
+        $settings = $agent->settings;
+        data_set($settings, 'delivery_policy.free_delivery_minimum', 60);
+        $agent->update(['settings' => $settings]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'url',
             'name' => 'Store website',
@@ -74,6 +108,8 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertStringContainsString('2-3 სამუშაო დღეში', $result['customer_message']);
         $this->assertArrayNotHasKey('earliest', $result);
         $this->assertStringNotContainsString('2026-', $result['customer_message']);
+        $this->assertSame(60.0, $result['free_delivery_minimum']);
+        $this->assertStringContainsString('60', $result['customer_message']);
     }
 
     public function test_manual_delivery_knowledge_has_priority_over_website_policy(): void

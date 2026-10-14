@@ -94,6 +94,23 @@ class SettingsBusinessIdentityTest extends TestCase
         $this->assertNull($conversation->fresh()->handoff_reason);
     }
 
+    public function test_owner_can_set_a_tenant_scoped_free_delivery_minimum(): void
+    {
+        [$owner, $agent] = $this->tenant('free-delivery-workspace', 'owner', 'Free Delivery Brand', 'Assistant');
+        [, $otherAgent] = $this->tenant('paid-delivery-workspace', 'owner', 'Paid Delivery Brand', 'Assistant');
+
+        $this->actingAs($owner)->get(route('settings.index'))
+            ->assertOk()
+            ->assertSee('Free delivery from order total (optional)');
+
+        $this->actingAs($owner)->put(route('settings.update'), $this->validSettings([
+            'delivery_free_minimum' => 60,
+        ]))->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertEquals(60.0, data_get($agent->fresh()->settings, 'delivery_policy.free_delivery_minimum'));
+        $this->assertNull(data_get($otherAgent->fresh()->settings, 'delivery_policy.free_delivery_minimum'));
+    }
+
     public function test_admin_can_update_identity_but_viewer_cannot(): void
     {
         [$admin, $adminAgent] = $this->tenant('admin-workspace', 'admin', 'Admin Brand', 'Admin Assistant');

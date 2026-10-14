@@ -71,6 +71,7 @@ class SettingsController extends Controller
             'delivery_local_days' => 'required|integer|min:1|max:10',
             'delivery_regional_min_days' => 'required|integer|min:1|max:30',
             'delivery_regional_max_days' => 'required|integer|min:1|max:30|gte:delivery_regional_min_days',
+            'delivery_free_minimum' => 'nullable|numeric|min:0.01|max:1000000',
         ]);
         $agent = $tenant->agent();
         $currentTheme = $agent->widgetTheme();
@@ -97,6 +98,9 @@ class SettingsController extends Controller
                     'local_business_days' => (int) $data['delivery_local_days'],
                     'regional_min_business_days' => (int) $data['delivery_regional_min_days'],
                     'regional_max_business_days' => (int) $data['delivery_regional_max_days'],
+                    'free_delivery_minimum' => isset($data['delivery_free_minimum'])
+                        ? (float) $data['delivery_free_minimum']
+                        : null,
                     'source_label' => 'Configured delivery policy',
                 ],
             ]);
