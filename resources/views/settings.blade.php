@@ -113,7 +113,6 @@
                 <label>Local business days</label><input name="delivery_local_days" type="number" min="1" max="10" value="{{ old('delivery_local_days', $delivery['local_business_days'] ?? 1) }}" required>
                 <label>Regional minimum business days</label><input name="delivery_regional_min_days" type="number" min="1" max="30" value="{{ old('delivery_regional_min_days', $delivery['regional_min_business_days'] ?? 1) }}" required>
                 <label>Regional maximum business days</label><input name="delivery_regional_max_days" type="number" min="1" max="30" value="{{ old('delivery_regional_max_days', $delivery['regional_max_business_days'] ?? 3) }}" required>
-                <label>Free delivery from order total (optional)</label><input name="delivery_free_minimum" type="number" step="0.01" min="0.01" max="1000000" value="{{ old('delivery_free_minimum', $delivery['free_delivery_minimum'] ?? '') }}">
                 @if(in_array($role, ['owner', 'admin']))
                     <button class="btn lime" style="margin-top:18px">Save business & AI settings</button>
                 @else

@@ -1082,7 +1082,7 @@ class SalesToolbox
                     ? "Verified delivery to {$city} is {$fee} {$currency}, with an indicative {$minimum}–{$maximum} business-day window. Checkout confirms the final fee and timing."
                     : "{$city}-ში გადამოწმებული მიწოდების საფასურია {$fee} {$currency}, სავარაუდო ვადა კი {$minimum}–{$maximum} სამუშაო დღეა. საბოლოო თანხასა და დროს შეკვეთის გაფორმებისას გადაამოწმებთ.";
 
-                return $this->withFreeDeliveryPolicy($agent, [
+                return [
                     'ok' => true,
                     'city' => $city,
                     'minimum_business_days' => $minimum,
@@ -1092,7 +1092,7 @@ class SalesToolbox
                     'indicative' => (bool) ($quote['estimate_only'] ?? true),
                     'customer_message' => $customerMessage,
                     'source' => ['label' => $connection->name ?: 'Live delivery quote', 'type' => 'live_delivery', 'checked_at' => $quote['quoted_at'] ?? now()->toIso8601String()],
-                ], (string) ($a['language'] ?? 'ka'));
+                ];
             } catch (\Throwable $exception) {
                 report($exception);
 
@@ -1104,7 +1104,7 @@ class SalesToolbox
         // source. Prefer its published delivery wording over a manually seeded
         // estimate so we never manufacture calendar dates from stale defaults.
         if ($publishedPolicy = $this->publishedDeliveryPolicy($agent, (string) $a['city'], (string) ($a['language'] ?? 'ka'))) {
-            return $this->withFreeDeliveryPolicy($agent, $publishedPolicy, (string) ($a['language'] ?? 'ka'));
+            return $publishedPolicy;
         }
 
         $policy = $agent->settings['delivery_policy'] ?? null;
@@ -1134,7 +1134,7 @@ class SalesToolbox
             ? "For {$a['city']}, the verified indicative window is {$earliest->toDateString()} to {$latest->toDateString()} ({$estimate}). Final timing is confirmed after the address and order are confirmed."
             : "{$a['city']}-ში გადამოწმებული სავარაუდო ფანჯარაა {$earliest->toDateString()}-დან {$latest->toDateString()}-მდე ({$estimateKa}). საბოლოო დრო მისამართისა და შეკვეთის დადასტურების შემდეგ დაზუსტდება.";
 
-        return $this->withFreeDeliveryPolicy($agent, [
+        return [
             'ok' => true,
             'city' => $a['city'],
             'earliest' => $earliest->toDateString(),
@@ -1146,31 +1146,7 @@ class SalesToolbox
             'indicative' => true,
             'customer_message' => $customerMessage,
             'source' => ['label' => $policy['source_label'] ?? 'Verified delivery policy', 'type' => 'policy'],
-        ], (string) ($a['language'] ?? 'ka'));
-    }
-
-    private function withFreeDeliveryPolicy(Agent $agent, array $result, string $language): array
-    {
-        $minimum = data_get($agent->settings, 'delivery_policy.free_delivery_minimum');
-        if (! is_numeric($minimum) || ! is_finite((float) $minimum) || (float) $minimum <= 0) {
-            return $result;
-        }
-
-        $minimum = round((float) $minimum, 2);
-        $currency = $this->expectedCurrency($agent);
-        $formatted = floor($minimum) === $minimum
-            ? number_format($minimum, 0, '.', '')
-            : number_format($minimum, 2, '.', '');
-        $georgianCurrency = $currency === 'GEL' ? '₾' : $currency;
-        $message = $language === 'en'
-            ? "Delivery is free for purchases of {$formatted} {$currency} or more."
-            : "{$formatted} {$georgianCurrency}-ის ან მეტი ღირებულების შენაძენზე მიწოდება უფასოა.";
-
-        $result['free_delivery_minimum'] = $minimum;
-        $result['free_delivery_currency'] = $currency;
-        $result['customer_message'] = trim((string) ($result['customer_message'] ?? '').' '.$message);
-
-        return $result;
+        ];
     }
 
     private function publishedDeliveryPolicy(Agent $agent, string $city, string $language): ?array
