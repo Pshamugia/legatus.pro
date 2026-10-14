@@ -19,6 +19,7 @@ use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateRenderer;
 use App\Services\SocialMediaTemplateService;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -1394,6 +1395,47 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'graph.facebook.test'));
     }
 
+    public function test_terminal_ai_failure_publishes_verified_product_text_instead_of_losing_the_slot(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('terminal-ai-fallback');
+        $this->connections($agent);
+        config()->set('services.openai.key', 'test-openai-key');
+        $product = $agent->products()->create($this->product('Fallback Product', 'General', 1));
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'simple',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => '', 'copy_mode' => 'ai',
+        ]);
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::response(['error' => ['message' => 'Unavailable']], 503),
+            'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'verified-fallback-post']),
+        ]);
+        $queueJob = \Mockery::mock(Job::class);
+        $queueJob->shouldReceive('attempts')->andReturn(3);
+        $job = new PublishSocialMediaPost($post->id);
+        $job->setJob($queueJob);
+
+        $job->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
+
+        $fresh = $post->fresh();
+        $this->assertSame('published', $fresh->status);
+        $this->assertSame('verified-fallback', $fresh->ai_model);
+        $this->assertSame(
+            $product->name."\n\n".$product->description."\n\n".data_get($product->metadata, 'product_url'),
+            $fresh->caption,
+        );
+        $this->assertSame('verified-fallback-post', $fresh->provider_post_id);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/page-1/photos')
+            && str_contains((string) $request['caption'], $product->description));
+    }
+
     public function test_live_product_page_replaces_contaminated_catalog_copy_with_its_real_description(): void
     {
         [, $agent] = $this->tenant('live-description-refresh');
@@ -2556,6 +2598,80 @@ class SocialMediaSchedulerTest extends TestCase
 
         $this->assertSame('preparing', $post->fresh()->status);
         Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+    }
+
+    public function test_ai_slot_prepares_every_channel_before_queueing_and_replaces_a_failed_product(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('preflight-ai-slot');
+        $rejected = $agent->products()->create($this->product('Rejected AI Product', 'General', 2));
+        $replacement = $agent->products()->create($this->product('Prepared Replacement', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram', 'threads']);
+        $schedule->update(['copy_mode' => 'ai', 'ai_tone' => 'simple']);
+        $dueAt = now('UTC')->subMinute();
+        foreach (['facebook', 'instagram', 'threads'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $rejected->id, 'provider' => $provider,
+                'status' => 'preparing', 'scheduled_for' => $dueAt, 'title' => $rejected->name,
+                'description' => $rejected->description, 'product_url' => data_get($rejected->metadata, 'product_url'),
+                'image_url' => $rejected->publicImageUrl(), 'caption' => '', 'copy_mode' => 'ai',
+            ]);
+        }
+
+        $copywriter = \Mockery::mock(SocialMediaAiCopywriter::class);
+        $copywriter->shouldReceive('generate')->times(4)->andReturnUsing(function (SocialMediaPost $post) use ($rejected): string {
+            if ((int) $post->product_id === (int) $rejected->id) {
+                throw new \RuntimeException('The AI draft did not pass verification.');
+            }
+
+            return $post->title."\n\n".$post->product_url;
+        });
+
+        (new PrepareSocialMediaSlot($schedule->id, $dueAt->format('Y-m-d H:i:s')))->handle(
+            app(SocialMediaScheduler::class),
+            null,
+            $copywriter,
+        );
+
+        $posts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
+        $this->assertCount(3, $posts);
+        $this->assertSame([$replacement->id], $posts->pluck('product_id')->unique()->values()->all());
+        $this->assertTrue($posts->every(fn (SocialMediaPost $post): bool => $post->status === 'queued'
+            && filled($post->caption)
+            && filled($post->ai_generated_at)));
+        Queue::assertPushed(PublishSocialMediaPost::class, 3);
+    }
+
+    public function test_ai_slot_uses_verified_title_fallback_when_no_other_described_product_exists(): void
+    {
+        Queue::fake();
+        Http::fake();
+        [, $agent] = $this->tenant('title-fallback-ai-slot');
+        $details = $this->product('Verified Title Only', 'General', 2);
+        $details['description'] = null;
+        $product = $agent->products()->create($details);
+        $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram', 'threads']);
+        $schedule->update(['copy_mode' => 'ai', 'ai_tone' => 'simple']);
+        $dueAt = now('UTC')->subMinute();
+        foreach (['facebook', 'instagram', 'threads'] as $provider) {
+            $schedule->posts()->create([
+                'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => $provider,
+                'status' => 'preparing', 'scheduled_for' => $dueAt, 'title' => $product->name,
+                'description' => null, 'product_url' => data_get($product->metadata, 'product_url'),
+                'image_url' => $product->publicImageUrl(), 'caption' => '', 'copy_mode' => 'ai',
+            ]);
+        }
+
+        (new PrepareSocialMediaSlot($schedule->id, $dueAt->format('Y-m-d H:i:s')))->handle(
+            app(SocialMediaScheduler::class),
+        );
+
+        $posts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
+        $this->assertTrue($posts->every(fn (SocialMediaPost $post): bool => $post->status === 'queued'
+            && $post->ai_model === 'verified-fallback'
+            && $post->caption === $product->name."\n\n".data_get($product->metadata, 'product_url')));
+        Queue::assertPushed(PublishSocialMediaPost::class, 3);
+        Http::assertNothingSent();
     }
 
     public function test_product_that_becomes_invalid_after_preparation_releases_the_whole_slot_for_replacement(): void

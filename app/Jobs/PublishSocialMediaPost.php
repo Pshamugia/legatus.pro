@@ -124,17 +124,23 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                     ]);
                     $post->refresh();
                 } catch (\Throwable $exception) {
-                    $post->update([
-                        'status' => $this->attempts() >= $this->tries ? 'failed' : 'queued',
-                        'ai_generation_attempted_at' => $this->attempts() >= $this->tries ? $post->ai_generation_attempted_at : null,
-                        'failure_reason' => Str::limit('AI Copywriter failed; AI mode did not publish Original template content. '.$exception->getMessage(), 2000, ''),
-                    ]);
-
                     if ($this->attempts() >= $this->tries) {
-                        return;
-                    }
+                        $post->update([
+                            'caption' => $copywriter->verifiedFallback($post),
+                            'ai_generated_at' => now(),
+                            'ai_model' => 'verified-fallback',
+                            'failure_reason' => null,
+                        ]);
+                        $post->refresh();
+                    } else {
+                        $post->update([
+                            'status' => 'queued',
+                            'ai_generation_attempted_at' => null,
+                            'failure_reason' => Str::limit('AI Copywriter failed; AI mode did not publish Original template content. '.$exception->getMessage(), 2000, ''),
+                        ]);
 
-                    throw $exception;
+                        throw $exception;
+                    }
                 }
             }
         }

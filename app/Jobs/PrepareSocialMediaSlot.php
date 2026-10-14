@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\SocialMediaPost;
 use App\Models\SocialMediaSchedule;
+use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaAiPhotoEditor;
 use App\Services\SocialMediaScheduler;
 use Carbon\CarbonImmutable;
@@ -17,6 +18,8 @@ use Illuminate\Support\Str;
 class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
+
+    private const AI_PRODUCT_ATTEMPTS = 3;
 
     public int $timeout = 75;
 
@@ -39,8 +42,11 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
         return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(10)->expireAfter(90)];
     }
 
-    public function handle(SocialMediaScheduler $scheduler, ?SocialMediaAiPhotoEditor $photoEditor = null): void
-    {
+    public function handle(
+        SocialMediaScheduler $scheduler,
+        ?SocialMediaAiPhotoEditor $photoEditor = null,
+        ?SocialMediaAiCopywriter $copywriter = null,
+    ): void {
         $schedule = SocialMediaSchedule::query()->with('agent')->find($this->scheduleId);
         if (! $schedule || $schedule->status !== 'active') {
             $this->releasePreparingPosts();
@@ -49,9 +55,47 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
         }
 
         $scheduledFor = CarbonImmutable::createFromFormat('Y-m-d H:i:s', $this->scheduledFor, 'UTC');
-        $safeIds = $scheduler->prepareDueSlot($schedule, $scheduledFor);
-        if ($safeIds === []) {
-            return;
+        $excludedProductIds = [];
+        $safeIds = [];
+        $copywriter ??= app(SocialMediaAiCopywriter::class);
+
+        for ($attempt = 1; $attempt <= self::AI_PRODUCT_ATTEMPTS; $attempt++) {
+            $safeIds = $scheduler->prepareDueSlot(
+                $schedule,
+                $scheduledFor,
+                $excludedProductIds,
+                $excludedProductIds !== [],
+            );
+            if ($safeIds === []) {
+                return;
+            }
+
+            $posts = SocialMediaPost::query()->whereIn('id', $safeIds)->orderBy('id')->get();
+            $productId = (int) ($posts->first()?->product_id ?? 0);
+            $alreadyRejected = $productId > 0 && in_array($productId, $excludedProductIds, true);
+            $usesAiCopy = $posts->contains(fn (SocialMediaPost $post): bool => ($post->copy_mode ?: $schedule->copy_mode) === 'ai');
+            if (! $usesAiCopy) {
+                break;
+            }
+
+            if ($alreadyRejected) {
+                $this->prepareVerifiedFallback($safeIds, $copywriter);
+                break;
+            }
+
+            try {
+                $this->prepareAiCopy($safeIds, $copywriter);
+                break;
+            } catch (\Throwable $exception) {
+                if ($productId > 0 && $attempt < self::AI_PRODUCT_ATTEMPTS) {
+                    $excludedProductIds[] = $productId;
+
+                    continue;
+                }
+
+                $this->prepareVerifiedFallback($safeIds, $copywriter);
+                break;
+            }
         }
 
         if ($schedule->ai_photo_editor) {
@@ -75,6 +119,61 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
 
         foreach ($queuedIds as $id) {
             PublishSocialMediaPost::dispatch($id)->onQueue('channels');
+        }
+    }
+
+    /** @param list<int> $postIds */
+    private function prepareAiCopy(array $postIds, SocialMediaAiCopywriter $copywriter): void
+    {
+        $posts = SocialMediaPost::query()
+            ->with(['agent', 'product', 'schedule'])
+            ->whereIn('id', $postIds)
+            ->where('status', 'preparing')
+            ->orderBy('id')
+            ->get();
+        if ($posts->count() !== count($postIds)) {
+            throw new \RuntimeException('AI Copywriter could not prepare the complete multi-channel product slot.');
+        }
+
+        foreach ($posts as $post) {
+            if (filled($post->ai_generated_at) && filled($post->caption)) {
+                continue;
+            }
+            if (blank($post->description)) {
+                throw new \RuntimeException('AI Copywriter requires a verified product description.');
+            }
+
+            $post->update(['ai_generation_attempted_at' => now(), 'failure_reason' => null]);
+            $post->update([
+                'caption' => $copywriter->generate($post->fresh(['agent', 'product', 'schedule'])),
+                'ai_generated_at' => now(),
+                'ai_model' => (string) config('services.openai.social_media_model', 'gpt-5.6-luna'),
+                'failure_reason' => null,
+            ]);
+        }
+    }
+
+    /** @param list<int> $postIds */
+    private function prepareVerifiedFallback(array $postIds, SocialMediaAiCopywriter $copywriter): void
+    {
+        $posts = SocialMediaPost::query()
+            ->with(['agent', 'product', 'schedule'])
+            ->whereIn('id', $postIds)
+            ->where('status', 'preparing')
+            ->orderBy('id')
+            ->get();
+        if ($posts->count() !== count($postIds)) {
+            throw new \RuntimeException('Verified fallback could not prepare the complete multi-channel product slot.');
+        }
+
+        foreach ($posts as $post) {
+            $post->update([
+                'caption' => $copywriter->verifiedFallback($post),
+                'ai_generation_attempted_at' => $post->ai_generation_attempted_at ?: now(),
+                'ai_generated_at' => now(),
+                'ai_model' => 'verified-fallback',
+                'failure_reason' => null,
+            ]);
         }
     }
 

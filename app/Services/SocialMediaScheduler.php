@@ -184,8 +184,14 @@ class SocialMediaScheduler
      *
      * @return list<int> IDs that are safe to queue
      */
-    public function prepareDueSlot(SocialMediaSchedule $schedule, CarbonInterface $scheduledFor): array
-    {
+    public function prepareDueSlot(
+        SocialMediaSchedule $schedule,
+        CarbonInterface $scheduledFor,
+        array $excludedProductIds = [],
+        bool $keepCurrentWhenNoReplacement = false,
+    ): array {
+        $excludedProductIds = collect($excludedProductIds)
+            ->mapWithKeys(fn ($id): array => [(int) $id => true]);
         $this->publicationHistory->backfill($schedule->agent);
         $slotPosts = $schedule->posts()
             ->where('scheduled_for', $scheduledFor)
@@ -238,9 +244,11 @@ class SocialMediaScheduler
             )
         );
 
-        if ($product && $productMatchesSchedule && ! $alreadyClaimedByEarlierSlot && ! $alreadyPublished && $pending->every(
+        $currentProductIsEligible = $product && $productMatchesSchedule && ! $alreadyClaimedByEarlierSlot && ! $alreadyPublished && $pending->every(
             fn ($post): bool => $this->productIsPublishableForPost($product, $post),
-        ) && $this->liveAvailabilityAllows($schedule->agent, $product)) {
+        ) && $this->liveAvailabilityAllows($schedule->agent, $product);
+
+        if ($currentProductIsEligible && ! isset($excludedProductIds[(int) $product->id])) {
             return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
         }
 
@@ -266,6 +274,7 @@ class SocialMediaScheduler
         $allReplacements = $eligibleVariants
             ->when($wantedLanguage !== null, fn (Collection $variants): Collection => $variants->where('language', $wantedLanguage))
             ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
+            ->reject(fn (array $variant): bool => isset($excludedProductIds[(int) $variant['product']->id]))
             ->unique(fn (array $variant): int => (int) $variant['product']->id)
             ->values();
         $providers = $pending->pluck('provider')->all();
@@ -288,6 +297,10 @@ class SocialMediaScheduler
         }
 
         if (! $replacement) {
+            if ($keepCurrentWhenNoReplacement && $currentProductIsEligible) {
+                return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            }
+
             $pending->each->update([
                 'status' => 'skipped',
                 'failure_reason' => 'No unused publishable product was available to replace this slot.',

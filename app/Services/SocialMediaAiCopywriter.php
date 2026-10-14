@@ -76,6 +76,30 @@ class SocialMediaAiCopywriter
         return $caption;
     }
 
+    public function verifiedFallback(SocialMediaPost $post): string
+    {
+        $title = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $post->title)) ?? '');
+        if ($title === '') {
+            throw new \RuntimeException('A verified product title is required for the social media fallback.');
+        }
+
+        $description = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $post->description)) ?? '');
+        $body = $description === '' ? $title : $title."\n\n".$description;
+
+        try {
+            return $this->renderCaption($post, $body);
+        } catch (\RuntimeException $exception) {
+            if (! str_contains($exception->getMessage(), 'exceeds the provider limit')) {
+                throw $exception;
+            }
+
+            // Never cut a verified title or description mid-sentence merely
+            // to satisfy a provider limit. A complete title and exact link are
+            // the smallest safe fallback that still identifies the product.
+            return $this->renderCaption($post, $title);
+        }
+    }
+
     /**
      * @param  array<string, array{label: string, value: string}>  $facts
      * @return array{caption: string, input_tokens: int, output_tokens: int}
