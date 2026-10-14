@@ -132,8 +132,8 @@ class VerifiedCatalogResponder
             if ($suggestion === '') {
                 return [
                     'text' => $georgian
-                        ? 'კატალოგში ზუსტად მოთხოვნილი პროდუქტი ვერ მოვძებნე.'
-                        : 'I could not find the exact requested product in the catalog.',
+                        ? 'სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.'
+                        : "Sorry, I couldn't find that specific product in the catalog.",
                     'intent' => 'discovery',
                     'confidence' => .8,
                     'handoff' => false,

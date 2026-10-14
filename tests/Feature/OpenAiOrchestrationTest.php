@@ -2734,7 +2734,7 @@ class OpenAiOrchestrationTest extends TestCase
             ->assertJsonPath('products', []);
 
         $this->assertSame(
-            'I could not find the exact requested product in the catalog.',
+            "Sorry, I couldn't find that specific product in the catalog.",
             $response->json('text'),
         );
         $this->assertStringNotContainsString('I will not substitute', $response->json('text'));

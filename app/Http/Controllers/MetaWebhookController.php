@@ -109,6 +109,7 @@ class MetaWebhookController extends Controller
                         'text' => $event['text'],
                         'attachments' => $event['attachments'],
                         'requires_human' => (bool) ($event['requires_human'] ?? false),
+                        'suppress_reply' => (bool) ($event['suppress_reply'] ?? false),
                         'provider_timestamp' => $event['timestamp'],
                     ],
                     'received_at' => $this->date($event['timestamp']) ?? now(),

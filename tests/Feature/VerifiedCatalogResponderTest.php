@@ -69,7 +69,7 @@ class VerifiedCatalogResponderTest extends TestCase
         $reply = app(VerifiedCatalogResponder::class)->respond($agent, $conversation, 'ლურჯი პიჯაკი გაქვთ?');
 
         $this->assertNotNull($reply);
-        $this->assertStringContainsString('ვერ მოვძებნე', $reply['text']);
+        $this->assertStringContainsString('ვერ მოვიძიე', $reply['text']);
         $this->assertStringNotContainsString('მომწერეთ პროდუქტის სახელი', $reply['text']);
         $this->assertStringNotContainsString('ISBN', $reply['text']);
         $this->assertStringNotContainsString('ავტორ', $reply['text']);
@@ -537,7 +537,7 @@ class VerifiedCatalogResponderTest extends TestCase
         $this->assertFalse($suggestion['handoff']);
         $this->assertStringContainsString('ჯავახიშვილი', $suggestion['text']);
         $this->assertFalse($missing['handoff']);
-        $this->assertStringContainsString('ვერ მოვძებნე', $missing['text']);
+        $this->assertStringContainsString('ვერ მოვიძიე', $missing['text']);
         $this->assertStringNotContainsString('მომწერეთ პროდუქტის სახელი', $missing['text']);
         $this->assertSame('ai', $conversation->fresh()->status);
     }

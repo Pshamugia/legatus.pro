@@ -88,6 +88,21 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        if ((bool) data_get($record->payload, 'suppress_reply', false)) {
+            $reason = 'Passive Meta story mention does not require an automated reply.';
+            $preserved = $this->preserveWithoutPausingAi(
+                $record,
+                $reason,
+                transportFailure: false,
+                automaticProcessingFailure: false,
+            );
+            $record->update($preserved
+                ? ['status' => 'processed', 'payload' => $this->minimalPayload($record), 'processed_at' => now()]
+                : ['status' => 'failed', 'failure_reason' => $reason, 'failed_at' => now()]);
+
+            return;
+        }
+
         if ((bool) data_get($record->payload, 'requires_human', false)) {
             if ($record->message_type === 'attachment') {
                 $this->replyThatAttachmentCannotBeRead($record, $connection, $senderId, $text, $dispatcher);
@@ -623,10 +638,15 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
     }
 
     /** Preserve a redacted customer request without inventing human ownership. */
-    private function preserveWithoutPausingAi(ChannelMessage $record, string $reason, bool $transportFailure = true): bool
+    private function preserveWithoutPausingAi(
+        ChannelMessage $record,
+        string $reason,
+        bool $transportFailure = true,
+        bool $automaticProcessingFailure = true,
+    ): bool
     {
         try {
-            return DB::transaction(function () use ($record, $reason, $transportFailure): bool {
+            return DB::transaction(function () use ($record, $reason, $transportFailure, $automaticProcessingFailure): bool {
                 $locked = ChannelMessage::query()->lockForUpdate()->find($record->id);
                 if (! $locked) {
                     return false;
@@ -655,10 +675,15 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 $safeText = PrivacyRedactor::text($text);
                 $metadata = [
                     'contact_evidence' => PrivacyRedactor::contactEvidence($text),
-                    'automatic_processing_failure' => true,
-                    'processing_failure_reason' => $reason,
                     'channel_message_id' => $locked->id,
                 ];
+                if ($automaticProcessingFailure) {
+                    $metadata['automatic_processing_failure'] = true;
+                    $metadata['processing_failure_reason'] = $reason;
+                } else {
+                    $metadata['automated_reply_suppressed'] = true;
+                    $metadata['suppression_reason'] = $reason;
+                }
                 if ($transportFailure) {
                     $metadata['transport_failure'] = true;
                 }

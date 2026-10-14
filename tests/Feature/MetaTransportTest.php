@@ -643,6 +643,48 @@ class MetaTransportTest extends TestCase
         $this->assertStringNotContainsString('INTERNAL_MACHINE_TOKEN', $conversation->messages()->pluck('content')->implode(' '));
     }
 
+    public function test_passive_story_mention_is_preserved_without_an_automated_reply(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('instagram', 'instagram-story-account');
+        $payload = [
+            'object' => 'instagram',
+            'entry' => [[
+                'id' => 'instagram-story-account',
+                'messaging' => [[
+                    'sender' => ['id' => 'story-author'],
+                    'recipient' => ['id' => 'instagram-story-account'],
+                    'timestamp' => 1784512800000,
+                    'message' => [
+                        'mid' => 'story-mention-mid',
+                        'attachments' => [[
+                            'type' => 'story_mention',
+                            'payload' => ['url' => 'https://scontent.example/story.jpg'],
+                        ]],
+                    ],
+                ]],
+            ]],
+        ];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $this->metaWebhook($body, 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret'))->assertOk();
+
+        $inbound = $connection->channelMessages()->where('direction', 'inbound')->sole();
+        $this->assertTrue((bool) data_get($inbound->payload, 'suppress_reply'));
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+
+        $conversation = $connection->conversations()->sole();
+        $customer = $conversation->messages()->where('role', 'customer')->sole();
+        $this->assertSame('processed', $inbound->fresh()->status);
+        $this->assertTrue((bool) data_get($customer->metadata, 'automated_reply_suppressed'));
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
+    }
+
     public function test_customer_image_is_visually_matched_then_verified_against_catalog_and_stock(): void
     {
         Queue::fake();

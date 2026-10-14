@@ -104,6 +104,7 @@ class MetaWebhookNormalizer
         $attachments = [];
         $providerMessageId = null;
         $requiresHuman = false;
+        $suppressReply = false;
 
         if (is_array($message)) {
             $providerMessageId = isset($message['mid']) ? (string) $message['mid'] : null;
@@ -121,6 +122,10 @@ class MetaWebhookNormalizer
             $hasImage = collect($attachments)->contains(fn ($attachment): bool =>
                 $attachment['type'] === 'image' && filled($attachment['url'])
             );
+            $suppressReply = ($text === null || $text === '')
+                && collect($attachments)->contains(
+                    fn ($attachment): bool => $attachment['type'] === 'story_mention'
+                );
             if ($hasImage) {
                 $type = 'attachment';
                 $text = ($text === null || $text === '') ? '[Customer sent an image.]' : $text;
@@ -169,6 +174,7 @@ class MetaWebhookNormalizer
             'text' => mb_substr($text, 0, 4000),
             'attachments' => $attachments,
             'requires_human' => $requiresHuman,
+            'suppress_reply' => $suppressReply,
             'timestamp' => $this->timestamp($event['timestamp'] ?? null),
         ];
     }
