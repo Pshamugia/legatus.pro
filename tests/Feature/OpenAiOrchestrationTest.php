@@ -2632,6 +2632,68 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([$soldOut->id], collect($response->json('products'))->pluck('id')->all());
     }
 
+    public function test_catalog_candidates_not_named_in_the_answer_are_not_attached_as_recommendations(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $requested = $agent->products()->create([
+            'name' => 'Atlas Requested Guide', 'sku' => 'ATLAS-REQUESTED',
+            'search_text' => 'Atlas Requested Guide', 'price' => 20, 'stock' => 2,
+            'is_active' => true, 'metadata' => [],
+        ]);
+        $unrelatedDictionary = $agent->products()->create([
+            'name' => 'Atlas Unrelated Dictionary', 'sku' => 'ATLAS-DICTIONARY',
+            'search_text' => 'Atlas Unrelated Dictionary', 'price' => 21, 'stock' => 2,
+            'is_active' => true, 'metadata' => [],
+        ]);
+        $unrelatedManual = $agent->products()->create([
+            'name' => 'Atlas Unrelated Manual', 'sku' => 'ATLAS-MANUAL',
+            'search_text' => 'Atlas Unrelated Manual', 'price' => 22, 'stock' => 2,
+            'is_active' => true, 'metadata' => [],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        $allIds = [$requested->id, $unrelatedDictionary->id, $unrelatedManual->id];
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'catalog-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'catalog-search-call',
+                'arguments' => json_encode(['query' => 'Atlas', 'category' => null, 'max_price' => null]),
+            ]]])
+            ->push(['id' => 'answer-with-hidden-products', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "Only {$requested->name} fits what you asked for.",
+                    'intent' => 'discovery', 'confidence' => .99, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => $allIds, 'sources' => [],
+                    'factual_claims' => collect($allIds)->map(fn (int $id): array => [
+                        'type' => 'product', 'product_id' => $id,
+                        'amount' => null, 'quantity' => null, 'reference' => null,
+                    ])->all(),
+                ])]],
+            ]]])
+            ->push(['id' => 'repaired-visible-product-only', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "Only {$requested->name} fits what you asked for.",
+                    'intent' => 'discovery', 'confidence' => .99, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [$requested->id], 'sources' => [],
+                    'factual_claims' => [[
+                        'type' => 'product', 'product_id' => $requested->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null,
+                    ]],
+                ])]],
+            ]]]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $agent->conversations()->create([
+            'visitor_id' => 'hidden-catalog-candidate-customer', 'status' => 'ai', 'channel' => 'facebook',
+        ]), 'Show me the matching Atlas item.');
+
+        $this->assertSame([$requested->id], $reply['products']->pluck('id')->all());
+        $this->assertStringNotContainsString($unrelatedDictionary->name, $reply['text']);
+        $this->assertStringNotContainsString($unrelatedManual->name, $reply['text']);
+        $run = AgentRun::query()->latest('id')->firstOrFail();
+        $this->assertContains('guardrail_repair', collect($run->tools_used)->pluck('name')->all());
+    }
+
     public function test_an_empty_exact_lookup_stops_after_the_verified_not_found_answer(): void
     {
         $this->seed();

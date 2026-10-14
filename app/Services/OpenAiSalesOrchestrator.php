@@ -250,6 +250,9 @@ class OpenAiSalesOrchestrator
                     'ok' => true,
                     'resolved_query' => $resolvedQuery,
                     'resolved_queries' => $resolvedQueries->all(),
+                    'referenced_product_id' => is_numeric($catalogContext['referenced_product_id'] ?? null)
+                        ? (int) $catalogContext['referenced_product_id']
+                        : null,
                     'resolved_category' => $resolvedCategory,
                     'catalog_match_scope' => $matchScope,
                     'explicit_name_identity' => $explicitNameIdentity,
@@ -1103,6 +1106,7 @@ class OpenAiSalesOrchestrator
         $ids = $escalationReason
             ? collect()
             : collect($data['product_ids'] ?? [])->map(fn ($id) => (int) $id)->intersect($this->verifiedProductIds(collect($used)));
+        $ids = $this->customerFacingProductIds($agent, (string) $data['text'], $ids, collect($used));
 
         return [
             'text' => $data['text'],
@@ -2244,6 +2248,10 @@ class OpenAiSalesOrchestrator
             return 'Required verification tool was not called for the '.$data['intent'].' intent.';
         }
         $claimedProductIds = collect($data['product_ids'] ?? [])->map(fn ($id) => (int) $id)->unique();
+        $customerFacingProductIds = $this->customerFacingProductIds($agent, $text, $claimedProductIds, $successful);
+        if ($claimedProductIds->diff($customerFacingProductIds)->isNotEmpty()) {
+            return 'A product was attached to the response without being named or explicitly referenced in the customer-facing answer.';
+        }
         $relatedOnlyIds = $successful->where('name', 'search_products')
             ->flatMap(fn (array $call) => data_get($call, 'result.related_products', []))
             ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique()
@@ -3081,6 +3089,54 @@ class OpenAiSalesOrchestrator
                 default => [],
             };
         })->map(fn ($id) => (int) $id)->unique()->values();
+    }
+
+    /**
+     * Product cards and channel links are actionable recommendations, not an
+     * invisible dump of every candidate touched during orchestration. Keep a
+     * selected product only when the reply actually names it, or when the
+     * semantic resolver confirmed that a singular relational follow-up (for
+     * example, "this one") refers to that exact product.
+     */
+    private function customerFacingProductIds(
+        Agent $agent,
+        string $text,
+        Collection $productIds,
+        Collection $used,
+    ): Collection {
+        $productIds = $productIds->map(fn ($id): int => (int) $id)->filter()->unique()->values();
+        if ($productIds->isEmpty()) {
+            return $productIds;
+        }
+
+        $referencedIds = $used
+            ->where('name', 'resolve_catalog_context')
+            ->pluck('result.referenced_product_id')
+            ->filter(fn ($id): bool => is_numeric($id))
+            ->map(fn ($id): int => (int) $id)
+            ->intersect($productIds);
+        $namedIds = $agent->customerProducts()
+            ->where('is_active', true)
+            ->get(['products.id', 'products.name'])
+            ->filter(function ($product) use ($text): bool {
+                $name = trim((string) $product->name);
+
+                return mb_strlen($name) >= 4
+                    && preg_match('/(?<!\pL)'.preg_quote($name, '/').'(?!\pL)/iu', $text) === 1;
+            })
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id);
+
+        // Some existing channel replies intentionally introduce a fully
+        // verified card set generically (for example, "here are three
+        // options"). Keep that behavior. The dangerous mismatch is when the
+        // prose identifies one catalog item while metadata silently attaches
+        // different ones, as those links read as explicit recommendations.
+        if ($namedIds->isEmpty()) {
+            return $productIds;
+        }
+
+        return $productIds->intersect($namedIds->merge($referencedIds)->unique())->values();
     }
 
     private function moneyValues(mixed $value, ?string $key = null): array
