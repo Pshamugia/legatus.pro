@@ -128,7 +128,7 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 ლოკალურად GitHub-ზე ატვირთვა:
 
 ```powershell
-cd C:\xampp\htdocs\ai-sales-employee
+cd C:\xampp\htdocs\Legatus
 git push origin main
 ```
 
