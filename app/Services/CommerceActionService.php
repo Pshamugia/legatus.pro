@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Agent;
 use App\Models\CommerceActionRequest;
 use App\Models\CommerceConnection;
+use App\Models\CommerceAttribution;
 use App\Models\Conversation;
 use App\Support\PrivacyRedactor;
 use Carbon\CarbonImmutable;
@@ -153,8 +154,14 @@ class CommerceActionService
         }
 
         $idempotencyKey = (string) Str::uuid();
+        $attribution = CommerceAttribution::create([
+            'agent_id' => $agent->id,
+            'conversation_id' => $conversation->id,
+            'commerce_connection_id' => $connection->id,
+            'status' => 'initiated',
+        ]);
         try {
-            $response = $this->connector->createCart($connection, $lines, $idempotencyKey);
+            $response = $this->connector->createCart($connection, $lines, $idempotencyKey, $attribution->token);
             $checkoutUrl = $this->safeStoreUrl($connection, data_get($response, 'data.checkout_url'));
             if ($checkoutUrl === null) {
                 throw new \RuntimeException('The commerce connector returned an invalid checkout URL.');
@@ -172,6 +179,7 @@ class CommerceActionService
                 'source' => ['label' => $connection->name ?: 'Live commerce checkout', 'type' => 'live_checkout'],
             ];
         } catch (Throwable $exception) {
+            $attribution->delete();
             $this->logFailure('create_checkout', $agent, $exception);
 
             return ['ok' => false, 'error' => 'The checkout cart could not be created safely. No order or payment was submitted.'];

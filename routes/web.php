@@ -9,6 +9,7 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\CommerceConnectionController;
+use App\Http\Controllers\CommerceWebhookController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\KnowledgeController;
 use App\Http\Controllers\LinkedInConnectionController;
@@ -66,6 +67,9 @@ Route::withoutMiddleware([
     Route::post('/webhooks/paddle', PaddleWebhookController::class)
         ->middleware('throttle:600,1')
         ->name('webhooks.paddle');
+    Route::post('/webhooks/commerce', CommerceWebhookController::class)
+        ->middleware('throttle:600,1')
+        ->name('webhooks.commerce');
 });
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'login'])->name('login');

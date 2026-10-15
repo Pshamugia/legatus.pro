@@ -53,11 +53,12 @@ class CommerceConnectorClient
         return $this->request($connection, 'POST', '/api/legatus/v1/orders/status', [], $identity);
     }
 
-    public function createCart(CommerceConnection $connection, array $items, string $idempotencyKey): array
+    public function createCart(CommerceConnection $connection, array $items, string $idempotencyKey, string $attributionToken): array
     {
         return $this->request($connection, 'POST', '/api/legatus/v1/carts', [], [
             'items' => $items,
             'idempotency_key' => $idempotencyKey,
+            'attribution_token' => $attributionToken,
         ]);
     }
 

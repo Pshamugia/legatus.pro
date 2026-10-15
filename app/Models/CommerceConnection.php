@@ -27,4 +27,9 @@ class CommerceConnection extends Model
     {
         return $this->hasMany(CommerceActionRequest::class);
     }
+
+    public function attributions(): HasMany
+    {
+        return $this->hasMany(CommerceAttribution::class);
+    }
 }
