@@ -73,5 +73,13 @@ return [
         'business_brain' => 'Business brain', 'ready_to_answer' => 'Ready to answer', 'products' => 'Products', 'prices' => 'Prices', 'stock' => 'Stock', 'brand_voice' => 'Brand voice',
         'original' => 'Unchanged photo', 'social_ready' => 'AI Photo Editor',
     ],
+    'cookies' => [
+        'title' => 'Your privacy choices',
+        'description' => 'We use Google Analytics only with your permission to understand how Legatus is used and improve the service.',
+        'learn_more' => 'Learn more',
+        'reject' => 'Reject analytics',
+        'accept' => 'Allow analytics',
+        'settings' => 'Privacy settings',
+    ],
     'footer' => ['support' => 'Questions or support?', 'terms' => 'Terms of Service', 'privacy' => 'Privacy Policy', 'refunds' => 'Refund Policy'],
 ];
