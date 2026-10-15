@@ -5,12 +5,25 @@ namespace Tests\Feature;
 use App\Models\Agent;
 use App\Models\CommerceAttribution;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class CommerceAttributionTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_migration_recovers_from_mysql_partial_ddl_without_losing_attributions(): void
+    {
+        [, , $attribution] = $this->context();
+        Schema::drop('commerce_attribution_events');
+
+        $migration = require database_path('migrations/2026_10_16_000043_create_commerce_attributions.php');
+        $migration->up();
+
+        $this->assertTrue(Schema::hasTable('commerce_attribution_events'));
+        $this->assertDatabaseHas('commerce_attributions', ['id' => $attribution->id]);
+    }
 
     public function test_signed_conversion_and_refund_are_idempotent_and_update_verified_value(): void
     {
