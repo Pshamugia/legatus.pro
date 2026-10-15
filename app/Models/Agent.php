@@ -140,4 +140,9 @@ class Agent extends Model
     {
         return $this->hasOne(CommerceConnection::class);
     }
+
+    public function commerceActionRequests(): HasMany
+    {
+        return $this->hasMany(CommerceActionRequest::class);
+    }
 }

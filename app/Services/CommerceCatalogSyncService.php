@@ -73,6 +73,10 @@ class CommerceCatalogSyncService
             $staged->agent_id = $agent->id;
             $staged->setRelation('agent', $agent);
             $snapshot = $this->inspect($staged);
+            $attributes['settings'] = array_merge(
+                is_array($attributes['settings'] ?? null) ? $attributes['settings'] : [],
+                ['capabilities' => $this->discoverCapabilities($staged)],
+            );
 
             return DB::transaction(function () use ($agent, $attributes, $snapshot): array {
                 $connection = CommerceConnection::where('agent_id', $agent->id)->lockForUpdate()->first();
@@ -86,6 +90,27 @@ class CommerceCatalogSyncService
                 return $this->persistSnapshot($connection, $snapshot);
             });
         });
+    }
+
+    /** @return list<string> */
+    private function discoverCapabilities(CommerceConnection $connection): array
+    {
+        try {
+            $response = $this->client->capabilities($connection);
+        } catch (Throwable) {
+            // Capability discovery extends the existing catalog contract. An
+            // older connector remains usable for catalog reads, but Legatus
+            // must not expose actions it could not verify.
+            return [];
+        }
+
+        $allowed = ['order_status', 'cart_create', 'order_cancel', 'return_create', 'shipping_address_update'];
+
+        return collect(data_get($response, 'data.capabilities', []))
+            ->filter(fn ($capability): bool => is_string($capability) && in_array($capability, $allowed, true))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /** @return array{disconnected: bool, deactivated: int} */

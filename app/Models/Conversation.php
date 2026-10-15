@@ -37,4 +37,9 @@ class Conversation extends Model
     {
         return $this->hasOne(Lead::class);
     }
+
+    public function commerceActionRequests(): HasMany
+    {
+        return $this->hasMany(CommerceActionRequest::class);
+    }
 }

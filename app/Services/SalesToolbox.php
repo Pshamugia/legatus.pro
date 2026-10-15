@@ -22,6 +22,7 @@ class SalesToolbox
         private EmbeddingService $embeddings,
         private CommerceConnectorClient $commerce,
         private PublicStorefrontCatalog $storefront,
+        private CommerceActionService $commerceActions,
     ) {}
 
     public function definitions(?Agent $agent = null): array
@@ -39,6 +40,10 @@ class SalesToolbox
             $this->tool('reserve_product', 'Create a short pending reservation; never claim payment or final order.', ['product_id' => ['type' => 'integer'], 'quantity' => ['type' => 'integer', 'minimum' => 1]], ['product_id', 'quantity']),
             $this->tool('build_offer', 'Calculate a non-binding offer. Discounts above the configured limit are blocked and escalated.', ['items' => ['type' => 'array', 'minItems' => 1, 'items' => ['type' => 'object', 'properties' => ['product_id' => ['type' => 'integer'], 'quantity' => ['type' => 'integer', 'minimum' => 1]], 'required' => ['product_id', 'quantity'], 'additionalProperties' => false]], 'discount_percent' => ['type' => ['number', 'null'], 'minimum' => 0, 'maximum' => 100]], ['items', 'discount_percent']),
         ];
+
+        if ($agent && data_get($agent->settings, 'assistant_mode') !== 'platform_support') {
+            $definitions = array_merge($definitions, $this->commerceActionDefinitions($agent));
+        }
 
         return $agent && ! $agent->humanHandoffEnabled()
             ? array_values(array_filter($definitions, fn (array $tool): bool => $tool['name'] !== 'request_human'))
@@ -60,8 +65,95 @@ class SalesToolbox
             'search_products' => $this->search($agent, $conversation, $args), 'search_knowledge' => $this->knowledge($agent, $args), 'save_shopping_preferences' => $this->preferences($conversation, $args), 'recommend_products' => $this->recommend($agent, $conversation, $args), 'compare_products' => $this->compare($agent, $conversation, $args), 'check_stock' => $this->stock($agent, $conversation, $args), 'calculate_delivery' => $this->delivery($agent, $args),
             'create_lead' => $this->lead($agent, $conversation, $args), 'request_human' => $this->handoff($conversation, $args),
             'reserve_product' => $this->reserve($agent, $conversation, $args), 'build_offer' => $this->offer($agent, $conversation, $args),
+            'lookup_order_status' => $this->commerceActions->orderStatus($agent, $conversation, $args),
+            'create_checkout' => $this->commerceActions->createCheckout($agent, $conversation, $args),
+            'prepare_commerce_action' => $this->commerceActions->prepare($agent, $conversation, $args),
+            'confirm_commerce_action' => $this->commerceActions->confirm($agent, $conversation, $args),
             default => ['ok' => false, 'error' => 'Unknown tool'],
         };
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function commerceActionDefinitions(Agent $agent): array
+    {
+        $capabilities = $this->commerceActions->capabilities($agent);
+        $definitions = [];
+
+        if (in_array('order_status', $capabilities, true)) {
+            $definitions[] = $this->tool(
+                'lookup_order_status',
+                'Read one existing order status from the connected store. Require the order reference and a matching email or phone supplied by the customer in their current message. This tool never changes the order.',
+                [
+                    'order_reference' => ['type' => 'string'],
+                    'customer_email' => ['type' => ['string', 'null']],
+                    'customer_phone' => ['type' => ['string', 'null']],
+                ],
+                ['order_reference', 'customer_email', 'customer_phone'],
+            );
+        }
+
+        if (in_array('cart_create', $capabilities, true)) {
+            $definitions[] = $this->tool(
+                'create_checkout',
+                'Create a store checkout cart from verified products after live availability checks. This returns a checkout URL only; it never submits payment or claims that an order is complete.',
+                ['items' => ['type' => 'array', 'minItems' => 1, 'maxItems' => 20, 'items' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'product_id' => ['type' => 'integer'],
+                        'quantity' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100],
+                    ],
+                    'required' => ['product_id', 'quantity'],
+                    'additionalProperties' => false,
+                ]]],
+                ['items'],
+            );
+        }
+
+        $actions = collect([
+            'order_cancel' => 'cancel_order',
+            'return_create' => 'start_return',
+            'shipping_address_update' => 'update_shipping_address',
+        ])->filter(fn (string $action, string $capability): bool => in_array($capability, $capabilities, true))->values()->all();
+
+        if ($actions !== []) {
+            $detailProperties = [
+                'reason' => ['type' => ['string', 'null']],
+                'item_ids' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'recipient' => ['type' => ['string', 'null']],
+                'line1' => ['type' => ['string', 'null']],
+                'line2' => ['type' => ['string', 'null']],
+                'city' => ['type' => ['string', 'null']],
+                'region' => ['type' => ['string', 'null']],
+                'postal_code' => ['type' => ['string', 'null']],
+                'country' => ['type' => ['string', 'null']],
+            ];
+            $definitions[] = $this->tool(
+                'prepare_commerce_action',
+                'Prepare and preview a consequential order change. Explain the exact returned preview and request explicit customer confirmation in a separate message. Never execute it in the same turn.',
+                [
+                    'action' => ['type' => 'string', 'enum' => $actions],
+                    'order_reference' => ['type' => 'string'],
+                    'details' => [
+                        'type' => 'object',
+                        'properties' => $detailProperties,
+                        'required' => array_keys($detailProperties),
+                        'additionalProperties' => false,
+                    ],
+                ],
+                ['action', 'order_reference', 'details'],
+            );
+            $definitions[] = $this->tool(
+                'confirm_commerce_action',
+                'Execute one previously previewed order change only after a new, separate customer message explicitly confirms it. Pass that latest message verbatim. Never infer or manufacture confirmation.',
+                [
+                    'action_request_id' => ['type' => 'string'],
+                    'customer_confirmation' => ['type' => 'string'],
+                ],
+                ['action_request_id', 'customer_confirmation'],
+            );
+        }
+
+        return $definitions;
     }
 
     private function search(Agent $agent, Conversation $conversation, array $a): array
