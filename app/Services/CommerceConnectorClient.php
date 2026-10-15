@@ -43,50 +43,6 @@ class CommerceConnectorClient
         return $this->request($connection, 'POST', '/api/legatus/v1/delivery-quote', [], ['city' => $city]);
     }
 
-    public function capabilities(CommerceConnection $connection): array
-    {
-        return $this->request($connection, 'GET', '/api/legatus/v1/capabilities');
-    }
-
-    public function orderStatus(CommerceConnection $connection, array $identity): array
-    {
-        return $this->request($connection, 'POST', '/api/legatus/v1/orders/status', [], $identity);
-    }
-
-    public function createCart(CommerceConnection $connection, array $items, string $idempotencyKey): array
-    {
-        return $this->request($connection, 'POST', '/api/legatus/v1/carts', [], [
-            'items' => $items,
-            'idempotency_key' => $idempotencyKey,
-        ]);
-    }
-
-    public function previewAction(
-        CommerceConnection $connection,
-        string $action,
-        string $orderReference,
-        array $input,
-        string $idempotencyKey,
-    ): array {
-        return $this->request($connection, 'POST', '/api/legatus/v1/actions/preview', [], [
-            'action' => $action,
-            'order_reference' => $orderReference,
-            'input' => $input,
-            'idempotency_key' => $idempotencyKey,
-        ]);
-    }
-
-    public function executeAction(
-        CommerceConnection $connection,
-        string $actionToken,
-        string $idempotencyKey,
-    ): array {
-        return $this->request($connection, 'POST', '/api/legatus/v1/actions/execute', [], [
-            'action_token' => $actionToken,
-            'idempotency_key' => $idempotencyKey,
-        ]);
-    }
-
     public function request(
         CommerceConnection $connection,
         string $method,

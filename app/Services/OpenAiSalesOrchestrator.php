@@ -2016,17 +2016,7 @@ class OpenAiSalesOrchestrator
         $assistantIdentity .= '. A new message containing an explicit new product, category, person, or subject replaces any unresolved spelling suggestion or choice from older turns. Never carry a rejected or superseded candidate into the new request';
         $assistantIdentity .= '. Customer photo or image recognition is not available in the current conversation tools. Never ask the customer to send or upload a cover, label, product photo, screenshot, barcode image, or ISBN photo so that you can identify or search for a product. If the current text is insufficient, ask for one text attribute that this tenant catalog actually contains';
         $assistantIdentity .= $this->catalogIdentifierCapabilityInstructions($agent);
-        $availableToolNames = collect($this->tools->definitions($agent))->pluck('name');
-        $assistantIdentity .= '. Never offer, promise, or solicit customer data for an action that is not represented by an available tool. Never accept card or payment details and never claim that Legatus itself collected payment or finalized an order';
-        $assistantIdentity .= $availableToolNames->contains('create_checkout')
-            ? '. When the customer wants to buy verified products, create_checkout may prepare a cart after live availability checks. Describe its URL only as a cart ready for the customer to review and pay for on the connected store'
-            : '. When a customer wants to buy, direct them to the verified product link and explain that they must complete the business website checkout there';
-        $assistantIdentity .= $availableToolNames->contains('lookup_order_status')
-            ? '. For an existing order status, require the order reference plus a matching email or phone supplied by the customer in that same message, then use lookup_order_status. Do not expose order details without that verification'
-            : '. Do not claim to know a live order status because this connected store has not exposed that capability';
-        $assistantIdentity .= $availableToolNames->contains('prepare_commerce_action')
-            ? '. For cancellation, return, or shipping-address changes, use only the actions exposed by prepare_commerce_action. First return the exact preview and ask for explicit confirmation. Never call confirm_commerce_action in that same turn; execute only after a new customer message clearly confirms the pending preview, passing that message verbatim'
-            : '. Do not collect or promise cancellation, return, or shipping-address changes because this connected store has not exposed those actions';
+        $assistantIdentity .= '. Never offer, promise, or solicit customer data for an action that is not represented by an available tool. Legatus cannot place or finalize a connected-store order, accept payment, or collect recipient, shipping-address, card, or payment details for checkout. When a customer wants to buy, direct them to the verified product link and explain that they must complete the business website checkout there. If a customer nevertheless sends order or shipping details, do not repeat or treat them as an order or lead; briefly explain that checkout must be completed on the business website';
         $assistantIdentity .= '. Sold-out replacement rules override any more permissive recommendation wording below: never recommend an unavailable product or present it as purchasable. After verifying a sold-out item, call recommend_products with that item’s verified category, genres, tags, or product type as mandatory taxonomy constraints. Offer only verified available alternatives from the same or nearest trustworthy taxonomy; never drift to an unrelated category merely to return a result. If taxonomy is missing or no matching available alternative exists, say so instead of guessing';
         $assistantIdentity .= '. Understand catalogue targets semantically before searching. When one request contains multiple independently searchable targets, call search_products separately for each target and combine only the verified results. Never build one query by joining independent targets with conjunctions, punctuation, or a broader umbrella term. A multiword proper name, title, brand, or phrase such as Leonardo da Vinci is one target unless the conversation clearly requests its parts separately';
 
@@ -2172,7 +2162,7 @@ class OpenAiSalesOrchestrator
             'type' => 'object',
             'properties' => [
                 'text' => ['type' => 'string'],
-                'intent' => ['type' => 'string', 'enum' => ['conversation', 'clarification', 'discovery', 'price', 'stock', 'delivery', 'recommendation', 'wholesale', 'lead', 'reservation', 'offer', 'order', 'checkout', 'commerce_action', 'handoff']],
+                'intent' => ['type' => 'string', 'enum' => ['conversation', 'clarification', 'discovery', 'price', 'stock', 'delivery', 'recommendation', 'wholesale', 'lead', 'reservation', 'offer', 'handoff']],
                 'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
                 'handoff' => ['type' => 'boolean'],
                 'escalation_reason' => ['type' => ['string', 'null']],
@@ -2183,7 +2173,7 @@ class OpenAiSalesOrchestrator
                 'factual_claims' => ['type' => 'array', 'description' => 'Facts asserted as currently true in the customer-visible reply. Exclude questions, proposed or conditional next steps, and future actions.', 'maxItems' => 20, 'items' => [
                     'type' => 'object',
                     'properties' => [
-                        'type' => ['type' => 'string', 'enum' => ['product', 'price', 'stock', 'delivery', 'policy', 'discount', 'reservation', 'offer', 'budget', 'order', 'commerce_action']],
+                        'type' => ['type' => 'string', 'enum' => ['product', 'price', 'stock', 'delivery', 'policy', 'discount', 'reservation', 'offer', 'budget']],
                         'product_id' => ['type' => ['integer', 'null']],
                         'amount' => ['type' => ['number', 'null']],
                         'quantity' => ['type' => ['integer', 'null']],
@@ -2577,9 +2567,6 @@ class OpenAiSalesOrchestrator
             'create_lead',
             'request_human',
             'reserve_product',
-            'create_checkout',
-            'prepare_commerce_action',
-            'confirm_commerce_action',
         ], true);
     }
 
@@ -2926,12 +2913,6 @@ class OpenAiSalesOrchestrator
                 }
             } elseif ($type === 'reservation' && ! $successful->contains('name', 'reserve_product')) {
                 return 'A reservation factual claim was not backed by a successful hold.';
-            } elseif ($type === 'order' && ! $successful->contains('name', 'lookup_order_status')) {
-                return 'An order factual claim was not backed by a successful live order lookup.';
-            } elseif ($type === 'commerce_action' && ! $successful->contains(
-                fn (array $call): bool => in_array($call['name'] ?? null, ['create_checkout', 'prepare_commerce_action', 'confirm_commerce_action'], true)
-            )) {
-                return 'A commerce action factual claim was not backed by a successful connected-store action.';
             } elseif ($type === 'offer') {
                 $verified = $successful->whereIn('name', ['build_offer', 'recommend_products'])->flatMap(fn ($call) => $this->moneyValues($call['result'] ?? []));
                 if ($amount !== null && ! $verified->contains(fn ($value) => abs((float) $value - $amount) < 0.011)) {
@@ -2978,7 +2959,6 @@ class OpenAiSalesOrchestrator
                 'recommend_products' => $result['recommendations'] ?? [],
                 'check_stock' => [array_merge($result, ['id' => $result['product_id'] ?? null])],
                 'build_offer' => collect($result['items'] ?? [])->map(fn ($item) => array_merge($item, ['id' => $item['product_id'] ?? null, 'price' => $item['unit_price'] ?? null]))->all(),
-                'create_checkout' => collect($result['items'] ?? [])->map(fn ($item) => array_merge($item, ['id' => $item['product_id'] ?? null]))->all(),
                 default => [],
             };
 

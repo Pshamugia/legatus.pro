@@ -9,12 +9,6 @@ final class PrivacyRedactor
         'phone',
         'contact',
         'contact_details',
-        'recipient',
-        'line1',
-        'line2',
-        'address',
-        'postal_code',
-        'action_token',
     ];
 
     public static function text(string $text): string
