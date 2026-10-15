@@ -80,6 +80,7 @@ class MetaWebhookController extends Controller
 
             match ($event['kind']) {
                 'inbound' => $this->acceptInbound($connection, $event),
+                'comment' => $this->acceptComment($connection, $event),
                 'echo' => $this->acceptEcho($connection, $event),
                 'delivery' => $this->markDelivery($connection, $event, 'delivered'),
                 'sent' => $this->markDelivery($connection, $event, 'sent'),
@@ -128,6 +129,81 @@ class MetaWebhookController extends Controller
                 ->delay(now()->addSeconds(3))
                 ->afterCommit();
         }
+    }
+
+    private function acceptComment(ChannelConnection $connection, array $event): void
+    {
+        $text = trim((string) ($event['text'] ?? ''));
+        $senderId = (string) ($event['sender_id'] ?? '');
+        if ($text === '' || $senderId === '') {
+            return;
+        }
+
+        try {
+            $record = ChannelMessage::query()->firstOrCreate(
+                [
+                    'channel_connection_id' => $connection->id,
+                    'direction' => 'inbound',
+                    'provider_message_id' => $event['provider_message_id'],
+                ],
+                [
+                    'provider_sender_id' => $senderId,
+                    'provider_recipient_id' => $event['external_account_id'],
+                    'message_type' => 'comment',
+                    'status' => 'processed',
+                    'payload' => [
+                        'text' => PrivacyRedactor::text($text),
+                        'post_id' => (string) ($event['post_id'] ?? ''),
+                        'source' => 'social_comment',
+                    ],
+                    'received_at' => $this->date($event['timestamp'] ?? null) ?? now(),
+                    'processed_at' => now(),
+                ],
+            );
+        } catch (UniqueConstraintViolationException) {
+            return;
+        }
+        if ($record->conversation_id) {
+            return;
+        }
+
+        DB::transaction(function () use ($record, $connection, $event, $senderId, $text): void {
+            $locked = ChannelMessage::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            if ($locked->conversation_id) {
+                return;
+            }
+            $provider = (string) $connection->provider;
+            $conversation = $connection->agent->conversations()->create([
+                'channel_connection_id' => $connection->id,
+                'visitor_id' => "meta-comment:{$provider}:{$connection->id}:".hash('sha256', $senderId),
+                'external_thread_id' => 'comment:'.(string) $event['provider_message_id'],
+                'customer_name' => filled($event['sender_name'] ?? null)
+                    ? mb_substr((string) $event['sender_name'], 0, 120)
+                    : ucfirst($provider).' commenter',
+                'channel' => $provider.'_comment',
+                'status' => 'human',
+                'intent' => 'social_comment',
+                'priority' => 'high',
+                'handoff_reason' => 'A customer commented on a social post. Review it before deciding whether to reply.',
+                'context' => [
+                    'source_type' => 'social_comment',
+                    'provider' => $provider,
+                    'post_id' => (string) ($event['post_id'] ?? ''),
+                ],
+                'last_message_at' => $this->date($event['timestamp'] ?? null) ?? now(),
+            ]);
+            $safeText = PrivacyRedactor::text($text);
+            $message = $conversation->messages()->create([
+                'role' => 'customer',
+                'content' => $safeText,
+                'metadata' => ['source_type' => 'social_comment', 'provider' => $provider],
+            ]);
+            $locked->update([
+                'conversation_id' => $conversation->id,
+                'message_id' => $message->id,
+                'payload' => ['source' => 'social_comment', 'content_removed' => true],
+            ]);
+        });
     }
 
     private function acceptEcho(ChannelConnection $connection, array $event): void

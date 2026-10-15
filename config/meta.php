@@ -15,6 +15,7 @@ return [
     'max_webhook_bytes' => (int) env('META_MAX_WEBHOOK_BYTES', 1048576),
     'outbox_stale_seconds' => (int) env('META_OUTBOX_STALE_SECONDS', 60),
     'outbox_batch_size' => (int) env('META_OUTBOX_BATCH_SIZE', 100),
+    'comment_to_sale_enabled' => (bool) env('META_COMMENT_TO_SALE_ENABLED', false),
     'scopes' => [
         'meta' => array_values(array_filter(explode(',', (string) env(
             'META_SCOPES',

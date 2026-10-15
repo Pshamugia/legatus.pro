@@ -105,6 +105,9 @@ class MetaGraphClient
         // Dashboard. Keep the Page-valid union identical for both providers so
         // connecting a linked Instagram account cannot narrow a Facebook setup.
         $fields = 'messages,messaging_postbacks,message_deliveries,message_reads';
+        if ((bool) config('meta.comment_to_sale_enabled') && $connection->provider === 'facebook') {
+            $fields .= ',feed';
+        }
 
         $this->authorizedRequest($connection->access_token)
             ->post($this->url($connection->graphAccountId().'/subscribed_apps'), [

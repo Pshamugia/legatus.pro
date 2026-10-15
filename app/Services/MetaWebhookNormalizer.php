@@ -60,9 +60,61 @@ class MetaWebhookNormalizer
                     ];
                 }
             }
+
+            foreach ((array) ($entry['changes'] ?? []) as $change) {
+                $comment = $this->commentEvent($provider, $accountId, (array) $change);
+                if ($comment !== null) {
+                    $events[] = $comment;
+                }
+            }
         }
 
         return $events;
+    }
+
+    private function commentEvent(string $provider, string $accountId, array $change): ?array
+    {
+        $field = (string) ($change['field'] ?? '');
+        $value = (array) ($change['value'] ?? []);
+        if ($provider === 'facebook') {
+            if ($field !== 'feed' || ($value['item'] ?? null) !== 'comment' || ($value['verb'] ?? 'add') !== 'add') {
+                return null;
+            }
+            $commentId = (string) ($value['comment_id'] ?? '');
+            $text = trim((string) ($value['message'] ?? ''));
+            $senderId = (string) data_get($value, 'from.id', '');
+            $senderName = trim((string) data_get($value, 'from.name', ''));
+            $postId = (string) ($value['post_id'] ?? '');
+            $timestamp = $this->timestamp($value['created_time'] ?? null);
+        } else {
+            if ($field !== 'comments') {
+                return null;
+            }
+            $commentId = (string) ($value['id'] ?? '');
+            $text = trim((string) ($value['text'] ?? ''));
+            $senderId = (string) data_get($value, 'from.id', '');
+            $senderName = trim((string) (data_get($value, 'from.username') ?: data_get($value, 'from.name', '')));
+            $postId = (string) (data_get($value, 'media.id') ?: ($value['media_id'] ?? ''));
+            $timestamp = is_string($value['timestamp'] ?? null)
+                ? (string) $value['timestamp']
+                : $this->timestamp($value['timestamp'] ?? null);
+        }
+
+        if ($commentId === '' || $text === '' || $senderId === '' || hash_equals($accountId, $senderId)) {
+            return null;
+        }
+
+        return [
+            'kind' => 'comment',
+            'provider' => $provider,
+            'external_account_id' => $accountId,
+            'provider_message_id' => $commentId,
+            'sender_id' => $senderId,
+            'sender_name' => mb_substr($senderName, 0, 120),
+            'post_id' => mb_substr($postId, 0, 255),
+            'text' => mb_substr($text, 0, 4000),
+            'timestamp' => $timestamp,
+        ];
     }
 
     private function messageEvent(string $provider, string $accountId, array $event): ?array

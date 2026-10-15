@@ -231,6 +231,74 @@ class MetaTransportTest extends TestCase
         });
     }
 
+    public function test_comment_webhook_creates_a_review_only_tenant_inbox_opportunity(): void
+    {
+        Queue::fake();
+        [$user, $agent] = $this->tenant();
+        $connection = $agent->channelConnections()->create([
+            'provider' => 'facebook',
+            'status' => 'active',
+            'external_account_id' => 'page-comments',
+            'external_account_name' => 'Comment Page',
+            'access_token' => 'page-access-token',
+            'connected_at' => now(),
+        ]);
+        $payload = [
+            'object' => 'page',
+            'entry' => [[
+                'id' => 'page-comments',
+                'changes' => [[
+                    'field' => 'feed',
+                    'value' => [
+                        'item' => 'comment',
+                        'verb' => 'add',
+                        'comment_id' => 'comment-123',
+                        'post_id' => 'page-comments_post-456',
+                        'message' => 'Is this still available?',
+                        'from' => ['id' => 'customer-commenter', 'name' => 'Interested Customer'],
+                        'created_time' => 1784512800,
+                    ],
+                ]],
+            ]],
+        ];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        $signature = 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret');
+
+        $this->metaWebhook($body, $signature)->assertOk();
+        $this->metaWebhook($body, $signature)->assertOk();
+
+        $this->assertDatabaseCount('channel_messages', 1);
+        $conversation = $agent->conversations()->sole();
+        $this->assertSame('facebook_comment', $conversation->channel);
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame('social_comment', data_get($conversation->context, 'source_type'));
+        $this->assertSame('Is this still available?', $conversation->messages()->where('role', 'customer')->sole()->content);
+        Queue::assertNothingPushed();
+
+        $this->actingAs($user)->get(route('inbox.index', ['conversation' => $conversation->id]))
+            ->assertOk()
+            ->assertSee('Comment opportunity')
+            ->assertSee('reply from the native Meta inbox')
+            ->assertDontSee('Reply as a human operator');
+        $this->actingAs($user)->post(route('inbox.reply', $conversation), ['message' => 'Unsafe private reply'])
+            ->assertSessionHas('error');
+        $this->assertDatabaseMissing('messages', ['content' => 'Unsafe private reply']);
+        $this->assertSame($connection->id, $conversation->channel_connection_id);
+    }
+
+    public function test_facebook_comment_subscription_is_explicitly_capability_gated(): void
+    {
+        $connection = $this->connection('facebook', 'page-comment-subscription');
+        config()->set('meta.comment_to_sale_enabled', true);
+        Http::fake(['https://graph.facebook.test/*' => Http::response(['success' => true])]);
+
+        app(MetaGraphClient::class)->subscribe($connection);
+
+        Http::assertSent(fn ($request): bool =>
+            data_get($request->data(), 'subscribed_fields') === 'messages,messaging_postbacks,message_deliveries,message_reads,feed'
+        );
+    }
+
     public function test_assistant_delivery_appends_only_three_safe_verified_product_links(): void
     {
         Queue::fake();

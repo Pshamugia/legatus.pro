@@ -41,6 +41,9 @@ class InboxController extends Controller
     {
         $this->own($conversation, $tenant);
         $tenant->authorize(['owner', 'admin', 'agent']);
+        if (data_get($conversation->context, 'source_type') === 'social_comment') {
+            return back()->with('error', 'Public comments are review-only in Legatus. Reply from the native Meta inbox so a private message is never sent by mistake.');
+        }
         $data = $request->validate(['message' => 'required|string|max:2000']);
         $message = $conversation->messages()->create([
             'role' => 'human',
