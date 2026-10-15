@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Agent;
+use App\Services\CommerceIntegrationGuideService;
 use App\Services\TenantContext;
 use App\Services\WidgetInstallationService;
 use Illuminate\Http\Request;
@@ -13,7 +14,10 @@ use Illuminate\Validation\Rule;
 
 class ChannelController extends Controller
 {
-    public function __construct(private WidgetInstallationService $installation) {}
+    public function __construct(
+        private WidgetInstallationService $installation,
+        private CommerceIntegrationGuideService $commerceGuides,
+    ) {}
 
     public function index(TenantContext $tenant)
     {
@@ -119,6 +123,7 @@ class ChannelController extends Controller
         if (! array_key_exists($widgetPlatform, $widgetPlatforms)) {
             $widgetPlatform = 'other';
         }
+        $commerceIntegrationGuide = $this->commerceGuides->guide($widgetPlatform);
         $widgetInstallation = data_get($agent->settings, 'widget_installation', []);
         $widgetInstallation = is_array($widgetInstallation) ? $widgetInstallation : [];
         $widgetDomains = collect(data_get($agent->settings, 'widget_allowed_origins', []))
@@ -149,6 +154,7 @@ class ChannelController extends Controller
             'widgetPlatforms',
             'widgetPlatform',
             'widgetInstallation',
+            'commerceIntegrationGuide',
         );
     }
 

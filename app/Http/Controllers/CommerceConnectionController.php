@@ -3,10 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Services\CommerceCatalogSyncService;
+use App\Services\CommerceIntegrationGuideService;
 use App\Services\CommerceOriginValidator;
 use App\Services\TenantContext;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -15,6 +17,16 @@ use Throwable;
 
 class CommerceConnectionController extends Controller
 {
+    public function contract(TenantContext $tenant, CommerceIntegrationGuideService $guides): JsonResponse
+    {
+        $tenant->authorize(['owner', 'admin']);
+
+        return response()->json($guides->contract(), 200, [
+            'Content-Disposition' => 'attachment; filename="legatus-commerce-connector-v1.json"',
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
+
     public function connect(
         Request $request,
         TenantContext $tenant,
