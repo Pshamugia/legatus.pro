@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Agent;
 use App\Models\CommerceAttribution;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -17,12 +18,26 @@ class CommerceAttributionTest extends TestCase
     {
         [, , $attribution] = $this->context();
         Schema::drop('commerce_attribution_events');
+        Schema::create('commerce_attribution_events', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('commerce_attribution_id');
+            $table->foreignId('commerce_connection_id')->nullable();
+            $table->string('provider_event_id', 191);
+            $table->string('type', 40);
+            $table->decimal('amount', 12, 2);
+            $table->char('currency', 3);
+            $table->timestamps();
+        });
 
         $migration = require database_path('migrations/2026_10_16_000043_create_commerce_attributions.php');
         $migration->up();
 
         $this->assertTrue(Schema::hasTable('commerce_attribution_events'));
         $this->assertDatabaseHas('commerce_attributions', ['id' => $attribution->id]);
+        $this->assertTrue(collect(Schema::getIndexes('commerce_attribution_events'))->contains(
+            fn (array $index): bool => ($index['unique'] ?? false)
+                && ($index['columns'] ?? []) === ['commerce_connection_id', 'provider_event_id'],
+        ));
     }
 
     public function test_signed_conversion_and_refund_are_idempotent_and_update_verified_value(): void

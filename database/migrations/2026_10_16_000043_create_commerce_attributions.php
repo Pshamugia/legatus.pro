@@ -44,7 +44,7 @@ return new class extends Migration
                 $table->decimal('amount', 12, 2);
                 $table->char('currency', 3);
                 $table->timestamps();
-                $table->unique(['commerce_connection_id', 'provider_event_id']);
+                $table->unique(['commerce_connection_id', 'provider_event_id'], 'commerce_attr_events_provider_unique');
             });
         }
 
@@ -52,6 +52,12 @@ return new class extends Migration
             'id', 'commerce_attribution_id', 'commerce_connection_id', 'provider_event_id',
             'type', 'amount', 'currency', 'created_at', 'updated_at',
         ]);
+
+        if (! $this->hasProviderEventUniqueIndex()) {
+            Schema::table('commerce_attribution_events', function (Blueprint $table): void {
+                $table->unique(['commerce_connection_id', 'provider_event_id'], 'commerce_attr_events_provider_unique');
+            });
+        }
     }
 
     /** @param list<string> $columns */
@@ -60,6 +66,19 @@ return new class extends Migration
         if (! Schema::hasColumns($table, $columns)) {
             throw new RuntimeException("Existing {$table} table does not match the Legatus commerce attribution schema.");
         }
+    }
+
+    private function hasProviderEventUniqueIndex(): bool
+    {
+        foreach (Schema::getIndexes('commerce_attribution_events') as $index) {
+            $columns = array_map('strtolower', $index['columns'] ?? []);
+            if (($index['unique'] ?? false)
+                && $columns === ['commerce_connection_id', 'provider_event_id']) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function down(): void
