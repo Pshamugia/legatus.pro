@@ -150,4 +150,9 @@ class Agent extends Model
     {
         return $this->hasMany(CommerceAttribution::class);
     }
+
+    public function merchandisingRules(): HasMany
+    {
+        return $this->hasMany(ProductMerchandisingRule::class);
+    }
 }

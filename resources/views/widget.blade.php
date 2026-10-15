@@ -65,6 +65,7 @@
     const messageUrl = @json(route('chat.message', $agent));
     const historyUrl = @json(route('chat.history', $agent));
     const feedbackBase = @json(url('/demo/'.$agent->slug.'/messages'));
+    const contextUrl = @json(route('widget.context', $agent));
     const storageKey = 'legatus_widget_visitor_token_{{ $agent->slug }}';
     const requestDeadlineMs = 90000;
     let visitorToken = readToken();
@@ -78,6 +79,27 @@
     const assistantName = @json($assistantName);
     const platformSupport = @json($platformSupport);
     const widgetCopy = @json($widgetCopy);
+    let proactiveRendered = false;
+
+    window.addEventListener('message', async event => {
+        if (event.source !== parent || event.data?.type !== 'legatus:page-context' || proactiveRendered) return;
+        try {
+            const response = await fetch(contextUrl, {method: 'POST', headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: JSON.stringify({url: event.data.url}), cache: 'no-store'});
+            if (!response.ok) return;
+            const context = await response.json();
+            if (!context.message) return;
+            proactiveRendered = true;
+            add(String(context.message), 'ai');
+            if (context.prompt) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.textContent = String(context.prompt);
+                button.addEventListener('click', () => { input.value = String(context.prompt); document.querySelector('#form').requestSubmit(); });
+                document.querySelector('.suggest').prepend(button);
+            }
+            parent.postMessage({type: 'legatus:proactive'}, '*');
+        } catch (error) {}
+    });
 
     function phrase(key, replacements = {}) {
         let text = String(widgetCopy[key] || key);

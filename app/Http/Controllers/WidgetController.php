@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Support\WidgetLocaleResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Http\JsonResponse;
 
 class WidgetController extends Controller
 {
@@ -62,12 +63,13 @@ class WidgetController extends Controller
  var label=document.createElement('b');label.textContent=launcherLabel;
  launcher.append(mark,label);root.appendChild(launcher);
  var frame=document.createElement('iframe');frame.title=frameTitle;frame.id='legatus-frame';frame.src=frameUrl;frame.allow='clipboard-write';root.appendChild(frame);
- var css=document.createElement('style');css.textContent='#legatus-widget-root{position:fixed;right:22px;bottom:22px;z-index:2147483000;font-family:Arial,sans-serif}#legatus-launcher{border:0;background:var(--legatus-widget-primary);color:var(--legatus-widget-primary-foreground);border-radius:999px;padding:10px 17px 10px 10px;max-width:min(330px,calc(100vw - 44px));display:flex;align-items:center;gap:9px;box-shadow:0 12px 35px #142c2460;cursor:pointer}#legatus-launcher span{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--legatus-widget-accent);color:var(--legatus-widget-accent-foreground);font-weight:800}#legatus-launcher b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#legatus-frame{display:none;position:absolute;right:0;bottom:64px;width:min(390px,calc(100vw - 28px));height:min(680px,calc(100vh - 105px));border:0;border-radius:22px;background:white;box-shadow:0 24px 80px #142c244d}#legatus-widget-root.open #legatus-frame{display:block}@media(max-width:480px){#legatus-widget-root{right:14px;bottom:14px}#legatus-frame{position:fixed;inset:12px;width:calc(100vw - 24px);height:calc(100vh - 88px)}}';
+ var css=document.createElement('style');css.textContent='#legatus-widget-root{position:fixed;right:22px;bottom:22px;z-index:2147483000;font-family:Arial,sans-serif}#legatus-launcher{position:relative;border:0;background:var(--legatus-widget-primary);color:var(--legatus-widget-primary-foreground);border-radius:999px;padding:10px 17px 10px 10px;max-width:min(330px,calc(100vw - 44px));display:flex;align-items:center;gap:9px;box-shadow:0 12px 35px #142c2460;cursor:pointer}#legatus-launcher.has-proactive:after{content:"";position:absolute;right:2px;top:2px;width:11px;height:11px;border:2px solid white;border-radius:50%;background:var(--legatus-widget-accent)}#legatus-launcher span{display:grid;place-items:center;flex:0 0 34px;width:34px;height:34px;border-radius:50%;background:var(--legatus-widget-accent);color:var(--legatus-widget-accent-foreground);font-weight:800}#legatus-launcher b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#legatus-frame{display:none;position:absolute;right:0;bottom:64px;width:min(390px,calc(100vw - 28px));height:min(680px,calc(100vh - 105px));border:0;border-radius:22px;background:white;box-shadow:0 24px 80px #142c244d}#legatus-widget-root.open #legatus-frame{display:block}@media(max-width:480px){#legatus-widget-root{right:14px;bottom:14px}#legatus-frame{position:fixed;inset:12px;width:calc(100vw - 24px);height:calc(100vh - 88px)}}';
  function open(){root.classList.add('open')}function close(){root.classList.remove('open')}function toggle(){root.classList.toggle('open')}
  window.LegatusWidget={open:open,close:close,toggle:toggle};
  document.head.appendChild(css);document.body.appendChild(root);document.getElementById('legatus-launcher').onclick=toggle;
  if(window.LegatusWidgetRequestedOpen){window.LegatusWidgetRequestedOpen=false;open()}
- window.addEventListener('message',function(e){if(e.origin===frameOrigin&&(e.data==='legatus:close'||e.data==='nia:close'))root.classList.remove('open')});
+ frame.addEventListener('load',function(){try{frame.contentWindow.postMessage({type:'legatus:page-context',url:window.location.href},frameOrigin)}catch(error){}});
+ window.addEventListener('message',function(e){if(e.origin===frameOrigin){if(e.data==='legatus:close'||e.data==='nia:close')root.classList.remove('open');if(e.data&&e.data.type==='legatus:proactive')launcher.classList.add('has-proactive')}});
 })();
 JS;
 
@@ -85,6 +87,25 @@ JS;
             ->view('widget', compact('agent', 'widgetLocale', 'widgetCopy'))
             ->header('Content-Language', $widgetLocale)
             ->header('Cache-Control', 'no-store, private');
+    }
+
+    public function context(Request $request, Agent $agent): JsonResponse
+    {
+        abort_unless($agent->is_active && $agent->websiteWidgetEnabled(), 404);
+        $data = $request->validate(['url' => ['required', 'url:http,https', 'max:2048']]);
+        $rule = $agent->merchandisingRules()
+            ->whereNotNull('proactive_message')
+            ->whereHas('product', fn ($query) => $query->where('agent_id', $agent->id)->where('is_active', true))
+            ->with('product')
+            ->get()
+            ->first(fn ($rule): bool => $rule->isActive()
+                && $rule->product?->is_active
+                && $rule->product->matchesPublicProductUrl($data['url']));
+
+        return response()->json($rule ? [
+            'message' => $rule->proactive_message,
+            'prompt' => $rule->proactive_prompt,
+        ] : ['message' => null, 'prompt' => null])->header('Cache-Control', 'no-store, private');
     }
 
     private function javascript(string $content, ?string $locale = null)

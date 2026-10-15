@@ -857,7 +857,7 @@ class SalesToolbox
             ? collect($taxonomyProductIds)->merge($liveProductIds)->unique()->values()->all()
             : null;
 
-        $query = $agent->customerProducts()->where('is_active', true);
+        $query = $agent->customerProducts()->with('merchandisingRule')->where('is_active', true);
         $excludedProductIds = collect($a['exclude_product_ids'] ?? [])
             ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
         if ($excludedProductIds !== []) {
@@ -875,6 +875,10 @@ class SalesToolbox
             $query->where('price', '<=', (float) $a['budget']);
         }
         $ranked = $query->get()->map(function ($p) use ($termGroups, $preferenceTermGroups, $a, $c) {
+            $merchandising = $p->merchandisingRule;
+            if ($merchandising?->isActive() && $merchandising->recommendation_status === 'exclude') {
+                return null;
+            }
             $matched = collect($termGroups)
                 ->filter(fn (array $variants): bool => $this->productMatchesTermGroup($p, $variants))
                 ->map(fn (array $variants): string => (string) ($variants[0] ?? ''))
@@ -888,7 +892,13 @@ class SalesToolbox
             // must still match the customer's actual words in verified data.
             $relevance = $this->productSearchScore($p, $termGroups);
             $preferenceScore = $this->productSearchScore($p, $preferenceTermGroups);
-            $score = $relevance + $preferenceScore + ($within ? 20 : -500) + ($available > 0 ? 20 : -500);
+            // Merchandising may order already-relevant candidates, but it can
+            // never make an unrelated or unavailable product eligible.
+            $merchandisingBoost = $merchandising?->isActive()
+                ? max(-100, min(100, (int) $merchandising->priority))
+                    + ($merchandising->recommendation_status === 'promote' ? 25 : 0)
+                : 0;
+            $score = $relevance + $preferenceScore + ($within ? 20 : -500) + ($available > 0 ? 20 : -500) + $merchandisingBoost;
 
             $result = ['id' => $p->id, 'name' => $p->name, 'author' => data_get($p->metadata, 'author'), 'genres' => array_values(array_filter((array) data_get($p->metadata, 'genres', []), 'is_scalar')), 'taxonomy' => array_values(array_filter((array) data_get($p->metadata, 'taxonomy', []), 'is_scalar')), 'category' => $p->category, 'description' => $p->description, 'price' => (float) $p->price, 'available' => $available > 0, 'stock_precision' => $this->stockPrecision($p), 'score' => $score, 'matched_signals' => $matched->all(), 'within_budget' => $within, '_available_stock' => $available, '_relevance' => $relevance, '_matched_groups' => $matched->count()];
             if ($result['stock_precision'] === 'exact') {
@@ -897,7 +907,7 @@ class SalesToolbox
             }
 
             return $result;
-        })->filter(fn (array $product) => $product['_available_stock'] > 0);
+        })->filter(fn ($product): bool => is_array($product) && $product['_available_stock'] > 0);
         if ($termGroups !== []) {
             $maximumMatches = (int) $ranked->max('_matched_groups');
             $requiredMatches = count($termGroups) <= 2
@@ -940,7 +950,7 @@ class SalesToolbox
             ? $this->validatedSearchSuggestion($criteria, $this->nearestCatalogSuggestion($agent, $termGroups))
             : null;
 
-        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability', 'result_scope' => 'shortlist', 'returned_count' => $ranked->count(), 'has_more' => $eligibleCount > $ranked->count(), 'recommendations' => $ranked->all(), 'requested_quantity' => $requestedQuantity ?: null, 'bundle_complete' => $bundleComplete, 'bundle_total' => $bundleTotal, 'budget' => isset($a['budget']) ? (float) $a['budget'] : null, 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
+        return ['ok' => true, 'data_boundary' => $this->catalogDataBoundary(), 'ranking_method' => 'constraints + catalog signals + availability + tenant merchandising', 'result_scope' => 'shortlist', 'returned_count' => $ranked->count(), 'has_more' => $eligibleCount > $ranked->count(), 'recommendations' => $ranked->all(), 'requested_quantity' => $requestedQuantity ?: null, 'bundle_complete' => $bundleComplete, 'bundle_total' => $bundleTotal, 'budget' => isset($a['budget']) ? (float) $a['budget'] : null, 'did_you_mean' => $didYouMean, 'suggestion_requires_confirmation' => $didYouMean !== null];
     }
 
     private function selectBudgetBundle(Collection $products, int $quantity, ?float $budget): Collection
