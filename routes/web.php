@@ -9,7 +9,6 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\CommerceConnectionController;
-use App\Http\Controllers\CommerceWebhookController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\KnowledgeController;
 use App\Http\Controllers\LinkedInConnectionController;
@@ -68,9 +67,6 @@ Route::withoutMiddleware([
     Route::post('/webhooks/paddle', PaddleWebhookController::class)
         ->middleware('throttle:600,1')
         ->name('webhooks.paddle');
-    Route::post('/webhooks/commerce', CommerceWebhookController::class)
-        ->middleware('throttle:600,1')
-        ->name('webhooks.commerce');
 });
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'login'])->name('login');
@@ -167,9 +163,6 @@ Route::middleware('auth')->group(function () {
         Route::post('/app/channels/commerce', [CommerceConnectionController::class, 'connect'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.connect');
-        Route::get('/app/channels/commerce/connector-contract', [CommerceConnectionController::class, 'contract'])
-            ->middleware('throttle:30,1')
-            ->name('channels.commerce.contract');
         Route::post('/app/channels/commerce/sync', [CommerceConnectionController::class, 'sync'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.sync');

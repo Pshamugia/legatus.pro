@@ -16,41 +16,6 @@ class CommerceChannelManagementTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_owner_gets_platform_aware_connector_onboarding_and_downloadable_contract(): void
-    {
-        [$user, $agent] = $this->tenant('guided-store', 'owner');
-        $agent->update(['settings' => [
-            'website' => 'https://shop.example',
-            'widget_installation' => ['platform' => 'shopify'],
-        ]]);
-
-        $this->actingAs($user)->get(route('onboarding'))
-            ->assertOk()
-            ->assertSee('Recommended for Shopify')
-            ->assertSee('Public catalog, no code')
-            ->assertSee('Download connector contract')
-            ->assertSee('may still require their own app approval');
-
-        $response = $this->actingAs($user)->get(route('channels.commerce.contract'));
-        $response->assertOk()
-            ->assertHeader('Cache-Control', 'no-store, private')
-            ->assertHeader('Content-Disposition', 'attachment; filename="legatus-commerce-connector-v1.json"')
-            ->assertJsonPath('version', '1.0')
-            ->assertJsonPath('transport.canonical_request', "METHOD\nPATH_WITH_QUERY\nTIMESTAMP\nNONCE\nSHA256_RAW_BODY")
-            ->assertJsonPath('required_endpoints.0.path', '/api/legatus/v1/catalog')
-            ->assertJsonPath('required_endpoints.3.response_data.capabilities.2', 'cart_create')
-            ->assertJsonPath('optional_endpoints.2.capability', 'cart_create');
-        $this->assertStringNotContainsString('shared_secret', $response->getContent());
-    }
-
-    public function test_connector_contract_requires_an_authenticated_manager(): void
-    {
-        [$viewer] = $this->tenant('guided-viewer', 'viewer');
-
-        $this->get(route('channels.commerce.contract'))->assertRedirect(route('login'));
-        $this->actingAs($viewer)->get(route('channels.commerce.contract'))->assertForbidden();
-    }
-
     public function test_existing_active_catalog_is_reported_as_available_without_a_live_api_connection(): void
     {
         [$user, $agent] = $this->tenant('public-catalog-store', 'owner');
