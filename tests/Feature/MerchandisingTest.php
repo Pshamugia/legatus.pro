@@ -62,6 +62,26 @@ class MerchandisingTest extends TestCase
         $this->assertDatabaseHas('product_merchandising_rules', ['agent_id' => $agent->id, 'product_id' => $product->id, 'priority' => 25]);
     }
 
+    public function test_product_list_uses_compact_svg_free_pagination(): void
+    {
+        [$owner, $agent] = $this->tenant('merch-pages', 'owner');
+        foreach (range(1, 41) as $number) {
+            $agent->products()->create([
+                'name' => sprintf('Product %02d', $number),
+                'price' => 10,
+                'stock' => 1,
+                'is_active' => true,
+            ]);
+        }
+
+        $this->actingAs($owner)->get(route('merchandising.index'))
+            ->assertOk()
+            ->assertSee('data-compact-pagination', false)
+            ->assertSee('Showing 1–40 of 41')
+            ->assertSee('Next →')
+            ->assertDontSee('<svg', false);
+    }
+
     public function test_widget_returns_only_the_exact_active_product_page_campaign(): void
     {
         [, $agent] = $this->tenant('merch-proactive', 'owner');

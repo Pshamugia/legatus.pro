@@ -27,9 +27,12 @@
                     <label style="grid-column:4 / span 2">Suggested customer reply<input name="proactive_prompt" maxlength="120" value="{{ $rule?->proactive_prompt }}" placeholder="For example: Tell me more" @disabled(! $canManage)></label>
                 </form>
             @empty<p>No synchronized products found.</p>@endforelse
-            <div style="margin-top:18px">{{ $products->links() }}</div>
+            @include('partials.compact-pagination', ['paginator' => $products])
         </section>
     </main>
 </div>
-<style nonce="{{ request()->attributes->get('csp_nonce') }}">@media(max-width:900px){.main .panel form{grid-template-columns:1fr!important}}</style>
+<style nonce="{{ request()->attributes->get('csp_nonce') }}">
+.compact-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}.compact-pagination p{margin:0;color:var(--muted);font-size:12px}.compact-pagination__links{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.compact-pagination__links a,.compact-pagination__links span{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);font-size:12px;font-weight:700}.compact-pagination__links a:hover{border-color:#9eb8aa;background:#f3f8f4}.compact-pagination__links .is-current{border-color:var(--green);background:var(--green);color:#fff}.compact-pagination__links .is-disabled{color:#a4afaa;background:#f6f7f5}.compact-pagination__links .compact-pagination__ellipsis{min-width:22px;padding:0;border-color:transparent;background:transparent;color:var(--muted)}
+@media(max-width:900px){.main .panel form{grid-template-columns:1fr!important}.compact-pagination{align-items:flex-start;flex-direction:column}.compact-pagination__links{width:100%}}
+</style>
 @endsection
