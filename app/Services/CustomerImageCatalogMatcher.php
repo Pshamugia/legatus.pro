@@ -20,6 +20,24 @@ class CustomerImageCatalogMatcher
     public function resolve(Agent $agent, Conversation $conversation, string $imageUrl, string $customerText): array
     {
         $image = $this->downloadMetaImage($imageUrl);
+
+        return $this->resolvePreparedImage($agent, $conversation, $image, $customerText);
+    }
+
+    /** @return array<string, mixed> */
+    public function resolveBytes(Agent $agent, Conversation $conversation, string $bytes, string $customerText): array
+    {
+        return $this->resolvePreparedImage(
+            $agent,
+            $conversation,
+            $this->prepareImageBytes($bytes),
+            $customerText,
+        );
+    }
+
+    /** @param array{data_url: string, mime: string} $image @return array<string, mixed> */
+    private function resolvePreparedImage(Agent $agent, Conversation $conversation, array $image, string $customerText): array
+    {
         $model = (string) config('services.openai.image_recognition_model', 'gpt-5.6-sol');
         $usage = ['input_tokens' => 0, 'output_tokens' => 0, 'requests' => 0];
         $identity = $this->extractIdentity($image, $agent, $customerText, $model, $usage);
@@ -138,17 +156,22 @@ class CustomerImageCatalogMatcher
         if (! $response->successful()) {
             throw new \RuntimeException('The customer image could not be downloaded from Meta.');
         }
-        $body = $response->body();
-        if ($body === '' || strlen($body) > self::MAX_IMAGE_BYTES) {
+        return $this->prepareImageBytes($response->body());
+    }
+
+    /** @return array{data_url: string, mime: string} */
+    private function prepareImageBytes(string $bytes): array
+    {
+        if ($bytes === '' || strlen($bytes) > self::MAX_IMAGE_BYTES) {
             throw new \RuntimeException('The customer image is empty or too large.');
         }
-        $imageInfo = @getimagesizefromstring($body);
+        $imageInfo = @getimagesizefromstring($bytes);
         $mime = is_array($imageInfo) ? strtolower((string) ($imageInfo['mime'] ?? '')) : '';
         if (! in_array($mime, ['image/jpeg', 'image/png', 'image/webp'], true)) {
             throw new \RuntimeException('The customer attachment is not a supported image.');
         }
 
-        return ['data_url' => 'data:'.$mime.';base64,'.base64_encode($body), 'mime' => $mime];
+        return ['data_url' => 'data:'.$mime.';base64,'.base64_encode($bytes), 'mime' => $mime];
     }
 
     /** @param array<string, int> $usage */

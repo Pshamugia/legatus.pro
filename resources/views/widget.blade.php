@@ -25,7 +25,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ $assistantName }} · {{ $agent->business_name }}</title>
     <style>
-        :root{--widget-primary:{{ $widgetTheme['primary'] }};--widget-accent:{{ $widgetTheme['accent'] }};--widget-primary-foreground:{{ $widgetTheme['primary_foreground'] }};--widget-accent-foreground:{{ $widgetTheme['accent_foreground'] }}}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#17352c;background:#f6f8f4}.shell{height:100vh;display:flex;flex-direction:column}.head{background:var(--widget-primary);color:var(--widget-primary-foreground);padding:15px;display:flex;align-items:center;gap:10px}.avatar{width:40px;height:40px;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:13px;display:grid;place-items:center;font-weight:800}.head .identity{min-width:0;flex:1}.head b,.head small,.powered{display:block}.head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.head small{color:var(--widget-primary-foreground);opacity:.76;margin-top:2px}.powered{color:var(--widget-primary-foreground);opacity:.55;font-size:9px;margin-top:3px}.head-actions{display:flex;flex:0 0 auto;gap:6px}.head-action{border:0;background:#ffffff18;color:var(--widget-primary-foreground);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:16px}.head-action:hover{background:#ffffff2b}.messages{flex:1;overflow:auto;padding:17px}.bubble{max-width:86%;padding:11px 13px;border-radius:15px;margin:8px 0;font-size:13px;line-height:1.5;background:white;border:1px solid #e4e9e5}.bubble.user{margin-left:auto;background:var(--widget-primary);color:var(--widget-primary-foreground);border:0}.bubble.human{border-left:3px solid var(--widget-primary)}.bubble.thinking{display:flex;align-items:center;gap:9px;width:max-content;color:#557166}.thinking-dots{display:inline-flex;gap:3px}.thinking-dots i{width:5px;height:5px;border-radius:50%;background:var(--widget-primary);animation:thinking-pulse 1.15s infinite ease-in-out}.thinking-dots i:nth-child(2){animation-delay:.16s}.thinking-dots i:nth-child(3){animation-delay:.32s}@keyframes thinking-pulse{0%,70%,100%{opacity:.3;transform:translateY(0)}35%{opacity:1;transform:translateY(-3px)}}.operator{display:block;color:var(--widget-primary);font-size:10px;font-weight:700;margin-bottom:5px}.products{display:flex;gap:7px;overflow:auto;margin-top:8px}.product{display:block;min-width:135px;padding:9px;background:#eff4ed;border-radius:10px;color:inherit;text-decoration:none}.product[href]:hover{outline:2px solid var(--widget-accent)}.product.sold-out{background:#f7eeee;border:1px solid #e7caca}.product.sold-out small{color:#9b3030;font-weight:700}.product b,.product small{display:block}.product small{margin-top:4px;color:#557166}.trace{margin-top:10px;padding-top:9px;border-top:1px solid #e5ebe6;color:#557166;font-size:10px}.trace-row{display:flex;align-items:flex-start;gap:5px;margin-top:5px}.trace-label{font-weight:700;white-space:nowrap}.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#eff5ef;border-radius:99px;padding:2px 6px}.suggest{display:flex;gap:6px;padding:8px 14px;overflow:auto}.suggest button{white-space:nowrap;border:1px solid #dce4de;background:white;border-radius:99px;padding:7px 9px;font-size:10px;cursor:pointer}.composer{display:flex;gap:7px;padding:12px;background:white;border-top:1px solid #e2e8e3}.composer input{min-width:0;flex:1;border:1px solid #dce4de;border-radius:12px;padding:11px}.composer button{border:0;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:12px;padding:0 14px;font-weight:700;cursor:pointer}.composer button:disabled{cursor:wait;opacity:.65}@media(prefers-reduced-motion:reduce){.thinking-dots i{animation:none;opacity:.65}}
+        :root{--widget-primary:{{ $widgetTheme['primary'] }};--widget-accent:{{ $widgetTheme['accent'] }};--widget-primary-foreground:{{ $widgetTheme['primary_foreground'] }};--widget-accent-foreground:{{ $widgetTheme['accent_foreground'] }}}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#17352c;background:#f6f8f4}.shell{height:100vh;display:flex;flex-direction:column}.head{background:var(--widget-primary);color:var(--widget-primary-foreground);padding:15px;display:flex;align-items:center;gap:10px}.avatar{width:40px;height:40px;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:13px;display:grid;place-items:center;font-weight:800}.head .identity{min-width:0;flex:1}.head b,.head small,.powered{display:block}.head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.head small{color:var(--widget-primary-foreground);opacity:.76;margin-top:2px}.powered{color:var(--widget-primary-foreground);opacity:.55;font-size:9px;margin-top:3px}.head-actions{display:flex;flex:0 0 auto;gap:6px}.head-action{border:0;background:#ffffff18;color:var(--widget-primary-foreground);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:16px}.head-action:hover{background:#ffffff2b}.messages{flex:1;overflow:auto;padding:17px}.bubble{max-width:86%;padding:11px 13px;border-radius:15px;margin:8px 0;font-size:13px;line-height:1.5;background:white;border:1px solid #e4e9e5}.bubble.user{margin-left:auto;background:var(--widget-primary);color:var(--widget-primary-foreground);border:0}.bubble.user img{display:block;max-width:180px;max-height:180px;margin-top:7px;border-radius:10px;object-fit:cover}.bubble.human{border-left:3px solid var(--widget-primary)}.bubble.thinking{display:flex;align-items:center;gap:9px;width:max-content;color:#557166}.thinking-dots{display:inline-flex;gap:3px}.thinking-dots i{width:5px;height:5px;border-radius:50%;background:var(--widget-primary);animation:thinking-pulse 1.15s infinite ease-in-out}.thinking-dots i:nth-child(2){animation-delay:.16s}.thinking-dots i:nth-child(3){animation-delay:.32s}@keyframes thinking-pulse{0%,70%,100%{opacity:.3;transform:translateY(0)}35%{opacity:1;transform:translateY(-3px)}}.operator{display:block;color:var(--widget-primary);font-size:10px;font-weight:700;margin-bottom:5px}.products{display:flex;gap:7px;overflow:auto;margin-top:8px}.product{display:block;min-width:135px;padding:9px;background:#eff4ed;border-radius:10px;color:inherit;text-decoration:none}.product[href]:hover{outline:2px solid var(--widget-accent)}.product.sold-out{background:#f7eeee;border:1px solid #e7caca}.product.sold-out small{color:#9b3030;font-weight:700}.product b,.product small{display:block}.product small{margin-top:4px;color:#557166}.trace{margin-top:10px;padding-top:9px;border-top:1px solid #e5ebe6;color:#557166;font-size:10px}.trace-row{display:flex;align-items:flex-start;gap:5px;margin-top:5px}.trace-label{font-weight:700;white-space:nowrap}.chips{display:flex;flex-wrap:wrap;gap:4px}.chip{background:#eff5ef;border-radius:99px;padding:2px 6px}.suggest{display:flex;gap:6px;padding:8px 14px;overflow:auto}.suggest button{white-space:nowrap;border:1px solid #dce4de;background:white;border-radius:99px;padding:7px 9px;font-size:10px;cursor:pointer}.composer{display:flex;position:relative;gap:7px;padding:12px;background:white;border-top:1px solid #e2e8e3}.composer input:not([type=file]){min-width:0;flex:1;border:1px solid #dce4de;border-radius:12px;padding:11px}.composer button{border:0;background:var(--widget-accent);color:var(--widget-accent-foreground);border-radius:12px;padding:0 14px;font-weight:700;cursor:pointer}.composer .attach-image{flex:0 0 42px;padding:0;font-size:22px}.image-selection{position:absolute;right:12px;bottom:58px;left:12px;overflow:hidden;padding:7px 30px 7px 10px;border:1px solid #dce4de;border-radius:10px;background:white;color:#557166;font-size:10px;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 8px 24px #142a221c}.composer button:disabled{cursor:wait;opacity:.65}@media(prefers-reduced-motion:reduce){.thinking-dots i{animation:none;opacity:.65}}
     </style>
 </head>
 <body>
@@ -56,13 +56,16 @@
         @endif
     </div>
     <form class="composer" id="form">
-        <input id="input" required autocomplete="off" placeholder="{{ $widgetCopy['message_placeholder'] }}" aria-label="{{ $widgetCopy['message'] }}">
+        @unless($platformSupport)<input id="image-input" type="file" accept="image/jpeg,image/png,image/webp" hidden><button id="attach-image" class="attach-image" type="button" aria-label="{{ $widgetCopy['attach_image'] }}" title="{{ $widgetCopy['attach_image'] }}">+</button>@endunless
+        <input id="input" autocomplete="off" placeholder="{{ $widgetCopy['message_placeholder'] }}" aria-label="{{ $widgetCopy['message'] }}">
         <button id="send" type="submit" aria-label="{{ $widgetCopy['send'] }}">↑</button>
+        @unless($platformSupport)<span id="image-selection" class="image-selection" hidden></span>@endunless
     </form>
 </div>
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
     document.querySelector('#close-widget').addEventListener('click', () => parent.postMessage('legatus:close', '*'));
     const messageUrl = @json(route('chat.message', $agent));
+    const imageUrl = @json(route('chat.image', $agent));
     const historyUrl = @json(route('chat.history', $agent));
     const feedbackBase = @json(url('/demo/'.$agent->slug.'/messages'));
     const contextUrl = @json(route('widget.context', $agent));
@@ -76,10 +79,14 @@
     const box = document.querySelector('#messages');
     const input = document.querySelector('#input');
     const sendButton = document.querySelector('#send');
+    const imageInput = document.querySelector('#image-input');
+    const attachButton = document.querySelector('#attach-image');
+    const imageSelection = document.querySelector('#image-selection');
     const assistantName = @json($assistantName);
     const platformSupport = @json($platformSupport);
     const widgetCopy = @json($widgetCopy);
     let proactiveRendered = false;
+    let selectedImage = null;
 
     window.addEventListener('message', async event => {
         if (event.source !== parent || event.data?.type !== 'legatus:page-context' || proactiveRendered) return;
@@ -123,6 +130,31 @@
         cursor = 0;
         seen.clear();
         try { localStorage.removeItem(storageKey); } catch {}
+    }
+
+    function clearSelectedImage() {
+        selectedImage = null;
+        if (imageInput) imageInput.value = '';
+        if (imageSelection) {
+            imageSelection.hidden = true;
+            imageSelection.textContent = '';
+        }
+    }
+
+    if (attachButton && imageInput) {
+        attachButton.addEventListener('click', () => imageInput.click());
+        imageInput.addEventListener('change', () => {
+            const file = imageInput.files?.[0] || null;
+            if (!file) return clearSelectedImage();
+            if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) {
+                clearSelectedImage();
+                add(phrase('invalid_image'), 'ai');
+                return;
+            }
+            selectedImage = file;
+            imageSelection.textContent = phrase('image_selected', {name: file.name});
+            imageSelection.hidden = false;
+        });
     }
 
     document.querySelector('#new-conversation').addEventListener('click', () => {
@@ -256,7 +288,7 @@
                 const name = document.createElement('b');
                 const detail = document.createElement('small');
                 card.className = 'product';
-                const inStock = Number(product.stock) > 0;
+                const inStock = product.available === true || Number(product.stock) > 0;
                 if (!inStock) card.classList.add('sold-out');
                 if (productUrl) {
                     card.href = productUrl;
@@ -277,6 +309,24 @@
         }
 
         if (role === 'ai') addFeedback(bubble, meta.messageId || null);
+        box.append(bubble);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function addCustomerImage(text, file) {
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble user';
+        if (text) {
+            const copy = document.createElement('span');
+            copy.textContent = text;
+            bubble.append(copy);
+        }
+        const preview = document.createElement('img');
+        const objectUrl = URL.createObjectURL(file);
+        preview.src = objectUrl;
+        preview.alt = phrase('uploaded_image');
+        preview.addEventListener('load', () => URL.revokeObjectURL(objectUrl), {once: true});
+        bubble.append(preview);
         box.append(bubble);
         box.scrollTop = box.scrollHeight;
     }
@@ -368,6 +418,33 @@
         }
     }
 
+    async function postImage(file, message, id, signal) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const form = new FormData();
+            form.append('image', file, file.name);
+            form.append('message', message);
+            form.append('request_id', id);
+            form.append('channel', 'widget');
+            if (visitorToken) form.append('visitor_token', visitorToken);
+            try {
+                const response = await fetch(imageUrl, {
+                    method: 'POST',
+                    headers: {'Accept': 'application/json'},
+                    body: form,
+                    signal,
+                });
+                if (response.status === 401 && visitorToken && attempt === 0) {
+                    clearToken();
+                    continue;
+                }
+                return response;
+            } catch (error) {
+                if (error.name === 'AbortError' || attempt === 1) throw error;
+                await new Promise(resolve => setTimeout(resolve, 450));
+            }
+        }
+    }
+
     async function responseData(response) {
         const type = response.headers.get('content-type') || '';
         if (!type.includes('application/json')) throw new Error(`Unexpected server response (${response.status})`);
@@ -375,26 +452,26 @@
         return response.json();
     }
 
-    async function send(text) {
+    async function send(text, image = null) {
         const message = text.trim();
-        if (!message || sending) return;
+        if ((!message && !image) || sending) return;
 
         sending = true;
-        add(message, 'user');
+        if (image) addCustomerImage(message, image); else add(message, 'user');
         input.value = '';
+        clearSelectedImage();
         input.disabled = true;
         sendButton.disabled = true;
+        if (attachButton) attachButton.disabled = true;
         const hideThinking = showThinking();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestDeadlineMs);
 
         try {
-            const response = await postMessage({
-                message,
-                visitor_token: visitorToken,
-                request_id: requestId(),
-                channel: 'widget',
-            }, controller.signal);
+            const id = requestId();
+            const response = image
+                ? await postImage(image, message, id, controller.signal)
+                : await postMessage({message, visitor_token: visitorToken, request_id: id, channel: 'widget'}, controller.signal);
 
             const data = await responseData(response);
 
@@ -417,6 +494,7 @@
             sending = false;
             input.disabled = false;
             sendButton.disabled = false;
+            if (attachButton) attachButton.disabled = false;
             input.focus();
             pollHistory();
         }
@@ -424,7 +502,7 @@
 
     document.querySelector('#form').addEventListener('submit', event => {
         event.preventDefault();
-        send(input.value);
+        send(input.value, selectedImage);
     });
     document.querySelectorAll('[data-q]').forEach(button => {
         button.addEventListener('click', () => send(button.dataset.q));

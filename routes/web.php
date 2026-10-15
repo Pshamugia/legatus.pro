@@ -87,6 +87,7 @@ Route::withoutMiddleware([
     ValidateCsrfToken::class,
 ])->group(function (): void {
     Route::post('/demo/{agent:slug}/message', [ChatController::class, 'message'])->middleware('throttle:public-chat')->name('chat.message');
+    Route::post('/demo/{agent:slug}/image', [ChatController::class, 'image'])->middleware('throttle:10,1')->name('chat.image');
     Route::get('/demo/{agent:slug}/history', [ChatController::class, 'history'])->middleware('throttle:public-history')->name('chat.history');
     Route::post('/demo/{agent:slug}/messages/{message}/feedback', [ChatController::class, 'feedback'])->middleware('throttle:30,1')->name('chat.feedback');
 });

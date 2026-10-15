@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Services\ConversationEngine;
+use App\Services\CustomerImageConversationService;
 use App\Services\TenantContext;
 use App\Support\SignedVisitorToken;
 use App\Support\WidgetLocaleResolver;
@@ -94,6 +95,58 @@ class ChatController extends Controller
         }
 
         return $this->privateJson($payload);
+    }
+
+    public function image(
+        Request $request,
+        Agent $agent,
+        CustomerImageConversationService $images,
+        SignedVisitorToken $tokens,
+    ) {
+        $this->ensureActive($agent);
+        abort_if(data_get($agent->settings, 'assistant_mode') === 'platform_support', 404);
+        $data = $request->validate([
+            'image' => ['required', 'file', 'mimes:jpg,jpeg,png,webp', 'max:10240'],
+            'message' => ['nullable', 'string', 'max:1500'],
+            'visitor_token' => ['nullable', 'string', 'max:512'],
+            'request_id' => ['nullable', 'uuid'],
+            'channel' => ['nullable', 'in:web,widget'],
+        ]);
+
+        $providedToken = $this->providedToken($request);
+        if ($providedToken !== null) {
+            $visitorId = $tokens->resolve($agent, $providedToken);
+            abort_unless($visitorId !== null, 401, 'Invalid or expired visitor token.');
+            $visitorToken = $providedToken;
+        } else {
+            $identity = $tokens->issue($agent);
+            $visitorId = $identity['visitor_id'];
+            $visitorToken = $identity['token'];
+        }
+
+        $bytes = $data['image']->get();
+        abort_if(! is_string($bytes) || $bytes === '', 422, 'The uploaded image is empty.');
+
+        try {
+            $payload = Cache::lock('public-chat-conversation:'.$agent->id.':'.hash('sha256', $visitorId), 120)
+                ->block(10, fn (): array => $images->handle(
+                    $agent,
+                    $bytes,
+                    (string) ($data['message'] ?? ''),
+                    $data['channel'] ?? 'web',
+                    $visitorId,
+                    $data['request_id'] ?? null,
+                ));
+        } catch (LockTimeoutException) {
+            return $this->privateJson(['message' => 'Another message in this conversation is still being processed.'], 409);
+        }
+        unset($payload['conversation_id']);
+
+        return $this->privateJson($this->ownedResponse(
+            $payload,
+            $visitorToken,
+            $data['request_id'] ?? null,
+        ));
     }
 
     public function history(Request $request, Agent $agent, SignedVisitorToken $tokens)
