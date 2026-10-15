@@ -58,6 +58,41 @@ class AnalyticsController extends Controller
             ->get();
         $eval = EvaluationRun::where('agent_id', $agent->id)->latest()->first();
 
-        return view('analytics', compact('agent', 'metrics', 'runs', 'recentFeedback', 'eval'));
+        $knowledgeSources = $agent->knowledgeSources()
+            ->select(['id', 'name', 'source_scope', 'status', 'progress', 'error', 'last_synced_at', 'updated_at'])
+            ->latest('updated_at')
+            ->get();
+        $knowledgeIssues = $knowledgeSources->filter(fn ($source): bool =>
+            $source->status === 'failed'
+            || filled($source->error)
+            || ($source->status === 'processing' && $source->updated_at?->isBefore(now()->subMinutes(30)))
+            || ($source->status === 'ready' && (int) $source->progress < 100)
+        )->take(10)->values();
+        $degradedRuns = (clone $customerRuns)
+            ->whereIn('status', ['failed', 'fallback', 'moderated'])
+            ->latest('id')
+            ->take(10)
+            ->get();
+        $quality = [
+            'knowledge_sources' => $knowledgeSources->count(),
+            'knowledge_issues' => $knowledgeIssues->count(),
+            'degraded_runs' => (clone $customerRuns)->whereIn('status', ['failed', 'fallback', 'moderated'])->count(),
+            'low_confidence_responses' => (clone $assistantMessages)->whereNotNull('confidence')->where('confidence', '<', .6)->count(),
+            'products_missing_description' => $agent->products()->where('is_active', true)
+                ->where(fn ($query) => $query->whereNull('description')->orWhere('description', ''))->count(),
+            'products_missing_image' => $agent->products()->where('is_active', true)
+                ->where(fn ($query) => $query->whereNull('image')->orWhere('image', ''))->count(),
+        ];
+
+        return view('analytics', compact(
+            'agent',
+            'metrics',
+            'runs',
+            'recentFeedback',
+            'eval',
+            'quality',
+            'knowledgeIssues',
+            'degradedRuns',
+        ));
     }
 }

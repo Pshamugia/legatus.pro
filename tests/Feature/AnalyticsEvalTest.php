@@ -154,4 +154,49 @@ class AnalyticsEvalTest extends TestCase
         $this->assertTrue($response->viewData('recentFeedback')->contains($visible));
         $this->assertGreaterThanOrEqual(1, $response->viewData('metrics')['unhelpful_responses']);
     }
+
+    public function test_quality_center_is_actionable_and_tenant_scoped(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $user = User::where('email', 'demo@legatus.ai')->firstOrFail();
+        $agent = Agent::where('slug', 'legatus-demo')->firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Visible broken source',
+            'status' => 'failed',
+            'error' => 'Visible synchronization error.',
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'quality-customer',
+            'channel' => 'website',
+            'status' => 'ai',
+        ]);
+        AgentRun::create([
+            'agent_id' => $agent->id,
+            'conversation_id' => $conversation->id,
+            'model' => 'visible-quality-model',
+            'status' => 'failed',
+            'error' => 'Visible run error.',
+        ]);
+
+        $other = Organization::create(['name' => 'Hidden Quality Org', 'slug' => 'hidden-quality']);
+        $otherAgent = $other->agents()->create(['name' => 'Hidden Agent', 'slug' => 'hidden-quality-agent', 'business_name' => 'Hidden']);
+        $otherAgent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Hidden broken source',
+            'status' => 'failed',
+            'error' => 'Hidden synchronization error.',
+        ]);
+
+        $response = $this->actingAs($user)->get(route('analytics.index'))
+            ->assertOk()
+            ->assertSee('Quality & knowledge center', false)
+            ->assertSee($source->name)
+            ->assertSee('visible-quality-model')
+            ->assertSee(route('knowledge.index'), false)
+            ->assertDontSee('Hidden broken source');
+
+        $this->assertSame(1, $response->viewData('quality')['knowledge_issues']);
+        $this->assertTrue($response->viewData('degradedRuns')->contains('id', AgentRun::latest('id')->value('id')));
+    }
 }
