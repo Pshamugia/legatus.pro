@@ -30,10 +30,14 @@ class OpenAiSalesOrchestrator
         $fallbackReason = null;
         $modelUsage = [];
         $pendingSuggestion = trim((string) data_get($conversation->context, 'pending_catalog_suggestion', ''));
+        $rejectedPendingSuggestion = null;
         if ($pendingSuggestion !== '' && (
             $this->isRejectionTurn($message)
             || (! $this->isShortAffirmation($message) && ! $this->isShortRejection($message))
         )) {
+            if ($this->isRejectionTurn($message)) {
+                $rejectedPendingSuggestion = $pendingSuggestion;
+            }
             $context = $conversation->context ?? [];
             data_forget($context, 'pending_catalog_suggestion');
             $conversation->update(['context' => $context]);
@@ -875,6 +879,22 @@ class OpenAiSalesOrchestrator
             ->pluck('result.did_you_mean')
             ->filter(fn ($suggestion): bool => is_string($suggestion) && trim($suggestion) !== '')
             ->last();
+        if ($rejectedPendingSuggestion !== null) {
+            $verifiedSuggestion = null;
+            $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
+            $data = [
+                'text' => $georgian
+                    ? 'გასაგებია — ეს სხვა ვარიანტია. თუ კიდევ ერთი განმასხვავებელი დეტალი იცით, მომწერეთ და ზუსტად მოვძებნი.'
+                    : 'Understood — that is a different option. If you know one more distinguishing detail, send it and I will search precisely.',
+                'intent' => 'clarification',
+                'confidence' => 1,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [],
+                'sources' => [],
+                'factual_claims' => [],
+            ];
+        }
         if (is_string($verifiedSuggestion)) {
             $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
             $data['text'] = $georgian

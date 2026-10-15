@@ -1521,6 +1521,57 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertNull(data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
     }
 
+    public function test_rejected_pending_suggestion_cannot_be_recreated_in_the_same_turn(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $agent->products()->create([
+            'name' => 'ჩემო ელ-შადაი, ჩემო ადონაი',
+            'search_text' => 'ჩემო ელ-შადაი ჩემო ადონაი',
+            'price' => 12,
+            'stock' => 1,
+            'is_active' => true,
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'same-turn-rejected-suggestion',
+            'status' => 'ai',
+            'channel' => 'widget',
+            'context' => ['pending_catalog_suggestion' => 'ჩემო ელ-შადაი, ჩემო ადონაი'],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'rejected-suggestion-search', 'output' => [[
+                'type' => 'function_call',
+                'name' => 'search_products',
+                'call_id' => 'rejected-suggestion-call',
+                'arguments' => json_encode([
+                    'query' => 'ჩემი სიცოცხლე თქვენი სიცოცხლეა',
+                    'category' => null,
+                    'max_price' => null,
+                ], JSON_UNESCAPED_UNICODE),
+            ]], 'usage' => []])
+            ->push(['id' => 'rejected-suggestion-final', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'გასაგებია, ეს ვარიანტი არასწორია.',
+                    'intent' => 'clarification',
+                    'confidence' => .99,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'product_ids' => [],
+                    'sources' => [],
+                    'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'არა ეგ არა', $conversation);
+
+        $this->assertStringNotContainsString('ჩემო ელ-შადაი', $reply['text']);
+        $this->assertNull(data_get($conversation->fresh()->context, 'pending_catalog_suggestion'));
+    }
+
     public function test_new_explicit_subject_cannot_inherit_an_older_pending_suggestion(): void
     {
         $this->seed();

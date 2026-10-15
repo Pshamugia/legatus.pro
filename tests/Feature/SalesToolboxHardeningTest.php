@@ -613,6 +613,27 @@ class SalesToolboxHardeningTest extends TestCase
         }
     }
 
+    public function test_multi_word_title_never_suggests_another_title_from_repeated_pronoun_similarity(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'ჩემო ელ-შადაი, ჩემო ადონაი',
+            'description' => 'სრულიად სხვა წიგნი',
+            'search_text' => 'ჩემო ელ-შადაი ჩემო ადონაი',
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'ჩემი სიცოცხლე თქვენი სიცოცხლეა',
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([], $result['products']);
+        $this->assertNull($result['did_you_mean']);
+        $this->assertFalse($result['suggestion_requires_confirmation']);
+    }
+
     public function test_multi_word_product_lookup_never_suggests_an_unrelated_person_from_one_similar_word(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 2);

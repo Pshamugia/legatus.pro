@@ -1748,7 +1748,8 @@ class SalesToolbox
                     && ($suggestionTokens->count() === 1 || $suggestionIndex === $suggestionTokens->count() - 1)
                     || ($queryGroups->count() > 1
                         && $suggestionTokens->count() >= 2
-                        && $this->alignedSuggestionTokenCount($queryTokens, $suggestionTokens) >= 2);
+                        && $this->alignedSuggestionGroupCount($queryGroups, $suggestionTokens)
+                            >= $this->minimumSuggestionGroupMatches($queryGroups->count()));
                 if ($distance <= $maximumDistance
                     && $this->sameSuggestionPrefix($queryToken, $suggestionToken)
                     && $safeIdentityCorrection) {
@@ -1770,10 +1771,17 @@ class SalesToolbox
 
     private function nearestCatalogSuggestion(Agent $agent, array $termGroups): ?string
     {
-        $queryTokens = collect($termGroups)
+        $queryGroups = collect($termGroups)
+            ->map(fn (array $variants): array => collect($variants)
+                ->map(fn (string $token): string => Str::lower($token))
+                ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
+                ->unique()
+                ->values()
+                ->all())
+            ->filter()
+            ->values();
+        $queryTokens = $queryGroups
             ->flatten()
-            ->map(fn (string $token): string => Str::lower($token))
-            ->filter(fn (string $token): bool => mb_strlen($token) >= 4)
             ->unique()
             ->values();
         if ($queryTokens->isEmpty()) {
@@ -1811,9 +1819,9 @@ class SalesToolbox
                         $length = max(mb_strlen($queryToken), mb_strlen($candidateToken));
                         $maximumDistance = min(2, max(1, (int) floor($length * .25)));
                         $candidateCollection = collect($candidateTokens)->values();
-                        $alignedTokens = $this->alignedSuggestionTokenCount($queryTokens, $candidateCollection);
-                        $safeMultiTokenMatch = $queryTokens->count() === 1
-                            || $alignedTokens >= 2;
+                        $alignedGroups = $this->alignedSuggestionGroupCount($queryGroups, $candidateCollection);
+                        $safeMultiTokenMatch = $queryGroups->count() === 1
+                            || $alignedGroups >= $this->minimumSuggestionGroupMatches($queryGroups->count());
                         if ($distance < 1
                             || $distance > $maximumDistance
                             || $distance >= $bestDistance
@@ -1837,19 +1845,40 @@ class SalesToolbox
         return mb_substr($queryToken, 0, 2) === mb_substr($candidateToken, 0, 2);
     }
 
-    private function alignedSuggestionTokenCount(Collection $queryTokens, Collection $suggestionTokens): int
+    private function alignedSuggestionGroupCount(Collection $queryGroups, Collection $suggestionTokens): int
     {
-        return $suggestionTokens->filter(function (string $suggestionToken) use ($queryTokens): bool {
-            return $queryTokens->contains(function (string $queryToken) use ($suggestionToken): bool {
-                if (! $this->sameSuggestionPrefix($queryToken, $suggestionToken)) {
-                    return false;
-                }
-                $distance = $this->utf8Distance($queryToken, $suggestionToken);
-                $length = max(mb_strlen($queryToken), mb_strlen($suggestionToken));
+        $remainingSuggestionTokens = $suggestionTokens->values();
+        $matches = 0;
 
-                return $distance <= min(2, max(1, (int) floor($length * .25)));
-            });
-        })->count();
+        foreach ($queryGroups as $queryGroup) {
+            $variants = collect($queryGroup)
+                ->filter(fn ($token): bool => is_string($token) && mb_strlen($token) >= 4)
+                ->values();
+            $matchedIndex = $remainingSuggestionTokens->search(
+                fn (string $suggestionToken): bool => $variants->contains(function (string $queryToken) use ($suggestionToken): bool {
+                    if (! $this->sameSuggestionPrefix($queryToken, $suggestionToken)) {
+                        return false;
+                    }
+                    $distance = $this->utf8Distance($queryToken, $suggestionToken);
+                    $length = max(mb_strlen($queryToken), mb_strlen($suggestionToken));
+
+                    return $distance <= min(2, max(1, (int) floor($length * .25)));
+                }),
+            );
+            if ($matchedIndex === false) {
+                continue;
+            }
+
+            $matches++;
+            $remainingSuggestionTokens->forget($matchedIndex);
+        }
+
+        return $matches;
+    }
+
+    private function minimumSuggestionGroupMatches(int $queryGroupCount): int
+    {
+        return $queryGroupCount <= 1 ? 1 : max(2, (int) ceil($queryGroupCount * .6));
     }
 
     private function productSearchScore($product, array $termGroups): int
