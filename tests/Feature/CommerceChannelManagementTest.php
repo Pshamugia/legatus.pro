@@ -37,7 +37,9 @@ class CommerceChannelManagementTest extends TestCase
             ->assertHeader('Content-Disposition', 'attachment; filename="legatus-commerce-connector-v1.json"')
             ->assertJsonPath('version', '1.0')
             ->assertJsonPath('transport.canonical_request', "METHOD\nPATH_WITH_QUERY\nTIMESTAMP\nNONCE\nSHA256_RAW_BODY")
-            ->assertJsonPath('required_endpoints.0.path', '/api/legatus/v1/catalog');
+            ->assertJsonPath('required_endpoints.0.path', '/api/legatus/v1/catalog')
+            ->assertJsonPath('required_endpoints.3.response_data.capabilities.2', 'cart_create')
+            ->assertJsonPath('optional_endpoints.2.capability', 'cart_create');
         $this->assertStringNotContainsString('shared_secret', $response->getContent());
     }
 
