@@ -9,15 +9,68 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\CommerceAttributionService;
 use App\Services\ShopifyClient;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 class CommerceAttributionTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_attribution_migration_preserves_legacy_tables_and_recovers_from_a_partial_run(): void
+    {
+        Schema::disableForeignKeyConstraints();
+        Schema::dropIfExists('commerce_attribution_events');
+        Schema::dropIfExists('commerce_attribution_orders');
+        Schema::dropIfExists('commerce_attributions');
+        Schema::enableForeignKeyConstraints();
+        Schema::create('commerce_attributions', function (Blueprint $table): void {
+            $table->id();
+            $table->uuid('token');
+            $table->unsignedBigInteger('agent_id');
+            $table->unsignedBigInteger('conversation_id');
+            $table->unsignedBigInteger('commerce_connection_id')->nullable();
+            $table->string('status', 30)->default('initiated');
+            $table->timestamps();
+        });
+        Schema::create('commerce_attribution_events', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('commerce_attribution_id');
+            $table->string('provider_event_id', 191);
+            $table->string('type', 40);
+            $table->timestamps();
+        });
+        \DB::table('commerce_attributions')->insert([
+            'id' => 77,
+            'token' => '9afae51c-bfc4-4878-83db-686785d3dd2a',
+            'agent_id' => 1,
+            'conversation_id' => 1,
+            'status' => 'initiated',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        \DB::table('commerce_attribution_events')->insert([
+            'id' => 88,
+            'commerce_attribution_id' => 77,
+            'provider_event_id' => 'legacy-event',
+            'type' => 'converted',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $migration = require database_path('migrations/2026_10_17_000045_create_commerce_attribution_tables.php');
+        $migration->up();
+
+        $this->assertTrue(Schema::hasColumns('commerce_attributions', ['attribution_key', 'source_type', 'destination_url']));
+        $this->assertTrue(Schema::hasColumns('commerce_attribution_events', ['provider', 'event_type', 'payload_hash']));
+        $this->assertTrue(Schema::hasTable('commerce_attribution_orders'));
+        $this->assertDatabaseHas('commerce_attributions_legacy_20261017', ['id' => 77]);
+        $this->assertDatabaseHas('commerce_attribution_events_legacy_20261017', ['id' => 88]);
+    }
 
     public function test_chat_product_link_records_an_anonymous_click_and_preserves_utm_attribution(): void
     {
