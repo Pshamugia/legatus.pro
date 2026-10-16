@@ -28,7 +28,13 @@ class PublicProductAvailabilityVerifier
             $body = $response->body();
             $description = $this->ingestion->productDescriptionFromHtml($body);
             if ($description !== '') {
-                $product->update(['description' => $description]);
+                $metadata = $product->metadata ?? [];
+                foreach ((array) data_get($metadata, 'localized', []) as $language => $localized) {
+                    if ($this->samePageUrl(data_get($localized, 'product_url'), $url)) {
+                        $metadata['localized'][$language]['description'] = $description;
+                    }
+                }
+                $product->update(['description' => $description, 'metadata' => $metadata]);
             }
             $origin = (parse_url($url, PHP_URL_SCHEME) ?: 'https').'://'.parse_url($url, PHP_URL_HOST);
             $available = $this->explicitPageAvailability($body);
@@ -160,5 +166,14 @@ class PublicProductAvailabilityVerifier
 
         return Str::lower((string) parse_url($url, PHP_URL_HOST))
             .rtrim((string) parse_url($url, PHP_URL_PATH), '/');
+    }
+
+    private function samePageUrl(mixed $candidate, string $verifiedUrl): bool
+    {
+        if (! is_string($candidate)) {
+            return false;
+        }
+
+        return rtrim($candidate, '/') === rtrim($verifiedUrl, '/');
     }
 }

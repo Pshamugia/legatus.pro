@@ -1442,6 +1442,10 @@ class SocialMediaSchedulerTest extends TestCase
         $details = $this->product('ჭიათურა', 'Books', 1);
         $details['description'] = 'Navigation cart delivery and unrelated full page text.';
         $details['metadata']['product_url'] = 'https://example.com/books/chiatura/142';
+        $details['metadata']['localized']['Georgian'] = [
+            'product_url' => 'https://example.com/books/chiatura/142',
+            'description' => 'Truncated localized description that stops in the middle of a longer verified source text',
+        ];
         $product = $agent->products()->create($details);
         Http::fake([
             'https://example.com/books/chiatura/142' => Http::response(
@@ -1467,6 +1471,94 @@ class SocialMediaSchedulerTest extends TestCase
             'ეკონომიკურ-გეოგრაფიული სამეცნიერო ნარკვევი ჭიათურის შესახებ',
             $product->fresh()->description,
         );
+        $this->assertSame(
+            $product->fresh()->description,
+            data_get($product->fresh()->metadata, 'localized.Georgian.description'),
+        );
+    }
+
+    public function test_incomplete_verified_description_uses_title_only_fallback_and_never_calls_ai(): void
+    {
+        Http::fake();
+        [, $agent] = $this->tenant('truncated-social-description');
+        $product = $agent->products()->create($this->product('Complete Product Title', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'preparing',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => 'This verified source starts normally with several factual catalogue details, continues as a long prose paragraph, and then stops unexpectedly in the middle of an unfinished wor',
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => '',
+            'copy_mode' => 'ai',
+        ]);
+        $copywriter = app(SocialMediaAiCopywriter::class);
+
+        try {
+            $copywriter->generate($post);
+            $this->fail('A truncated verified description must not be sent to AI.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('truncated source', $exception->getMessage());
+        }
+
+        $this->assertSame(
+            $product->name."\n\n".data_get($product->metadata, 'product_url'),
+            $copywriter->verifiedFallback($post),
+        );
+        Http::assertNothingSent();
+    }
+
+    public function test_ai_copywriter_rewrites_a_caption_that_ends_mid_sentence(): void
+    {
+        [, $agent] = $this->tenant('incomplete-ai-caption');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('Verified Product', 'General', 3);
+        $details['description'] = 'A complete verified description explains the product and its documented background.';
+        $product = $agent->products()->create($details);
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'preparing',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => '',
+            'copy_mode' => 'ai',
+        ]);
+        $incomplete = 'The verified product has a documented background and its story continues in the';
+        $complete = 'The verified product has a documented background. Discover its complete story.';
+        $safeAudit = [
+            'supported' => true,
+            'unsupported_fragments' => [],
+            'distinct_from_recent' => true,
+            'similarity_reason' => '',
+            'core_identity_preserved' => true,
+            'identity_reason' => '',
+        ];
+        Http::fake(['https://api.openai.com/v1/responses' => Http::sequence()
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $incomplete])]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($safeAudit)]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $complete])]]]]])
+            ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode($safeAudit)]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringContainsString($complete, $caption);
+        $this->assertStringNotContainsString($incomplete, $caption);
+        Http::assertSentCount(4);
+        Http::assertSent(fn ($request): bool => str_contains(
+            (string) data_get($request->data(), 'input.0.content.0.text'),
+            'The previous draft was incomplete',
+        ));
     }
 
     public function test_ai_copywriter_refuses_to_generate_from_a_title_without_a_verified_description(): void

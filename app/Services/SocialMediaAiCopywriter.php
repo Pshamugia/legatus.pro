@@ -14,8 +14,12 @@ class SocialMediaAiCopywriter
     {
         $model = (string) config('services.openai.social_media_model', 'gpt-5.6-luna');
         $facts = $this->verifiedFacts($post);
-        if (blank(data_get($facts, 'description.value'))) {
+        $description = (string) data_get($facts, 'description.value', '');
+        if (blank($description)) {
             throw new \RuntimeException('AI Copywriter requires a verified product description and will not write from the title alone.');
+        }
+        if (! $this->descriptionAppearsComplete($description)) {
+            throw new \RuntimeException('AI Copywriter requires a complete verified product description and will not write from a truncated source.');
         }
         $recentCaptions = $this->recentCaptions($post);
         $generation = $this->requestCaption($post, $facts, $model, $recentCaptions);
@@ -25,8 +29,9 @@ class SocialMediaAiCopywriter
         $groundingFailure = $this->descriptionGroundingFailure($verification['caption'], $facts);
         $protectedReferenceFailure = $this->protectedReferenceFailure($verification['caption'], $facts);
         $meaningfulFailure = ! $this->hasMeaningfulCopy($verification['caption']);
+        $completionFailure = $this->completionFailure($verification['caption']);
 
-        if ($meaningfulFailure || $diversityFailure !== null || $identityFailure !== null || $groundingFailure !== null || $protectedReferenceFailure !== null) {
+        if ($meaningfulFailure || $completionFailure !== null || $diversityFailure !== null || $identityFailure !== null || $groundingFailure !== null || $protectedReferenceFailure !== null) {
             $retry = $this->requestCaption(
                 $post,
                 $facts,
@@ -38,9 +43,11 @@ class SocialMediaAiCopywriter
                     ? 'The previous draft obscured or misrepresented the product’s verified nature: '.$identityFailure.' Write a new caption that makes its actual type, form, or purpose clear from the source description without inventing contents or benefits.'
                     : ($meaningfulFailure
                         ? 'The previous draft lost its meaningful copy during factual review. Write a completely new, product-specific caption using only the verified evidence and omit every uncertain attribute.'
+                        : ($completionFailure !== null
+                            ? 'The previous draft was incomplete: '.$completionFailure.' Rewrite the complete caption from the beginning. Every sentence and word must be finished; never stop mid-sentence or mid-word.'
                         : ($groundingFailure !== null
                             ? 'The previous draft was based on the title instead of the verified description: '.$groundingFailure.' Rewrite it around concrete details that are actually present in the description. Beautify and adapt those details for social media, but do not invent a plot, theme, symbolism, benefit, or product property.'
-                            : 'The previous draft was too similar to earlier posts: '.$diversityFailure.' Use a fundamentally different opening, narrative angle, sentence construction, progression, and invitation. Do not merely replace words with synonyms.'))),
+                            : 'The previous draft was too similar to earlier posts: '.$diversityFailure.' Use a fundamentally different opening, narrative angle, sentence construction, progression, and invitation. Do not merely replace words with synonyms.')))),
             );
             $retryVerification = $this->sanitizeCaption($post, $retry['caption'], $facts, $recentCaptions, $model);
             $generation['input_tokens'] += $retry['input_tokens'];
@@ -55,6 +62,7 @@ class SocialMediaAiCopywriter
         }
 
         if (! $this->hasMeaningfulCopy($verification['caption'])
+            || $this->completionFailure($verification['caption']) !== null
             || $this->diversityFailure($verification['caption'], $recentCaptions, $verification) !== null
             || $this->identityFailure($verification) !== null
             || $this->descriptionGroundingFailure($verification['caption'], $facts) !== null
@@ -84,6 +92,9 @@ class SocialMediaAiCopywriter
         }
 
         $description = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $post->description)) ?? '');
+        if (! $this->descriptionAppearsComplete($description)) {
+            $description = '';
+        }
         $body = $description === '' ? $title : $title."\n\n".$description;
 
         try {
@@ -171,6 +182,7 @@ class SocialMediaAiCopywriter
 Write one {$platform}
 Tone: {$tone}
 Language: {$language}.
+Write a complete response. Every sentence and word must be finished; never end mid-sentence, mid-word, after a dangling conjunction, or with a truncation marker.
 Write the complete caption as natural, original marketing copy grounded primarily in the verified description; the title identifies the product but is not a source from which to guess its contents. Select at least two concrete, distinctive details from the description, preserve their factual meaning, and reshape them into fluent social-media copy instead of copying the full description or presenting a specification list. Make its verified type, form, or purpose clear to a reader; do not let an evocative title or mood replace what the item actually is. Capture only a distinctive subject, idea, use, or mood explicitly supported by the verified description. When the description is brief, use only the detail it supports and keep the copy concise: do not invent themes, contents, symbolism, plot, benefits, or abstract claims to reach a length. Use a few relevant emojis naturally and finish with a clear invitation. Put any hashtags on a separate final line.
 Every product must have its own creative concept and composition. The recent captions below are negative references, not style examples: do not reuse their opening words, hook formula, sentence-by-sentence scaffold, rhetorical progression, emoji placement, closing invitation, or hashtag pattern. Do not preserve an earlier structure while merely swapping product details or synonyms. Silently choose a different product-specific angle and a visibly different opening and paragraph structure before writing.
 Never use stock phrases such as "a new choice from our catalog", "new from our catalog", or "discover this product". Never output database-style labels or a specification list such as "Category:", "Price:", or a generic taxonomy value such as "Books" merely to fill space.
@@ -527,6 +539,44 @@ PROMPT;
         $copy = preg_replace('/[^\pL\pN]+/u', '', $copy) ?? '';
 
         return mb_strlen($copy) >= 20;
+    }
+
+    private function completionFailure(string $caption): ?string
+    {
+        $body = trim(preg_replace('~https?://\S+|#[\pL\pN_]+~u', ' ', strip_tags($caption)) ?? '');
+        $body = trim(preg_replace('/\s+/u', ' ', $body) ?? '');
+        if ($body === '') {
+            return 'The caption has no complete body.';
+        }
+        if (preg_match('/(?:\.{3}|…|[,;:–—-])\s*[”"»’\)\]]*$/u', $body) === 1) {
+            return 'The caption ends with a dangling or truncated phrase.';
+        }
+        if (preg_match('/[\pL\pN]\s*[”"»’\)\]]*$/u', $body) === 1) {
+            return 'The caption ends without a completed sentence.';
+        }
+
+        return null;
+    }
+
+    private function descriptionAppearsComplete(string $description): bool
+    {
+        $description = trim(preg_replace('/\s+/u', ' ', strip_tags($description)) ?? '');
+        if ($description === '') {
+            return false;
+        }
+        if (preg_match('/(?:\.{3}|…|[,;:–—-])\s*[”"»’\)\]]*$/u', $description) === 1) {
+            return false;
+        }
+        if (preg_match('/[.!?]\s*[”"»’\)\]]*$/u', $description) === 1) {
+            return true;
+        }
+
+        // A compact catalogue label may be complete without prose punctuation.
+        // A sentence-like source ending in a word is treated as truncated even
+        // when it happens to be shorter than the usual description length.
+        preg_match_all('/[\pL\pN]+/u', $description, $words);
+
+        return mb_strlen($description) <= 120 && count($words[0]) <= 8;
     }
 
     private function renderCaption(SocialMediaPost $post, string $caption): string
