@@ -526,8 +526,33 @@ class OpenAiSalesOrchestrator
                 }
                 $semanticResolution = collect($used)->firstWhere('name', 'resolve_catalog_context');
                 if (is_array($semanticResolution) && in_array($toolName, ['search_products', 'recommend_products'], true)) {
-                    $args['query'] = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
+                    $resolvedCatalogQuery = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
                     $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
+                    $directExactLookup = data_get($semanticResolution, 'result.catalog_match_scope') === 'exact_identity'
+                        && data_get($semanticResolution, 'result.recommendation_scope', 'none') === 'none';
+                    if ($toolName === 'search_products') {
+                        $args['query'] = $resolvedCatalogQuery;
+                    } elseif ($directExactLookup) {
+                        $groundedAlternative = $this->groundedAlternativeQuery(
+                            $agent,
+                            (string) ($args['query'] ?? ''),
+                            collect($used),
+                        );
+                        $args['query'] = $groundedAlternative ?? $resolvedCatalogQuery;
+                        $args['category'] = null;
+                        if ($groundedAlternative !== null) {
+                            $args['_verified_alternative_context'] = $groundedAlternative;
+                            $args['exclude_product_ids'] = collect($args['exclude_product_ids'] ?? [])
+                                ->merge($this->exactIdentityProductIds(collect($used)))
+                                ->map(fn ($id): int => (int) $id)
+                                ->filter()
+                                ->unique()
+                                ->values()
+                                ->all();
+                        }
+                    } else {
+                        $args['query'] = $resolvedCatalogQuery;
+                    }
                     if ($toolName === 'search_products') {
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
                         $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
@@ -547,6 +572,32 @@ class OpenAiSalesOrchestrator
                     $args['_required_name_identity'] = $explicitNameIdentity;
                 }
                 if ($toolName === 'recommend_products') {
+                    $exactIdentityIds = $this->exactIdentityProductIds(collect($used));
+                    if ($exactIdentityIds->isNotEmpty() && blank($args['_verified_alternative_context'] ?? null)) {
+                        $groundedAlternative = $this->groundedAlternativeQuery(
+                            $agent,
+                            (string) ($args['query'] ?? ''),
+                            collect($used),
+                        );
+                        $exactIdentityQuery = collect($used)
+                            ->where('name', 'search_products')
+                            ->filter(fn (array $usedCall): bool => data_get($usedCall, 'arguments._identity_match') === true)
+                            ->pluck('arguments.query')
+                            ->filter(fn ($query): bool => is_string($query) && trim($query) !== '')
+                            ->last();
+                        $args['query'] = $groundedAlternative ?? (string) $exactIdentityQuery;
+                        $args['category'] = null;
+                        if ($groundedAlternative !== null) {
+                            $args['_verified_alternative_context'] = $groundedAlternative;
+                            $args['exclude_product_ids'] = collect($args['exclude_product_ids'] ?? [])
+                                ->merge($exactIdentityIds)
+                                ->map(fn ($id): int => (int) $id)
+                                ->filter()
+                                ->unique()
+                                ->values()
+                                ->all();
+                        }
+                    }
                     // The model owns the conversational interpretation, but a
                     // verified shopping promise must not collapse into a
                     // single arbitrary card. Preserve server-parsed numeric
@@ -1295,6 +1346,18 @@ class OpenAiSalesOrchestrator
 
         $draftProductIds = collect($draft['product_ids'] ?? [])
             ->map(fn ($id): int => (int) $id)->filter()->unique();
+        $verifiedAlternativeIds = $used
+            ->where('name', 'recommend_products')
+            ->filter(fn (array $call): bool => filled(data_get($call, 'arguments._verified_alternative_context')))
+            ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
+            ->filter(fn ($product): bool => is_array($product)
+                && (int) ($product['id'] ?? 0) > 0
+                && ($product['available'] ?? true) === true)
+            ->pluck('id')->map(fn ($id): int => (int) $id)->unique();
+        if ($draftProductIds->intersect($verifiedAlternativeIds)->isNotEmpty()
+            && $draftProductIds->diff($searchResults->keys()->merge($verifiedAlternativeIds))->isEmpty()) {
+            return null;
+        }
         if ($draftProductIds->isNotEmpty()
             && $draftProductIds->diff($searchResults->keys()->map(fn ($id): int => (int) $id))->isEmpty()
             && ! $this->isAvailabilityCorrectionMessage($customerMessage)) {
@@ -1355,12 +1418,9 @@ class OpenAiSalesOrchestrator
                     : "დიახ, „{$name}“ საიტზე ხელმისაწვდომია.{$priceText}")
                 : "Yes, {$name} is currently available on the website.{$priceText}";
         } else {
-            $correction = $this->isAvailabilityCorrectionMessage($customerMessage);
             $text = $georgian
                 ? "„{$name}“ საიტზე იძებნება, თუმცა ამჟამად მარაგი ამოწურულია."
-                    .($correction ? '' : ' თუ გსურთ, მსგავს ხელმისაწვდომ პროდუქტებსაც შემოგთავაზებთ.')
-                : "{$name} is listed on the website, but it is currently out of stock."
-                    .($correction ? '' : ' If you like, I can suggest similar available alternatives.');
+                : "{$name} is listed on the website, but it is currently out of stock.";
         }
 
         $claims = [[
@@ -2071,7 +2131,7 @@ class OpenAiSalesOrchestrator
         $assistantIdentity .= '. Customer photo or image recognition is not available in the current conversation tools. Never ask the customer to send or upload a cover, label, product photo, screenshot, barcode image, or ISBN photo so that you can identify or search for a product. If the current text is insufficient, ask for one text attribute that this tenant catalog actually contains';
         $assistantIdentity .= $this->catalogIdentifierCapabilityInstructions($agent);
         $assistantIdentity .= '. Never offer, promise, or solicit customer data for an action that is not represented by an available tool. Legatus cannot place or finalize a connected-store order, accept payment, or collect recipient, shipping-address, card, or payment details for checkout. When a customer wants to buy, direct them to the verified product link and explain that they must complete the business website checkout there. If a customer nevertheless sends order or shipping details, do not repeat or treat them as an order or lead; briefly explain that checkout must be completed on the business website';
-        $assistantIdentity .= '. Sold-out replacement rules override any more permissive recommendation wording below: never recommend an unavailable product or present it as purchasable. After verifying a sold-out item, call recommend_products with that item’s verified category, genres, tags, or product type as mandatory taxonomy constraints. Offer only verified available alternatives from the same or nearest trustworthy taxonomy; never drift to an unrelated category merely to return a result. If taxonomy is missing or no matching available alternative exists, say so instead of guessing';
+        $assistantIdentity .= '. Sold-out replacement rules override any more permissive recommendation wording below: never recommend an unavailable product or present it as purchasable. Do not offer, promise, or ask whether the customer wants alternatives unless a successful tenant catalog tool in the current turn has already returned genuinely relevant available alternatives. Use the complete dialogue and the sold-out item’s verified attributes to choose the strongest meaningful relationship for an alternative—such as the same author, creator, brand, series, genre, taxonomy, category, theme, or product type—without assuming that author or category is always the right relationship. Call recommend_products with that one verified relationship as a mandatory constraint before mentioning alternatives. Offer only verified available alternatives from that contextual relationship; never drift to an unrelated attribute merely to return a result. If no matching available alternative exists, state only the sold-out fact instead of offering a search or guessing';
         $assistantIdentity .= '. Understand catalogue targets semantically before searching. When one request contains multiple independently searchable targets, call search_products separately for each target and combine only the verified results. Never build one query by joining independent targets with conjunctions, punctuation, or a broader umbrella term. A multiword proper name, title, brand, or phrase such as Leonardo da Vinci is one target unless the conversation clearly requests its parts separately';
 
         return "You are {$assistantIdentity}. If asked who you are, identify yourself as {$customerFacingIdentity}; never present the platform name Legatus as the business or chat identity. Legatus may be mentioned only as the underlying technology provider."
@@ -2364,9 +2424,14 @@ class OpenAiSalesOrchestrator
                 data_get($call, 'result.unavailable_products', []),
             ))
             ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique();
+        $verifiedContextualAlternativeIds = $successful
+            ->where('name', 'recommend_products')
+            ->filter(fn (array $call): bool => filled(data_get($call, 'arguments._verified_alternative_context')))
+            ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
+            ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique();
         if ($hasExactIdentityResolution
             && $exactIdentityIds->isNotEmpty()
-            && $claimedProductIds->diff($exactIdentityIds)->isNotEmpty()) {
+            && $claimedProductIds->diff($exactIdentityIds->merge($verifiedContextualAlternativeIds))->isNotEmpty()) {
             return 'An exact product request included products outside the verified exact-identity search result.';
         }
         $verifiedSearchMatches = $successful
@@ -2404,6 +2469,9 @@ class OpenAiSalesOrchestrator
         }
         if ($this->claimsShortlistIsComplete($text, $successful)) {
             return 'The response presented a limited catalog shortlist as the total number of matching products.';
+        }
+        if ($this->offersUnverifiedAlternatives($text, $successful)) {
+            return 'The response offered to find alternatives before a successful tenant recommendation had verified that suitable available alternatives exist.';
         }
         if ($reason = $this->unsupportedActionReason($agent, $text)) {
             return $reason;
@@ -2844,6 +2912,24 @@ class OpenAiSalesOrchestrator
         }
 
         return null;
+    }
+
+    private function offersUnverifiedAlternatives(string $text, Collection $successful): bool
+    {
+        $offersAlternatives = preg_match(
+            '/(?:\b(?:if\s+you(?:\s+would|\'d)?\s+like|if\s+you\s+want|would\s+you\s+like|i\s+can|we\s+can)\b.{0,120}\b(?:suggest|recommend|find|show)\p{L}*.{0,80}\b(?:similar|alternative|other)\p{L}*|\b(?:similar|alternative|other)\p{L}*.{0,80}\b(?:i|we)\s+(?:can|will)\s+(?:suggest|recommend|find|show)\p{L}*|(?:თუ\s+(?:გსურთ|გინდა|ისურვებთ)|შემიძლია|შეგვიძლია).{0,120}(?:შემოგთავაზ|გირჩ|მოგიძებნ|გიჩვენ)\p{L}*|(?:მსგავს|ალტერნატ|სხვა)\p{L}*.{0,100}(?:შემოგთავაზ|მოგიძებნ|გიჩვენ|გირჩევ)\p{L}*)/iu',
+            $text,
+        ) === 1;
+        if (! $offersAlternatives) {
+            return false;
+        }
+
+        return ! $successful
+            ->where('name', 'recommend_products')
+            ->contains(fn (array $call): bool => collect(data_get($call, 'result.recommendations', []))
+                ->contains(fn ($product): bool => is_array($product)
+                    && (int) ($product['id'] ?? 0) > 0
+                    && ($product['available'] ?? true) === true));
     }
 
     /**
@@ -3294,6 +3380,85 @@ class OpenAiSalesOrchestrator
                     && mb_substr($queryToken, 0, 4) === mb_substr($messageToken, 0, 4);
             });
         });
+    }
+
+    private function groundedAlternativeQuery(Agent $agent, string $requestedQuery, Collection $used): ?string
+    {
+        $requestedTokens = $this->catalogTokens($requestedQuery);
+        if ($requestedTokens->isEmpty()) {
+            return null;
+        }
+
+        $productIds = $this->exactIdentityProductIds($used);
+        if ($productIds->isEmpty()) {
+            return null;
+        }
+
+        $attributes = $agent->customerProducts()
+            ->whereKey($productIds)
+            ->get(['category', 'metadata'])
+            ->flatMap(function ($product): array {
+                $metadata = (array) $product->metadata;
+
+                return collect([
+                    $product->category,
+                    data_get($metadata, 'author'),
+                    data_get($metadata, 'creator'),
+                    data_get($metadata, 'brand'),
+                    data_get($metadata, 'manufacturer'),
+                    data_get($metadata, 'series'),
+                    data_get($metadata, 'product_type'),
+                    data_get($metadata, 'type'),
+                    ...(array) data_get($metadata, 'genres', []),
+                    ...(array) data_get($metadata, 'taxonomy', []),
+                    ...(array) data_get($metadata, 'themes', []),
+                    ...(array) data_get($metadata, 'tags', []),
+                ])->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
+                    ->map(fn ($value): string => trim((string) $value))
+                    ->all();
+            })
+            ->unique(fn (string $attribute): string => Str::lower($attribute))
+            ->sortByDesc(fn (string $attribute): int => mb_strlen($attribute))
+            ->values();
+
+        return $attributes->first(function (string $attribute) use ($requestedTokens): bool {
+            $attributeTokens = $this->catalogTokens($attribute);
+
+            return $attributeTokens->isNotEmpty()
+                && $attributeTokens->every(fn (string $attributeToken): bool => $requestedTokens->contains(
+                    fn (string $requestedToken): bool => $attributeToken === $requestedToken
+                        || (mb_strlen($attributeToken) >= 5
+                            && mb_strlen($requestedToken) >= 5
+                            && mb_substr($attributeToken, 0, 4) === mb_substr($requestedToken, 0, 4)),
+                ));
+        });
+    }
+
+    private function exactIdentityProductIds(Collection $used): Collection
+    {
+        return $used
+            ->where('name', 'search_products')
+            ->filter(fn (array $call): bool => data_get($call, 'result.ok') === true
+                && data_get($call, 'arguments._identity_match') === true)
+            ->flatMap(fn (array $call) => array_merge(
+                data_get($call, 'result.products', []),
+                data_get($call, 'result.unavailable_products', []),
+            ))
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+    }
+
+    private function catalogTokens(string $value): Collection
+    {
+        preg_match_all('/[\pL\pN]+/u', Str::lower($value), $matches);
+
+        return collect($matches[0] ?? [])
+            ->filter(fn (string $token): bool => ! ctype_digit($token) && mb_strlen($token) >= 3)
+            ->unique()
+            ->values();
     }
 
     private function explicitQuantityConstraint(string $message): ?int

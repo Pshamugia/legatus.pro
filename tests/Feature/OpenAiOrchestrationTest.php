@@ -2447,6 +2447,90 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('unsupported order-fulfilment action', $reason);
     }
 
+    public function test_guardrail_rejects_an_alternative_offer_before_relevant_products_are_verified(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'unverified-alternative-offer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+
+        $reason = $method->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, [
+            'text' => 'თუ გსურთ, მსგავს ხელმისაწვდომ პროდუქტებსაც შემოგთავაზებთ.',
+            'intent' => 'conversation', 'confidence' => 1,
+            'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+            'sources' => [], 'factual_claims' => [],
+        ], collect());
+
+        $this->assertStringContainsString('before a successful tenant recommendation', $reason);
+    }
+
+    public function test_sold_out_alternatives_use_a_verified_contextual_attribute_before_they_are_shown(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'verified-contextual-alternative', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $soldOut = $agent->products()->create([
+            'name' => 'Unavailable exact title', 'sku' => 'CONTEXT-SOLD-OUT',
+            'search_text' => 'Unavailable exact title Verified Author',
+            'price' => 20, 'stock' => 0, 'is_active' => true,
+            'metadata' => ['author' => 'Verified Author', 'genres' => ['Verified Genre']],
+        ]);
+        $alternative = $agent->products()->create([
+            'name' => 'Another verified work', 'sku' => 'CONTEXT-AVAILABLE',
+            'search_text' => 'Another verified work Verified Author',
+            'price' => 22, 'stock' => 1, 'is_active' => true,
+            'metadata' => ['author' => 'Verified Author', 'genres' => ['Different Genre']],
+        ]);
+        $searchResult = [
+            'id' => $soldOut->id, 'name' => $soldOut->name, 'author' => 'Verified Author',
+            'genres' => ['Verified Genre'], 'category' => null, 'price' => 20,
+            'available' => false, 'stock_precision' => 'exact', 'stock' => 0,
+        ];
+        $alternativeResult = [
+            'id' => $alternative->id, 'name' => $alternative->name, 'author' => 'Verified Author',
+            'genres' => ['Different Genre'], 'category' => null, 'price' => 22,
+            'available' => true, 'stock_precision' => 'exact', 'stock' => 1,
+        ];
+        $used = collect([
+            ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
+                'ok' => true, 'catalog_match_scope' => 'exact_identity', 'recommendation_scope' => 'none',
+            ]],
+            ['name' => 'search_products', 'arguments' => ['query' => $soldOut->name, '_identity_match' => true], 'result' => [
+                'ok' => true, 'products' => [], 'unavailable_products' => [$searchResult],
+            ]],
+            ['name' => 'check_stock', 'arguments' => ['product_id' => $soldOut->id], 'result' => [
+                'ok' => true, 'product_id' => $soldOut->id, 'name' => $soldOut->name,
+                'available' => false, 'stock_precision' => 'exact', 'stock' => 0, 'price' => 20,
+            ]],
+            ['name' => 'recommend_products', 'arguments' => [
+                'query' => 'Verified Author', '_verified_alternative_context' => 'Verified Author',
+            ], 'result' => ['ok' => true, 'recommendations' => [$alternativeResult]]],
+        ]);
+        $orchestrator = app(OpenAiSalesOrchestrator::class);
+        $groundedQuery = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'groundedAlternativeQuery');
+        $availabilityReply = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'verifiedAvailabilityReply');
+        $guardrail = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $draft = [
+            'text' => "{$soldOut->name} is out of stock. I found another work by the same author: {$alternative->name}.",
+            'intent' => 'recommendation', 'confidence' => 1,
+            'handoff' => false, 'escalation_reason' => null,
+            'product_ids' => [$soldOut->id, $alternative->id], 'sources' => [],
+            'factual_claims' => collect([$soldOut->id, $alternative->id])->map(fn (int $id): array => [
+                'type' => 'product', 'product_id' => $id,
+                'amount' => null, 'quantity' => null, 'reference' => null,
+            ])->all(),
+        ];
+
+        $this->assertSame('Verified Author', $groundedQuery->invoke($orchestrator, $agent, 'other books by Verified Author', $used));
+        $this->assertNull($groundedQuery->invoke($orchestrator, $agent, 'Unrelated Creator', $used));
+        $this->assertNull($availabilityReply->invoke($orchestrator, $soldOut->name, $used, $draft));
+        $this->assertNull($guardrail->invoke($orchestrator, $agent, $conversation, $draft, $used));
+    }
+
     public function test_guardrail_rejects_promised_photo_identification_and_an_identifier_missing_from_the_tenant_catalog(): void
     {
         $this->seed();
@@ -2740,6 +2824,8 @@ class OpenAiOrchestrationTest extends TestCase
 
         $this->assertStringContainsString($product->name, $response->json('text'));
         $this->assertStringContainsString('out of stock', $response->json('text'));
+        $this->assertStringNotContainsString('suggest', $response->json('text'));
+        $this->assertStringNotContainsString('alternative', $response->json('text'));
         $this->assertNotContains('server_guardrail', $response->json('tools_used'));
         Http::assertSentCount(4);
     }
