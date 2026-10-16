@@ -34,7 +34,7 @@ APP_URL=https://legatus.pro
 OPENAI_MODEL=gpt-5.6-sol
 LEGATUS_OFFLINE_FALLBACK=false
 QUEUE_CONNECTION=database
-DB_QUEUE_RETRY_AFTER=180
+DB_QUEUE_RETRY_AFTER=600
 LEGATUS_PRIVACY_EMAIL=privacy@legatus.pro
 ```
 
@@ -59,7 +59,7 @@ Only after the script URL is verified should Bukinistebi set `LEGATUS_WIDGET_ENA
 Meta replies require a continuously running queue worker; the scheduler alone is not a substitute. Run the worker under Supervisor/systemd or the hosting provider's persistent-process feature:
 
 ```bash
-php artisan queue:work database --queue=default --sleep=2 --tries=3 --timeout=80 --max-time=3600
+php artisan queue:work database --queue=default --sleep=2 --tries=3 --timeout=480 --max-time=3600
 ```
 
 Restart workers after every release. Run `php artisan schedule:run` every minute for catalogue reconciliation, outbox recovery, privacy cleanup, and reservation expiry.

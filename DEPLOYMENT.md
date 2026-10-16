@@ -118,7 +118,7 @@ SESSION_HTTP_ONLY=true
 SESSION_SAME_SITE=lax
 CACHE_STORE=database
 QUEUE_CONNECTION=database
-DB_QUEUE_RETRY_AFTER=180
+DB_QUEUE_RETRY_AFTER=600
 ```
 
 In the Meta App Dashboard, enable the Instagram webhook object and subscribe it to `messages`, `messaging_postbacks`, and `messaging_seen` before onboarding businesses. This is a one-time platform-owner configuration: Instagram topics cannot be configured through the Facebook Page `/subscribed_apps` endpoint. Legatus uses that endpoint only to install the app on the selected Page with Page-supported fields.
@@ -184,10 +184,10 @@ The current release also schedules commerce reconciliation and recovery of eligi
 Run the database queue continuously under Supervisor, systemd, or the host's persistent-process manager:
 
 ```bash
-php artisan queue:work database --queue=channels,default --sleep=2 --tries=3 --timeout=80 --max-time=3600
+php artisan queue:work database --queue=channels,default --sleep=2 --tries=3 --timeout=480 --max-time=3600
 ```
 
-The worker timeout must remain lower than `DB_QUEUE_RETRY_AFTER` (recommended: 80 versus 180 seconds). Monitor `jobs` and `failed_jobs`; a healthy webhook returning HTTP 200 does not prove a reply was processed. If shared hosting cannot run a persistent process, use a provider-supported worker service before enabling Meta traffic—cron-starting short workers is a degraded fallback, not the production target.
+The worker and longest per-job timeout must remain lower than `DB_QUEUE_RETRY_AFTER` (recommended: 480 versus 600 seconds). Monitor `jobs` and `failed_jobs`; a healthy webhook returning HTTP 200 does not prove a reply was processed. If shared hosting cannot run a persistent process, use a provider-supported worker service before enabling Meta traffic—cron-starting short workers is a degraded fallback, not the production target.
 
 ## 6. Reverse proxy and HTTPS
 
