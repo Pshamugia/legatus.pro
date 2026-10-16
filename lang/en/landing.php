@@ -16,6 +16,10 @@ return [
         'problem' => 'Customers need an answer at the moment they are ready to buy. You cannot always be in the chat.',
         'solution' => 'Legatus answers questions about products, prices, and stock on your behalf, explains your terms, and helps customers choose the right product.',
         'channels' => 'Facebook Messenger, Instagram, WhatsApp, and website chat — your assistant is where your customers message you.',
+        'comments_title' => 'Public comments get an answer too.',
+        'comments_body' => 'Legatus can answer safe Facebook and Instagram product questions directly under the post using your verified business information. Sensitive or customer-specific cases stay in your Inbox for human review.',
+        'comments_facebook' => 'Facebook comments',
+        'comments_instagram' => 'Instagram comments',
         'script_title' => 'Your website needs only one small script.',
         'script_body' => 'Copy the ready-made Legatus code and add it to your website once — the website AI chat is ready. Facebook, Instagram, and WhatsApp are connected separately from Legatus.',
     ],
@@ -27,7 +31,7 @@ return [
     ],
     'social' => [
         'title' => 'Set the schedule once. Legatus handles daily posting.', 'problem' => 'An active page always needs fresh posts. Every post needs copy, an image, and publishing.', 'intro' => 'Legatus handles this work for you:',
-        'item_products' => 'Creates posts tailored to your products.', 'item_copy' => 'Writes descriptions in your preferred tone — simple, creative, or academic.', 'item_images' => 'Prepares images for social media.', 'item_publish' => 'Publishes on Facebook and Instagram according to your schedule.',
+        'item_products' => 'Creates posts tailored to your products.', 'item_copy' => 'Writes descriptions in your preferred tone — simple, creative, or academic.', 'item_images' => 'Prepares images for social media.', 'item_publish' => 'Publishes on Facebook and Instagram according to your schedule.', 'item_comments' => 'Answers safe Facebook and Instagram comments with verified information.',
         'closing' => 'You no longer need to prepare every post from scratch. You set the direction and schedule — Legatus handles the daily work.',
     ],
     'images' => [

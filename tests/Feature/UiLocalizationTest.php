@@ -42,6 +42,11 @@ class UiLocalizationTest extends TestCase
             ->assertSee('href="#pricing"', false)
             ->assertSee('ვებსაიტზე ჩასართავად მხოლოდ ერთი პატარა სკრიპტია საჭირო.')
             ->assertSee('Facebook Messenger, Instagram, WhatsApp და ვებსაიტის ჩატი')
+            ->assertSee('საჯარო კომენტარებსაც პასუხობს.')
+            ->assertSee('პროდუქტის შესახებ უსაფრთხო კითხვებს პირდაპირ პოსტის ქვეშ')
+            ->assertSee('Facebook კომენტარები')
+            ->assertSee('Instagram კომენტარები')
+            ->assertSee('უსაფრთხო კომენტარებს გადამოწმებული ინფორმაციით პასუხობს.')
             ->assertSee('გამოიყენე პროდუქტის ფოტო უცვლელად — ან გააფორმე AI Photo Editor-ით.')
             ->assertSee('პოსტში პირდაპირ გამოიყენებს კატალოგის ფოტოს, ყოველგვარი ვიზუალური ცვლილების გარეშე.')
             ->assertDontSee('მოურავი');
