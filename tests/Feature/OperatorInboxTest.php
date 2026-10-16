@@ -225,4 +225,53 @@ class OperatorInboxTest extends TestCase
         $this->assertSame('helpful', $messages->firstWhere('id', $helpful->id)['feedback']);
         $this->assertSame('unhelpful', $messages->firstWhere('id', $unhelpful->id)['feedback']);
     }
+
+    public function test_meta_comment_replies_are_visibly_separate_from_private_chat_replies(): void
+    {
+        $privateConversation = $this->conversation();
+        $agent = $privateConversation->agent;
+        $commentConversation = $agent->conversations()->create([
+            'visitor_id' => 'meta-comment:facebook:1:customer',
+            'customer_name' => 'Facebook customer',
+            'channel' => 'facebook_comment',
+            'status' => 'ai',
+            'intent' => 'product_search',
+            'context' => [
+                'source_type' => 'social_comment',
+                'provider' => 'facebook',
+                'reply_mode' => 'public_comment',
+            ],
+            'last_message_at' => now()->addSecond(),
+        ]);
+        $commentConversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'Is this product available?',
+        ]);
+        $assistant = $commentConversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'Yes, this product is currently available.',
+        ]);
+
+        $this->get('/app/inbox?conversation='.$commentConversation->id)
+            ->assertOk()
+            ->assertSee('Meta comments')
+            ->assertSee('Facebook · public Meta comment thread')
+            ->assertSee('Facebook commenter · public comment')
+            ->assertSee('Legatus · public reply on Facebook')
+            ->assertSee('public-comment-bubble', false);
+
+        $pollMessage = collect($this->getJson("/app/inbox/{$commentConversation->id}/poll")
+            ->assertOk()
+            ->assertJsonPath('public_comment', true)
+            ->assertJsonPath('provider', 'facebook')
+            ->json('messages'))
+            ->firstWhere('id', $assistant->id);
+        $this->assertSame('Legatus · public reply on Facebook', $pollMessage['display_role']);
+        $this->assertTrue($pollMessage['public_comment']);
+
+        $filtered = $this->get('/app/inbox?source=meta_comments')->assertOk();
+        $filteredConversations = $filtered->viewData('conversations');
+        $this->assertCount(1, $filteredConversations);
+        $this->assertSame($commentConversation->id, $filteredConversations->first()->id);
+    }
 }

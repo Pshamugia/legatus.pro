@@ -13,6 +13,7 @@ class InboxController extends Controller
     {
         $agent = $tenant->agent();
         $status = $request->string('status')->toString();
+        $source = $request->string('source')->toString();
         $customerConversations = $agent->conversations()->where('channel', '!=', 'eval');
         $needsHumanCount = (clone $customerConversations)->where('status', 'human')->count();
         $query = (clone $customerConversations)->with([
@@ -22,10 +23,13 @@ class InboxController extends Controller
         if (in_array($status, ['human', 'ai', 'closed'])) {
             $query->where('status', $status);
         }
+        if ($source === 'meta_comments') {
+            $query->whereIn('channel', ['facebook_comment', 'instagram_comment']);
+        }
         $conversations = $query->get();
         $selected = $request->filled('conversation') ? $conversations->firstWhere('id', (int) $request->conversation) : $conversations->first();
 
-        return view('inbox', compact('agent', 'conversations', 'selected', 'status', 'needsHumanCount'));
+        return view('inbox', compact('agent', 'conversations', 'selected', 'status', 'source', 'needsHumanCount'));
     }
 
     public function takeOver(Conversation $conversation, TenantContext $tenant)
@@ -99,6 +103,8 @@ class InboxController extends Controller
             ->map(fn ($message) => [
                 'id' => $message->id,
                 'role' => $message->role,
+                'display_role' => $this->displayRole($conversation, $message->role),
+                'public_comment' => data_get($conversation->context, 'source_type') === 'social_comment',
                 'content' => $message->content,
                 'confidence' => $message->confidence,
                 'feedback' => $message->role === 'assistant' ? $message->feedback : null,
@@ -113,6 +119,8 @@ class InboxController extends Controller
             'status' => $conversation->status,
             'assigned_to' => $conversation->assigned_to,
             'simulated' => str_starts_with($conversation->visitor_id, 'demo-'),
+            'public_comment' => data_get($conversation->context, 'source_type') === 'social_comment',
+            'provider' => str_replace('_comment', '', $conversation->channel),
             'messages' => $messages,
         ]);
     }
@@ -150,6 +158,22 @@ class InboxController extends Controller
             'failed' => 'Not delivered. Verify the channel connection before replying again.',
             'delivery_unknown' => 'Delivery is uncertain. Check the native Meta inbox before resending.',
             default => null,
+        };
+    }
+
+    private function displayRole(Conversation $conversation, string $role): string
+    {
+        if (data_get($conversation->context, 'source_type') !== 'social_comment') {
+            return $role === 'human' ? 'Human operator' : ucfirst($role);
+        }
+
+        $provider = ucfirst(str_replace('_comment', '', $conversation->channel));
+
+        return match ($role) {
+            'customer' => $provider.' commenter · public comment',
+            'assistant' => 'Legatus · public reply on '.$provider,
+            'human' => 'Human operator · public reply on '.$provider,
+            default => ucfirst($role).' · '.$provider.' comment thread',
         };
     }
 }
