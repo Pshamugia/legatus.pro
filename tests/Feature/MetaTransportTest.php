@@ -419,6 +419,59 @@ class MetaTransportTest extends TestCase
         Queue::assertPushed(SendMetaMessage::class, 1);
     }
 
+    public function test_inbound_jobs_wait_for_older_messages_from_the_same_customer(): void
+    {
+        Queue::fake();
+        config()->set('services.openai.key', null);
+        config()->set('legatus.offline_fallback_enabled', true);
+        $connection = $this->connection('facebook', 'page-ordered-inbound');
+        $older = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'ordered-mid-1',
+            'provider_sender_id' => 'ordered-customer',
+            'provider_recipient_id' => 'page-ordered-inbound',
+            'message_type' => 'text',
+            'status' => 'received',
+            'payload' => ['text' => 'Named product request'],
+            'received_at' => now()->subSeconds(2),
+        ]);
+        $newer = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'ordered-mid-2',
+            'provider_sender_id' => 'ordered-customer',
+            'provider_recipient_id' => 'page-ordered-inbound',
+            'message_type' => 'text',
+            'status' => 'received',
+            'payload' => ['text' => 'Follow-up stock request'],
+            'received_at' => now(),
+        ]);
+
+        (new ProcessMetaInboundMessage($newer->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+
+        $this->assertSame('received', $newer->fresh()->status);
+        $this->assertNull($newer->fresh()->conversation_id);
+
+        (new ProcessMetaInboundMessage($older->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+        (new ProcessMetaInboundMessage($newer->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
+
+        $this->assertSame('processed', $older->fresh()->status);
+        $this->assertSame('processed', $newer->fresh()->status);
+        $this->assertSame($older->fresh()->conversation_id, $newer->fresh()->conversation_id);
+        $this->assertSame(
+            ['Named product request', 'Follow-up stock request'],
+            $older->fresh()->conversation->messages()->where('role', 'customer')->orderBy('id')->pluck('content')->all(),
+        );
+    }
+
     public function test_completed_customer_exchange_is_recorded_without_a_meta_reply(): void
     {
         Queue::fake();

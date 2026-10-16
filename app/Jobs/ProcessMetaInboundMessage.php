@@ -31,7 +31,9 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
     public const TIMEOUT_SECONDS = 150;
 
-    public int $tries = 3;
+    public int $tries = 10;
+
+    public int $maxExceptions = 3;
 
     public int $timeout = self::TIMEOUT_SECONDS;
 
@@ -127,6 +129,16 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     return;
                 }
 
+                // Meta may deliver adjacent messages in separate webhooks and
+                // multiple queue workers can acquire those jobs out of order.
+                // Do not let a later turn become the conversation context
+                // before an older message from the same customer is handled.
+                if ($this->hasEarlierPendingInbound($record)) {
+                    $this->release(2);
+
+                    return;
+                }
+
                 $record->update([
                     'status' => 'processing',
                     'attempts' => $record->attempts + 1,
@@ -208,6 +220,30 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'processed_at' => now(),
                 ]);
             });
+    }
+
+    private function hasEarlierPendingInbound(ChannelMessage $record): bool
+    {
+        return ChannelMessage::query()
+            ->where('channel_connection_id', $record->channel_connection_id)
+            ->where('direction', 'inbound')
+            ->where('provider_sender_id', $record->provider_sender_id)
+            ->whereKeyNot($record->id)
+            ->whereIn('status', ['received', 'processing'])
+            ->where(function ($query) use ($record): void {
+                if ($record->received_at) {
+                    $query->where('received_at', '<', $record->received_at)
+                        ->orWhere(function ($sameTime) use ($record): void {
+                            $sameTime->where('received_at', $record->received_at)
+                                ->where('id', '<', $record->id);
+                        });
+
+                    return;
+                }
+
+                $query->where('id', '<', $record->id);
+            })
+            ->exists();
     }
 
     private function customerImageRecord(ChannelMessage $record): ?ChannelMessage

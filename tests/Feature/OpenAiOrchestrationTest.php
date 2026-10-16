@@ -2044,6 +2044,36 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('could not find', $result['text']);
     }
 
+    public function test_unresolved_stock_request_asks_for_product_identity_instead_of_handoff(): void
+    {
+        $clarification = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'missingProductIdentityClarification');
+        $result = $clarification->invoke(
+            app(OpenAiSalesOrchestrator::class),
+            'მარაგი ამოიწურა, სად ვიშოვი?',
+            ['intent' => 'stock'],
+            collect(),
+        );
+
+        $this->assertSame('clarification', $result['intent']);
+        $this->assertFalse($result['handoff']);
+        $this->assertSame('search_products', $result['clarification_next_tool']);
+        $this->assertSame('query', $result['clarification_missing_input']);
+        $this->assertStringContainsString('რომელი პროდუქტის', $result['text']);
+
+        $resolved = $clarification->invoke(
+            app(OpenAiSalesOrchestrator::class),
+            'Is it in stock?',
+            ['intent' => 'stock'],
+            collect([[
+                'name' => 'resolve_catalog_context',
+                'arguments' => [],
+                'result' => ['ok' => true, 'resolved_query' => 'Known Product', 'referenced_product_id' => null],
+            ]]),
+        );
+
+        $this->assertNull($resolved);
+    }
+
     public function test_a_fallback_model_preserves_verified_product_recommendations_after_luna_continuation_fails(): void
     {
         $this->seed();

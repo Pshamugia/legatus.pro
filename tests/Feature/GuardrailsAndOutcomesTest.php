@@ -212,6 +212,36 @@ class GuardrailsAndOutcomesTest extends TestCase
         $this->assertDatabaseHas('agent_runs', ['response_id' => 'ungrounded-price']);
     }
 
+    public function test_stock_question_without_product_identity_requests_the_name_instead_of_handoff(): void
+    {
+        [$agent] = $this->salesContext();
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'unresolved-stock', 'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                'text' => 'I cannot confirm it.',
+                'intent' => 'stock',
+                'confidence' => .99,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'product_ids' => [],
+                'sources' => [],
+                'factual_claims' => [],
+            ])]]]], 'usage' => []]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'მარაგი ამოიწურა, სად ვიშოვი?',
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('intent', 'clarification');
+        $this->assertStringContainsString('რომელი პროდუქტის', $response->json('text'));
+        $this->assertContains('clarify_product_identity', $response->json('tools_used'));
+        $visitorId = app(SignedVisitorToken::class)->resolve($agent, $response->json('visitor_token'));
+        $this->assertDatabaseHas('conversations', ['visitor_id' => $visitorId, 'status' => 'ai']);
+    }
+
     public function test_reservation_factual_claim_without_a_successful_hold_is_blocked(): void
     {
         [$agent] = $this->salesContext();

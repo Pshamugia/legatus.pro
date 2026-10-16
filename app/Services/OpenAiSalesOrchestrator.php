@@ -1077,6 +1077,16 @@ class OpenAiSalesOrchestrator
             }
         }
 
+        if ($escalationReason
+            && ($clarification = $this->missingProductIdentityClarification($message, $data, $usedCollection)) !== null) {
+            // An ordinary stock question with no resolvable product identity
+            // is not a safety incident and does not need a human operator.
+            // Ask for the one input that search_products can actually use.
+            $data = $clarification;
+            $escalationReason = null;
+            $used[] = ['name' => 'clarify_product_identity', 'arguments' => [], 'result' => ['ok' => true]];
+        }
+
         if ($escalationReason) {
             $handoffEnabled = $agent->humanHandoffEnabled();
             if ($handoffEnabled) {
@@ -1529,6 +1539,48 @@ class OpenAiSalesOrchestrator
                 'quantity' => null,
                 'reference' => null,
             ])->all(),
+        ];
+    }
+
+    private function missingProductIdentityClarification(
+        string $customerMessage,
+        array $data,
+        Collection $used,
+    ): ?array {
+        if (($data['intent'] ?? null) !== 'stock') {
+            return null;
+        }
+        if ($used->contains(fn (array $call): bool => in_array(
+            $call['name'] ?? null,
+            ['search_products', 'check_stock'],
+            true,
+        ))) {
+            return null;
+        }
+
+        $resolvedIdentity = $used->where('name', 'resolve_catalog_context')->contains(
+            fn (array $call): bool => filled(data_get($call, 'result.resolved_query'))
+                || is_numeric(data_get($call, 'result.referenced_product_id')),
+        );
+        if ($resolvedIdentity) {
+            return null;
+        }
+
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage) === 1;
+
+        return [
+            'text' => $georgian
+                ? 'რომელი პროდუქტის მარაგი გაინტერესებთ? მომწერეთ დასახელება და გადავამოწმებ.'
+                : 'Which product would you like me to check? Send its name and I will verify the stock.',
+            'intent' => 'clarification',
+            'confidence' => 1,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'clarification_next_tool' => 'search_products',
+            'clarification_missing_input' => 'query',
+            'product_ids' => [],
+            'sources' => [],
+            'factual_claims' => [],
         ];
     }
 
