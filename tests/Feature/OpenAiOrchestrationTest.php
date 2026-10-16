@@ -2023,6 +2023,87 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('political repression', $recommendation->query['query']);
     }
 
+    public function test_a_budget_cannot_erase_an_explicit_product_topic_and_return_unrelated_cheap_products(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'name' => 'Budget topic catalog', 'url' => 'https://shop.example/catalog', 'status' => 'ready',
+        ]);
+        $matching = $agent->products()->create([
+            'name' => 'Children’s Illustrated Scripture', 'sku' => 'CHILD-SCRIPTURE',
+            'description' => 'An illustrated scripture edition prepared for children.',
+            'search_text' => 'Children illustrated scripture religious',
+            'price' => 10, 'stock' => 2, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'Beauty and the Beast', 'sku' => 'UNRELATED-FAIRYTALE',
+            'description' => 'A classic fairy tale.',
+            'search_text' => 'Beauty Beast classic fairy tale',
+            'price' => 4, 'stock' => 2, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'budget-topic-customer', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) use ($matching) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response($this->catalogContextResponse([
+                        // The preliminary semantic pass is wrong, but the
+                        // main model still preserves the explicit topic.
+                        'catalog_scope_action' => 'replace',
+                        'recommendation_scope' => 'broad',
+                    ], 'budget-topic-context'));
+                }
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'budget-topic-tool', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'budget-topic-call',
+                        'arguments' => json_encode([
+                            'query' => 'children scripture', 'budget' => 15, 'quantity' => null,
+                            'category' => null, 'mood' => null, 'occasion' => null, 'limit' => 5,
+                            'exclude_product_ids' => [],
+                        ]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'budget-topic-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'Here is the matching verified option.',
+                        'intent' => 'recommendation', 'confidence' => 1,
+                        'handoff' => false, 'escalation_reason' => null,
+                        'product_ids' => [$matching->id], 'sources' => [],
+                        'factual_claims' => [[
+                            'type' => 'product', 'product_id' => $matching->id,
+                            'amount' => null, 'quantity' => null, 'reference' => null,
+                        ]],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Please recommend children’s scripture within 15 GEL.',
+            $conversation,
+        );
+
+        $this->assertSame([$matching->id], collect($reply['products'])->pluck('id')->all());
+        $this->assertNotContains($unrelated->id, collect($reply['products'])->pluck('id')->all());
+        $recommendation = RecommendationEvent::query()->latest('id')->firstOrFail();
+        $this->assertSame('children scripture', $recommendation->query['query']);
+        $this->assertEquals(15.0, $recommendation->query['budget']);
+    }
+
     public function test_deterministic_catalog_recovery_never_turns_recommendation_candidates_into_suggestions(): void
     {
         $fallback = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'verifiedCatalogFallbackReply');

@@ -564,13 +564,15 @@ class OpenAiSalesOrchestrator
                             ? 5
                             : max(3, (int) ($args['limit'] ?? 0));
                     }
-                    // A semantically broad request (for example, the customer
-                    // explicitly accepts any category, or gives only a budget)
-                    // removes topical filters. Treating "any category" as a
-                    // literal mandatory catalogue term produces a false empty
-                    // result even though eligible tenant products exist.
+                    // A genuinely broad request removes topical filters, but
+                    // a budget must never erase a concrete topic grounded in
+                    // the customer's own wording. Conversely, do not promote
+                    // a model-invented phrase into a mandatory catalogue term.
                     if ($broadRecommendation
-                        && ($modelRequestedCatalogSearch || $budgetConstraint !== null || blank($args['query'] ?? null))) {
+                        && ($modelRequestedCatalogSearch
+                            || blank($args['query'] ?? null)
+                            || ($budgetConstraint !== null
+                                && ! $this->catalogQueryIsGroundedInCurrentTurn((string) ($args['query'] ?? ''), $message)))) {
                         $args['query'] = '';
                         $args['category'] = null;
                         $args['mood'] = null;
@@ -3253,6 +3255,36 @@ class OpenAiSalesOrchestrator
         $budget = (float) str_replace(',', '.', $value);
 
         return $budget > 0 ? $budget : null;
+    }
+
+    private function catalogQueryIsGroundedInCurrentTurn(string $query, string $message): bool
+    {
+        $tokens = static function (string $value): Collection {
+            preg_match_all('/[\pL\pN]+/u', Str::lower($value), $matches);
+
+            return collect($matches[0] ?? [])
+                ->filter(fn (string $token): bool => ! ctype_digit($token) && mb_strlen($token) >= 3)
+                ->unique()
+                ->values();
+        };
+
+        $queryTokens = $tokens($query);
+        $messageTokens = $tokens($message);
+        if ($queryTokens->isEmpty() || $messageTokens->isEmpty()) {
+            return false;
+        }
+
+        return $queryTokens->contains(function (string $queryToken) use ($messageTokens): bool {
+            return $messageTokens->contains(function (string $messageToken) use ($queryToken): bool {
+                if ($queryToken === $messageToken) {
+                    return true;
+                }
+
+                return mb_strlen($queryToken) >= 5
+                    && mb_strlen($messageToken) >= 5
+                    && mb_substr($queryToken, 0, 4) === mb_substr($messageToken, 0, 4);
+            });
+        });
     }
 
     private function explicitQuantityConstraint(string $message): ?int
