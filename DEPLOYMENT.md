@@ -126,6 +126,14 @@ In the Meta App Dashboard, enable the Instagram webhook object and subscribe it 
 
 Use the host’s secret manager. Never commit the production `.env`, API keys, database credentials, `APP_KEY`, session data, or customer exports.
 
+### Hosted commerce connections and attribution
+
+WooCommerce merchants connect from Legatus by entering only their store URL and approving the standard WooCommerce authorization screen. They do not create or paste API keys. The store must expose HTTPS WooCommerce REST API and webhook endpoints.
+
+Shopify requires one platform-owner app configuration, not per-business developer work. Register the production callback URL as `https://your-domain.example/app/channels/commerce/shopify/callback`, configure `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` in the production secret manager, and complete Shopify's required distribution/review steps before external merchants connect. Keep the configured scopes synchronized with `SHOPIFY_SCOPES`. Merchants then enter only their permanent `myshopify.com` domain and approve the app.
+
+Both hosted flows create signed order webhooks automatically. Legatus adds an anonymous attribution UUID to links shown in chat, social posts, and Reels; Analytics counts revenue only when the connected store returns that same UUID on a verified order. Customer names, emails, addresses, and order numbers are not stored for attribution. The hourly `legatus:sync-commerce` run retries webhook provisioning when a store was temporarily unavailable.
+
 Create and monitor the mailbox configured by `LEGATUS_PRIVACY_EMAIL`. Before publishing a Meta app, verify that `/privacy`, `/terms`, and `/data-deletion` are publicly reachable over HTTPS and use this monitored address.
 
 Recommended Laravel settings depend on the host, but production should use durable database/Redis-backed sessions and cache rather than local ephemeral storage. Public request idempotency remains database-backed if cache entries disappear; a durable shared cache still improves replay latency and is required for effective cross-process locks/rate limiting. The daily AI ceilings above are starting values, not universal capacity recommendations; set them from the judging/load budget and attach cost alerts. Semantic candidate scoring defaults to the newest 2,000 embedded chunks and is clamped by the application to 50-5,000; review this limit and move large corpora to database/vector-native search before high-volume use.

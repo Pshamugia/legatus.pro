@@ -136,6 +136,16 @@ class Agent extends Model
         return $this->hasMany(AiReel::class);
     }
 
+    public function commerceAttributions(): HasMany
+    {
+        return $this->hasMany(CommerceAttribution::class);
+    }
+
+    public function commerceAttributionOrders(): HasMany
+    {
+        return $this->hasMany(CommerceAttributionOrder::class);
+    }
+
     public function knowledgeSources(): HasMany
     {
         return $this->hasMany(KnowledgeSource::class);
@@ -145,6 +155,7 @@ class Agent extends Model
     {
         return $this->hasOne(CommerceConnection::class);
     }
+
     public function merchandisingRules(): HasMany
     {
         return $this->hasMany(ProductMerchandisingRule::class);

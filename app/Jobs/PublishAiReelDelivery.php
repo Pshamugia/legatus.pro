@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\AiReelDelivery;
+use App\Services\CommerceAttributionService;
 use App\Services\MetaGraphClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -27,9 +28,10 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
         return (string) $this->deliveryId;
     }
 
-    public function handle(MetaGraphClient $meta): void
+    public function handle(MetaGraphClient $meta, ?CommerceAttributionService $attributions = null): void
     {
-        $delivery = AiReelDelivery::query()->with('reel.agent')->find($this->deliveryId);
+        $attributions ??= app(CommerceAttributionService::class);
+        $delivery = AiReelDelivery::query()->with(['reel.agent', 'reel.product'])->find($this->deliveryId);
         if (! $delivery || in_array($delivery->status, ['published', 'delivery_unknown'], true)) {
             return;
         }
@@ -45,20 +47,21 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
             return;
         }
         $reel->update(['status' => 'publishing']);
+        $caption = $this->attributedCaption($delivery, $attributions);
 
         if ($delivery->provider === 'instagram') {
-            $this->publishInstagram($delivery, $connection, $meta, $videoUrl);
+            $this->publishInstagram($delivery, $connection, $meta, $videoUrl, $caption);
         } else {
-            $this->publishFacebook($delivery, $connection, $meta, $videoUrl);
+            $this->publishFacebook($delivery, $connection, $meta, $videoUrl, $caption);
         }
     }
 
-    private function publishInstagram(AiReelDelivery $delivery, $connection, MetaGraphClient $meta, string $videoUrl): void
+    private function publishInstagram(AiReelDelivery $delivery, $connection, MetaGraphClient $meta, string $videoUrl, string $caption): void
     {
         try {
             if (! $delivery->provider_container_id) {
                 $delivery->update([
-                    'provider_container_id' => $meta->createInstagramReelContainer($connection, $videoUrl, (string) $delivery->reel->caption),
+                    'provider_container_id' => $meta->createInstagramReelContainer($connection, $videoUrl, $caption),
                     'status' => 'processing',
                 ]);
                 $this->release(15);
@@ -91,7 +94,7 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function publishFacebook(AiReelDelivery $delivery, $connection, MetaGraphClient $meta, string $videoUrl): void
+    private function publishFacebook(AiReelDelivery $delivery, $connection, MetaGraphClient $meta, string $videoUrl, string $caption): void
     {
         try {
             if (! $delivery->provider_container_id) {
@@ -100,7 +103,7 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
                 $delivery->update(['provider_container_id' => $videoId, 'status' => 'publishing']);
             }
             try {
-                $result = $meta->finishFacebookReel($connection, $delivery->provider_container_id, (string) $delivery->reel->caption);
+                $result = $meta->finishFacebookReel($connection, $delivery->provider_container_id, $caption);
             } catch (\Throwable $exception) {
                 $delivery->update(['status' => 'delivery_unknown', 'last_error' => Str::limit($exception->getMessage(), 1000)]);
                 $this->refreshReelStatus($delivery);
@@ -134,5 +137,23 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
         } elseif ($statuses->every(fn ($status) => in_array($status, ['published', 'failed', 'delivery_unknown'], true))) {
             $reel->update(['status' => $statuses->contains('published') ? 'partially_failed' : 'failed']);
         }
+    }
+
+    private function attributedCaption(AiReelDelivery $delivery, CommerceAttributionService $attributions): string
+    {
+        $caption = (string) $delivery->reel->caption;
+        $destination = trim((string) $delivery->reel->reference_url);
+        if ($destination === '') {
+            $destination = trim((string) data_get($delivery->reel->product?->metadata, 'product_url', ''));
+        }
+        if ($destination === '') {
+            return $caption;
+        }
+
+        $tracked = $attributions->reelUrl($delivery->reel, $destination, $delivery->provider);
+
+        return str_contains($caption, $destination)
+            ? str_replace($destination, $tracked, $caption)
+            : rtrim($caption)."\n\n".$tracked;
     }
 }

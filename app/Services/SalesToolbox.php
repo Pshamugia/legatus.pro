@@ -618,16 +618,16 @@ class SalesToolbox
                     '_match_count' => $matchedTerms->count(),
                 ];
             })
-            ->filter(fn (array $result) => $result['matched_terms'] !== [])
-            ->sortByDesc('_match_count')
-            ->take(5)
-            ->map(function (array $result): array {
-                unset($result['_match_count']);
+                ->filter(fn (array $result) => $result['matched_terms'] !== [])
+                ->sortByDesc('_match_count')
+                ->take(5)
+                ->map(function (array $result): array {
+                    unset($result['_match_count']);
 
-                return $result;
-            })
-            ->values()
-            ->all();
+                    return $result;
+                })
+                ->values()
+                ->all();
         };
 
         $results = $rank($q->limit(50)->get(['id', 'kind', 'title', 'content', 'metadata']));
@@ -976,6 +976,9 @@ class SalesToolbox
                 $expectedCurrency = $this->expectedCurrency($agent);
                 $productCurrency = $this->normalizedCurrency(data_get($p->metadata, 'currency', $expectedCurrency));
                 $remoteCurrency = $this->normalizedCurrency($remote['currency'] ?? null);
+                $stockPrecision = in_array($remote['stock_precision'] ?? 'exact', ['exact', 'availability_only'], true)
+                    ? ($remote['stock_precision'] ?? 'exact')
+                    : null;
                 if (! is_scalar($remote['product_id'] ?? null)
                     || is_bool($remote['product_id'])
                     || trim((string) $remote['product_id']) !== $expectedId
@@ -986,6 +989,7 @@ class SalesToolbox
                     || ! is_bool($remote['in_stock'] ?? null)
                     || ! is_bool($remote['purchasable'] ?? null)
                     || $remoteCurrency === null
+                    || $stockPrecision === null
                     || $remoteCurrency !== $productCurrency
                     || $remoteCurrency !== $expectedCurrency
                 ) {
@@ -1001,6 +1005,7 @@ class SalesToolbox
                         'in_stock' => $remote['in_stock'],
                         'purchasable' => $remote['purchasable'],
                         'currency' => $remoteCurrency,
+                        'stock_precision' => $stockPrecision,
                         'live_checked_at' => is_scalar($remote['checked_at'] ?? null) ? (string) $remote['checked_at'] : now()->toIso8601String(),
                     ]),
                 ]);
@@ -1015,15 +1020,16 @@ class SalesToolbox
                     'name' => $p->name,
                     'price' => $price,
                     'currency' => $remoteCurrency,
-                    'catalog_stock' => $stock,
-                    'stock' => $available,
-                    'available_stock' => $available,
-                    'stock_precision' => 'exact',
+                    'stock_precision' => $stockPrecision,
                     'available' => $canFulfil,
                     'in_stock' => $remote['in_stock'],
                     'purchasable' => $remote['purchasable'],
                     'source' => ['label' => $connection->name ?: 'Live commerce inventory', 'type' => 'live_inventory', 'checked_at' => $remote['checked_at'] ?? now()->toIso8601String()],
-                ];
+                ] + ($stockPrecision === 'exact' ? [
+                    'catalog_stock' => $stock,
+                    'stock' => $available,
+                    'available_stock' => $available,
+                ] : []);
             } catch (\Throwable $exception) {
                 report($exception);
 

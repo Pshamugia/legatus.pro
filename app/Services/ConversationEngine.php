@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Agent;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\Product;
 use App\Models\Reservation;
 use App\Support\PrivacyRedactor;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -17,7 +18,10 @@ use Illuminate\Database\UniqueConstraintViolationException;
  */
 class ConversationEngine
 {
-    public function __construct(private SalesAgentService $salesAgent) {}
+    public function __construct(
+        private SalesAgentService $salesAgent,
+        private CommerceAttributionService $attributions,
+    ) {}
 
     public function handle(
         Agent $agent,
@@ -256,6 +260,11 @@ class ConversationEngine
     {
         $products = collect($products)->values();
         $ids = $products->pluck('id')->filter()->map(fn ($id) => (int) $id)->unique();
+        $catalogProducts = Product::query()
+            ->where('agent_id', $conversation->agent_id)
+            ->whereIn('id', $ids)
+            ->get()
+            ->keyBy('id');
         $heldByOthers = Reservation::query()
             ->whereIn('product_id', $ids)
             ->where('conversation_id', '!=', $conversation->id)
@@ -265,9 +274,16 @@ class ConversationEngine
             ->groupBy('product_id')
             ->pluck('held_quantity', 'product_id');
 
-        return $products->map(function ($product) use ($heldByOthers): array {
+        return $products->map(function ($product) use ($catalogProducts, $conversation, $heldByOthers): array {
             $id = (int) data_get($product, 'id');
             $stock = max(0, (int) data_get($product, 'stock', 0) - (int) ($heldByOthers[$id] ?? 0));
+            $url = data_get($product, 'url')
+                ?: data_get($product, 'metadata.product_url')
+                ?: data_get($product, 'metadata.url');
+            $catalogProduct = $catalogProducts->get($id);
+            if ($catalogProduct && is_string($url) && $url !== '') {
+                $url = $this->attributions->conversationProductUrl($conversation, $catalogProduct, $url);
+            }
 
             return [
                 'id' => $id,
@@ -275,9 +291,7 @@ class ConversationEngine
                 'price' => (float) data_get($product, 'price', 0),
                 'stock' => $stock,
                 'image' => data_get($product, 'image'),
-                'url' => data_get($product, 'url')
-                    ?: data_get($product, 'metadata.product_url')
-                    ?: data_get($product, 'metadata.url'),
+                'url' => $url,
                 'original_price' => ($original = data_get($product, 'metadata.original_price')) !== null ? (float) $original : null,
                 'discount_percent' => ($discount = data_get($product, 'metadata.discount_percent')) !== null ? (float) $discount : null,
             ];

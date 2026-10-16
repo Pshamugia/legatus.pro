@@ -9,6 +9,11 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ChannelController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\CommerceConnectionController;
+use App\Http\Controllers\CommerceAttributionController;
+use App\Http\Controllers\WooCommerceConnectionController;
+use App\Http\Controllers\WooCommerceWebhookController;
+use App\Http\Controllers\ShopifyConnectionController;
+use App\Http\Controllers\ShopifyWebhookController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\KnowledgeController;
 use App\Http\Controllers\LinkedInConnectionController;
@@ -54,6 +59,9 @@ Route::withoutMiddleware([
     ShareErrorsFromSession::class,
     ValidateCsrfToken::class,
 ])->group(function (): void {
+    Route::get('/l/{attribution:token}', [CommerceAttributionController::class, 'visit'])
+        ->middleware('throttle:240,1')
+        ->name('attribution.visit');
     Route::get('/webhooks/meta', [MetaWebhookController::class, 'verify'])
         ->middleware('throttle:120,1')
         ->name('webhooks.meta.verify');
@@ -67,6 +75,15 @@ Route::withoutMiddleware([
     Route::post('/webhooks/paddle', PaddleWebhookController::class)
         ->middleware('throttle:600,1')
         ->name('webhooks.paddle');
+    Route::post('/webhooks/commerce/woocommerce/authorize', [WooCommerceConnectionController::class, 'authorize'])
+        ->middleware('throttle:30,1')
+        ->name('webhooks.commerce.woocommerce.authorize');
+    Route::post('/webhooks/commerce/woocommerce/{connection:webhook_token}', WooCommerceWebhookController::class)
+        ->middleware('throttle:600,1')
+        ->name('webhooks.commerce.woocommerce');
+    Route::post('/webhooks/commerce/shopify/{connection:webhook_token}', ShopifyWebhookController::class)
+        ->middleware('throttle:600,1')
+        ->name('webhooks.commerce.shopify');
 });
 Route::middleware('guest')->group(function () {
     Route::get('/login', [AuthController::class, 'login'])->name('login');
@@ -163,6 +180,18 @@ Route::middleware('auth')->group(function () {
         Route::post('/app/channels/commerce', [CommerceConnectionController::class, 'connect'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.connect');
+        Route::post('/app/channels/commerce/woocommerce/connect', [WooCommerceConnectionController::class, 'connect'])
+            ->middleware('throttle:10,1')
+            ->name('channels.commerce.woocommerce.connect');
+        Route::get('/app/channels/commerce/woocommerce/complete', [WooCommerceConnectionController::class, 'complete'])
+            ->middleware('throttle:10,1')
+            ->name('channels.commerce.woocommerce.complete');
+        Route::post('/app/channels/commerce/shopify/connect', [ShopifyConnectionController::class, 'connect'])
+            ->middleware('throttle:10,1')
+            ->name('channels.commerce.shopify.connect');
+        Route::get('/app/channels/commerce/shopify/callback', [ShopifyConnectionController::class, 'callback'])
+            ->middleware('throttle:10,1')
+            ->name('channels.commerce.shopify.callback');
         Route::post('/app/channels/commerce/sync', [CommerceConnectionController::class, 'sync'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.sync');

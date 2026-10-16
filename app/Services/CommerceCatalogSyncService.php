@@ -244,7 +244,21 @@ class CommerceCatalogSyncService
             ->whereNotIn('external_product_id', $snapshot['seen_ids'])
             ->update(['is_active' => false]);
 
-        $connection->update(['status' => 'active', 'last_sync_at' => now(), 'last_error' => null]);
+        $settings = $connection->settings ?? [];
+        $currencies = collect($snapshot['records'])
+            ->pluck('values.metadata.currency')
+            ->filter(fn ($currency): bool => is_string($currency) && preg_match('/^[A-Z]{3}$/D', $currency) === 1)
+            ->unique()
+            ->values();
+        if ($currencies->count() === 1) {
+            $settings['currency'] = $currencies->first();
+        }
+        $connection->update([
+            'status' => 'active',
+            'last_sync_at' => now(),
+            'last_error' => null,
+            'settings' => $settings,
+        ]);
 
         return ['received' => count($snapshot['records']), 'created' => $created, 'updated' => $updated, 'unchanged' => $unchanged];
     }
@@ -379,6 +393,9 @@ class CommerceCatalogSyncService
                     'currency' => $currency,
                     'in_stock' => $item['in_stock'],
                     'purchasable' => $item['purchasable'],
+                    'stock_precision' => in_array($item['stock_precision'] ?? null, ['exact', 'availability_only'], true)
+                        ? $item['stock_precision']
+                        : 'exact',
                     'text_trust' => 'untrusted_catalog_data',
                     'remote_updated_at' => is_scalar($item['updated_at'] ?? null) ? (string) $item['updated_at'] : null,
                 ],

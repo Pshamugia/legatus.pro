@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\User;
+use App\Services\CommerceAttributionService;
 use App\Services\ConversationEngine;
 use App\Services\SalesAgentService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -111,7 +112,7 @@ class OperatorInboxTest extends TestCase
             ];
         });
 
-        $result = (new ConversationEngine($service))->handle(
+        $result = (new ConversationEngine($service, app(CommerceAttributionService::class)))->handle(
             $agent,
             'Can someone check this for me?',
             $c->channel,

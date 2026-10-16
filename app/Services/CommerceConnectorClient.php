@@ -10,10 +10,21 @@ use Illuminate\Support\Str;
 
 class CommerceConnectorClient
 {
-    public function __construct(private CommerceOriginValidator $origins) {}
+    public function __construct(
+        private CommerceOriginValidator $origins,
+        private WooCommerceClient $wooCommerce,
+        private ShopifyClient $shopify,
+    ) {}
 
     public function catalog(CommerceConnection $connection, int $page = 1, int $perPage = 100): array
     {
+        if ($connection->provider === 'woocommerce') {
+            return $this->wooCommerce->catalog($connection, $page, $perPage);
+        }
+        if ($connection->provider === 'shopify') {
+            return $this->shopify->catalog($connection, $page, $perPage);
+        }
+
         return $this->request($connection, 'GET', '/api/legatus/v1/catalog', [
             'page' => $page,
             'per_page' => min(100, max(1, $perPage)),
@@ -22,6 +33,13 @@ class CommerceConnectorClient
 
     public function search(CommerceConnection $connection, string $query, array $filters = []): array
     {
+        if ($connection->provider === 'woocommerce') {
+            return $this->wooCommerce->search($connection, $query, $filters);
+        }
+        if ($connection->provider === 'shopify') {
+            return $this->shopify->search($connection, $query, $filters);
+        }
+
         return $this->request($connection, 'GET', '/api/legatus/v1/products/search', array_filter([
             'q' => $query,
             'page' => 1,
@@ -35,11 +53,22 @@ class CommerceConnectorClient
 
     public function availability(CommerceConnection $connection, string|int $productId): array
     {
+        if ($connection->provider === 'woocommerce') {
+            return $this->wooCommerce->availability($connection, $productId);
+        }
+        if ($connection->provider === 'shopify') {
+            return $this->shopify->availability($connection, $productId);
+        }
+
         return $this->request($connection, 'GET', '/api/legatus/v1/products/'.rawurlencode((string) $productId).'/availability');
     }
 
     public function deliveryQuote(CommerceConnection $connection, string $city): array
     {
+        if (in_array($connection->provider, ['woocommerce', 'shopify'], true)) {
+            throw new \RuntimeException('This commerce platform does not expose a destination quote without checkout context.');
+        }
+
         return $this->request($connection, 'POST', '/api/legatus/v1/delivery-quote', [], ['city' => $city]);
     }
 

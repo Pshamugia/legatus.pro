@@ -170,6 +170,13 @@ class AnalyticsEvalTest extends TestCase
             'visitor_id' => 'quality-customer',
             'channel' => 'website',
             'status' => 'ai',
+            'last_message_at' => now()->subMinutes(10),
+        ]);
+        $conversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'Do you offer a verified warranty?',
+            'created_at' => now()->subMinutes(10),
+            'updated_at' => now()->subMinutes(10),
         ]);
         AgentRun::create([
             'agent_id' => $agent->id,
@@ -177,6 +184,19 @@ class AnalyticsEvalTest extends TestCase
             'model' => 'visible-quality-model',
             'status' => 'failed',
             'error' => 'Visible run error.',
+        ]);
+        $silentConversation = $agent->conversations()->create([
+            'visitor_id' => 'completed-social-turn',
+            'channel' => 'facebook',
+            'status' => 'ai',
+            'outcome' => 'no_reply_needed',
+            'last_message_at' => now()->subMinutes(10),
+        ]);
+        $silentConversation->messages()->create([
+            'role' => 'customer',
+            'content' => 'Thank you, that is all.',
+            'created_at' => now()->subMinutes(10),
+            'updated_at' => now()->subMinutes(10),
         ]);
 
         $other = Organization::create(['name' => 'Hidden Quality Org', 'slug' => 'hidden-quality']);
@@ -191,12 +211,21 @@ class AnalyticsEvalTest extends TestCase
         $response = $this->actingAs($user)->get(route('analytics.index'))
             ->assertOk()
             ->assertSee('Quality & knowledge center', false)
+            ->assertSee('Suggested fixes')
+            ->assertSee('Do you offer a verified warranty?')
+            ->assertSee('Open the conversation')
             ->assertSee($source->name)
             ->assertSee('visible-quality-model')
             ->assertSee(route('knowledge.index'), false)
+            ->assertDontSee('Thank you, that is all.')
             ->assertDontSee('Hidden broken source');
 
         $this->assertSame(1, $response->viewData('quality')['knowledge_issues']);
+        $this->assertGreaterThanOrEqual(1, $response->viewData('quality')['actionable_issues']);
+        $this->assertTrue($response->viewData('qualityIssues')->contains(
+            fn (array $issue): bool => $issue['type'] === 'unanswered_question'
+                && $issue['conversation_id'] === $conversation->id,
+        ));
         $this->assertTrue($response->viewData('degradedRuns')->contains('id', AgentRun::latest('id')->value('id')));
     }
 }
