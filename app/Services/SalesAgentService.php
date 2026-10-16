@@ -167,7 +167,7 @@ class SalesAgentService
             // A plain thank-you or farewell ends a social-channel exchange.
             // This deterministic gate must run before any generated reply or
             // first-AI-message disclosure can be queued for Meta delivery.
-            if (in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)) {
+            if (in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp', 'facebook_comment', 'instagram_comment'], true)) {
                 return [
                     'text' => null,
                     'silent' => true,

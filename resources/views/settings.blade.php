@@ -101,6 +101,11 @@
                     <input type="checkbox" name="human_handoff_enabled" value="1" style="width:auto;margin-top:3px" @checked((bool) old('human_handoff_enabled', $agent->humanHandoffEnabled())) @disabled(! $canManageSettings)>
                     <span><b>Enable human handoff</b><small style="display:block;color:var(--muted);margin-top:4px">Allow customers to request a person and let Legatus transfer conversations that genuinely require human judgment. Turn this off for AI-only support.</small></span>
                 </label>
+                <input type="hidden" name="automatic_comment_replies_enabled" value="0">
+                <label class="tag" style="display:flex;align-items:flex-start;gap:10px;margin-top:12px;padding:14px">
+                    <input type="checkbox" name="automatic_comment_replies_enabled" value="1" style="width:auto;margin-top:3px" @checked((bool) old('automatic_comment_replies_enabled', $agent->automaticCommentRepliesEnabled())) @disabled(! $canManageSettings)>
+                    <span><b>Automatic Facebook & Instagram comment replies</b><small style="display:block;color:var(--muted);margin-top:4px">Legatus answers safe public comments automatically using the same verified business data. Sensitive, private or unresolved requests are kept in Needs human without a public guess.</small></span>
+                </label>
                 <label>Human handoff threshold</label><input name="handoff_threshold" type="number" step="0.01" min="0" max="1" value="{{ old('handoff_threshold', $agent->settings['handoff_threshold'] ?? .72) }}">
                 <label>Maximum autonomous discount (%)</label><input name="discount_limit" type="number" min="0" max="100" value="{{ old('discount_limit', $agent->settings['discount_limit'] ?? 0) }}">
                 <label>Business hours</label><textarea name="business_hours" rows="2">{{ old('business_hours', $agent->settings['business_hours'] ?? '') }}</textarea>

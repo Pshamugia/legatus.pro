@@ -14,6 +14,7 @@ use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
 use App\Services\CustomerImageCatalogMatcher;
 use App\Services\MetaGraphClient;
+use App\Services\PublicCommentGate;
 use Illuminate\Contracts\Bus\Dispatcher as BusDispatcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
@@ -231,10 +232,11 @@ class MetaTransportTest extends TestCase
         });
     }
 
-    public function test_comment_webhook_creates_a_review_only_tenant_inbox_opportunity(): void
+    public function test_comment_webhook_stays_in_review_when_tenant_disables_automatic_replies(): void
     {
         Queue::fake();
         [$user, $agent] = $this->tenant();
+        $agent->update(['settings' => ['automatic_comment_replies_enabled' => false]]);
         $connection = $agent->channelConnections()->create([
             'provider' => 'facebook',
             'status' => 'active',
@@ -277,13 +279,275 @@ class MetaTransportTest extends TestCase
 
         $this->actingAs($user)->get(route('inbox.index', ['conversation' => $conversation->id]))
             ->assertOk()
-            ->assertSee('Comment opportunity')
-            ->assertSee('reply from the native Meta inbox')
-            ->assertDontSee('Reply as a human operator');
-        $this->actingAs($user)->post(route('inbox.reply', $conversation), ['message' => 'Unsafe private reply'])
-            ->assertSessionHas('error');
-        $this->assertDatabaseMissing('messages', ['content' => 'Unsafe private reply']);
+            ->assertSee('Needs human')
+            ->assertSee('Reply publicly to this comment')
+            ->assertDontSee('Automatic public replies are active');
+        $this->actingAs($user)->post(route('inbox.reply', $conversation), ['message' => 'Verified public reply'])
+            ->assertSessionHas('success');
+        $this->assertDatabaseHas('messages', ['content' => 'Verified public reply', 'role' => 'human']);
+        $this->assertDatabaseHas('channel_messages', [
+            'message_type' => 'comment_reply',
+            'provider_recipient_id' => 'comment-123',
+            'status' => 'queued',
+        ]);
+        Queue::assertPushed(SendMetaMessage::class, 1);
         $this->assertSame($connection->id, $conversation->channel_connection_id);
+    }
+
+    public function test_comment_webhook_is_queued_for_automatic_public_processing_by_default(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant();
+        $agent->channelConnections()->create([
+            'provider' => 'facebook',
+            'status' => 'active',
+            'external_account_id' => 'page-auto-comments',
+            'access_token' => 'page-access-token',
+            'connected_at' => now(),
+        ]);
+        $payload = ['object' => 'page', 'entry' => [[
+            'id' => 'page-auto-comments',
+            'changes' => [[
+                'field' => 'feed',
+                'value' => [
+                    'item' => 'comment',
+                    'verb' => 'add',
+                    'comment_id' => 'comment-auto-1',
+                    'post_id' => 'page-auto-comments_post-1',
+                    'message' => 'Is it available?',
+                    'from' => ['id' => 'commenter-auto'],
+                    'created_time' => 1784512800,
+                ],
+            ]],
+        ]]];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $this->metaWebhook($body, 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret'))->assertOk();
+
+        $message = ChannelMessage::query()->sole();
+        $this->assertSame('received', $message->status);
+        $this->assertSame('comment', $message->message_type);
+        $this->assertDatabaseCount('conversations', 0);
+        Queue::assertPushed(ProcessMetaInboundMessage::class, fn ($job): bool => $job->channelMessageId === $message->id);
+    }
+
+    public function test_comment_job_uses_linked_post_product_context_and_queues_a_public_reply(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-product-comments');
+        $product = $connection->agent->products()->create([
+            'name' => 'Verified Product',
+            'description' => 'Verified description.',
+            'price' => 25,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://shop.example/products/verified'],
+        ]);
+        $schedule = $connection->agent->socialMediaSchedules()->create([
+            'starts_on' => now()->toDateString(),
+            'ends_on' => now()->toDateString(),
+            'posts_per_day' => 1,
+            'categories' => [],
+            'providers' => ['facebook'],
+            'timezone' => 'UTC',
+            'status' => 'active',
+        ]);
+        $schedule->posts()->create([
+            'agent_id' => $connection->agent_id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'published',
+            'scheduled_for' => now(),
+            'published_at' => now(),
+            'provider_post_id' => 'page-product-comments_post-77',
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => 'https://shop.example/products/verified',
+            'caption' => 'Published product',
+        ]);
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'comment-product-1',
+            'provider_sender_id' => 'commenter-product',
+            'provider_recipient_id' => 'page-product-comments',
+            'message_type' => 'comment',
+            'status' => 'received',
+            'payload' => [
+                'text' => 'Is this available?',
+                'post_id' => 'page-product-comments_post-77',
+                'source' => 'social_comment',
+            ],
+            'received_at' => now(),
+        ]);
+
+        $engine = \Mockery::mock(ConversationEngine::class);
+        $engine->shouldReceive('handle')->once()->withArgs(function ($agent, $text, $channel, $customerId) use ($product): bool {
+            $conversation = $agent->conversations()->where('visitor_id', $customerId)->sole();
+            $this->assertSame('facebook_comment', $channel);
+            $this->assertSame([$product->id], data_get($conversation->context, 'last_catalog_product_ids'));
+
+            return $text === 'Is this available?';
+        })->andReturnUsing(function ($agent, $text, $channel, $customerId, $requestId): array {
+            $conversation = $agent->conversations()->where('visitor_id', $customerId)->sole();
+            $customer = $conversation->messages()->create([
+                'role' => 'customer',
+                'content' => $text,
+                'request_id' => $requestId,
+            ]);
+            $assistant = $conversation->messages()->create([
+                'role' => 'assistant',
+                'content' => 'Yes, it is available.',
+                'confidence' => 1,
+                'metadata' => ['handoff' => false, 'products' => []],
+            ]);
+
+            return [
+                'conversation_id' => $conversation->id,
+                'customer_message_id' => $customer->public_id,
+                'message_id' => $assistant->public_id,
+            ];
+        });
+
+        $gate = \Mockery::mock(PublicCommentGate::class);
+        $gate->shouldReceive('decide')->once()->andReturn(['action' => 'reply', 'reason' => 'Safe public question.']);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle($engine, app(ChannelMessageDispatcher::class), null, $gate);
+
+        $conversation = $connection->agent->conversations()->sole();
+        $this->assertSame('facebook_comment', $conversation->channel);
+        $this->assertSame('public_comment', data_get($conversation->context, 'reply_mode'));
+        $this->assertDatabaseHas('channel_messages', [
+            'conversation_id' => $conversation->id,
+            'direction' => 'outbound',
+            'message_type' => 'comment_reply',
+            'provider_recipient_id' => 'comment-product-1',
+            'status' => 'queued',
+        ]);
+        Queue::assertPushed(SendMetaMessage::class, 1);
+    }
+
+    #[DataProvider('publicCommentNonReplyDecisions')]
+    public function test_public_comment_gate_can_silence_noise_or_require_human_review(
+        string $action,
+        string $expectedStatus,
+        string $expectedOutcome,
+    ): void {
+        Queue::fake();
+        $connection = $this->connection('instagram', 'ig-gated-comments');
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'ig-gated-comment',
+            'provider_sender_id' => 'ig-commenter',
+            'provider_recipient_id' => 'ig-gated-comments',
+            'message_type' => 'comment',
+            'status' => 'received',
+            'payload' => ['text' => 'Public comment text', 'post_id' => 'ig-post-9'],
+            'received_at' => now(),
+        ]);
+        $engine = \Mockery::mock(ConversationEngine::class);
+        $engine->shouldNotReceive('handle');
+        $gate = \Mockery::mock(PublicCommentGate::class);
+        $gate->shouldReceive('decide')->once()->andReturn([
+            'action' => $action,
+            'reason' => $action === 'review' ? 'This needs private human judgment.' : 'No answer is needed.',
+        ]);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            $engine,
+            app(ChannelMessageDispatcher::class),
+            null,
+            $gate,
+        );
+
+        $conversation = $connection->agent->conversations()->sole();
+        $this->assertSame($expectedStatus, $conversation->status);
+        $this->assertSame($expectedOutcome, $conversation->outcome);
+        $this->assertSame('processed', $inbound->fresh()->status);
+        $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
+        Queue::assertNothingPushed();
+    }
+
+    public static function publicCommentNonReplyDecisions(): array
+    {
+        return [
+            'passive noise stays silent' => ['silent', 'ai', 'no_reply_needed'],
+            'sensitive request needs human' => ['review', 'human', 'human_handoff'],
+        ];
+    }
+
+    public function test_public_comment_safety_classifier_uses_structured_semantic_decision(): void
+    {
+        config()->set('services.openai.key', 'test-key');
+        Http::fake(['api.openai.com/*' => Http::response([
+            'output' => [[
+                'type' => 'message',
+                'content' => [[
+                    'type' => 'output_text',
+                    'text' => json_encode(['action' => 'review', 'reason' => 'Customer-specific order issue.']),
+                ]],
+            ]],
+        ])]);
+        $connection = $this->connection('facebook', 'page-comment-classifier');
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'comment-classifier-customer',
+            'external_thread_id' => 'comment-classifier-1',
+            'channel' => 'facebook_comment',
+            'status' => 'ai',
+            'context' => ['source_type' => 'social_comment', 'reply_mode' => 'public_comment'],
+        ]);
+
+        $decision = app(PublicCommentGate::class)->decide('Please check my specific order.', $conversation);
+
+        $this->assertSame('review', $decision['action']);
+        $this->assertSame('Customer-specific order issue.', $decision['reason']);
+        Http::assertSent(function ($request): bool {
+            $schema = data_get($request->data(), 'text.format.schema.properties.action.enum');
+
+            return $request->url() === 'https://api.openai.com/v1/responses'
+                && $schema === ['reply', 'silent', 'review']
+                && str_contains((string) data_get($request->data(), 'instructions'), 'public social-media comment');
+        });
+    }
+
+    public function test_meta_send_job_replies_to_facebook_and_instagram_comments_on_public_endpoints(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://graph.facebook.test/v25.0/fb-comment/comments*' => Http::response(['id' => 'fb-reply-id']),
+            'https://graph.facebook.test/v25.0/ig-comment/replies*' => Http::response(['id' => 'ig-reply-id']),
+        ]);
+
+        [, $agent] = $this->tenant();
+        foreach ([['facebook', 'fb-comment', 'fb-reply-id'], ['instagram', 'ig-comment', 'ig-reply-id']] as [$provider, $commentId, $replyId]) {
+            $connection = $agent->channelConnections()->create([
+                'provider' => $provider,
+                'status' => 'active',
+                'external_account_id' => $provider.'-comment-account',
+                'access_token' => 'page-access-token',
+                'connected_at' => now(),
+            ]);
+            $conversation = $connection->agent->conversations()->create([
+                'channel_connection_id' => $connection->id,
+                'visitor_id' => $provider.'-commenter',
+                'external_thread_id' => $commentId,
+                'channel' => $provider.'_comment',
+                'status' => 'ai',
+                'context' => ['source_type' => 'social_comment'],
+            ]);
+            $assistant = $conversation->messages()->create(['role' => 'assistant', 'content' => 'Public answer']);
+            $delivery = app(ChannelMessageDispatcher::class)->dispatch($assistant);
+
+            (new SendMetaMessage($delivery->id))->handle(app(MetaGraphClient::class));
+
+            $this->assertSame('sent', $delivery->fresh()->status);
+            $this->assertSame($replyId, $delivery->fresh()->provider_message_id);
+        }
+
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/fb-comment/comments?')
+            && data_get($request->data(), 'message') === 'Public answer');
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/ig-comment/replies?')
+            && data_get($request->data(), 'message') === 'Public answer');
     }
 
     public function test_facebook_comment_subscription_is_explicitly_capability_gated(): void

@@ -41,6 +41,11 @@ class Agent extends Model
         return (bool) data_get($this->settings, 'human_handoff_enabled', true);
     }
 
+    public function automaticCommentRepliesEnabled(): bool
+    {
+        return (bool) data_get($this->settings, 'automatic_comment_replies_enabled', true);
+    }
+
     /**
      * @return array{preset: string, primary: string, accent: string, primary_foreground: string, accent_foreground: string}
      */

@@ -41,10 +41,8 @@ class InboxController extends Controller
     {
         $this->own($conversation, $tenant);
         $tenant->authorize(['owner', 'admin', 'agent']);
-        if (data_get($conversation->context, 'source_type') === 'social_comment') {
-            return back()->with('error', 'Public comments are review-only in Legatus. Reply from the native Meta inbox so a private message is never sent by mistake.');
-        }
-        $data = $request->validate(['message' => 'required|string|max:2000']);
+        $isComment = data_get($conversation->context, 'source_type') === 'social_comment';
+        $data = $request->validate(['message' => 'required|string|max:'.($isComment ? 1000 : 2000)]);
         $message = $conversation->messages()->create([
             'role' => 'human',
             'content' => $data['message'],
@@ -53,7 +51,7 @@ class InboxController extends Controller
         $conversation->update(['status' => 'human', 'assigned_to' => auth()->user()->name, 'last_message_at' => now()]);
         $delivery = $dispatcher->dispatch($message)?->fresh();
 
-        if (in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)) {
+        if (in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp', 'facebook_comment', 'instagram_comment'], true)) {
             if (! $delivery) {
                 return back()->with('error', 'Reply was saved, but the Meta channel is not connected. Reconnect it before replying again.');
             }

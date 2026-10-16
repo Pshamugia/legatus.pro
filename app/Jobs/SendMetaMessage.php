@@ -81,8 +81,10 @@ class SendMetaMessage implements ShouldBeUnique, ShouldQueue
             ]);
 
             try {
-                $response = $meta->sendText($connection, $recipientId, $text);
-                $providerMessageId = (string) ($response['message_id'] ?? '');
+                $response = $record->message_type === 'comment_reply'
+                    ? $meta->replyToComment($connection, $recipientId, $text)
+                    : $meta->sendText($connection, $recipientId, $text);
+                $providerMessageId = (string) ($response[$record->message_type === 'comment_reply' ? 'id' : 'message_id'] ?? '');
                 if ($providerMessageId === '') {
                     $this->markDeliveryUnknown($record, $connection);
 

@@ -19,7 +19,7 @@ class ChannelMessageDispatcher
         }
 
         $conversation = $message->conversation()->with('channelConnection')->first();
-        if (! $conversation instanceof Conversation || ! in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)) {
+        if (! $conversation instanceof Conversation || ! in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp', 'facebook_comment', 'instagram_comment'], true)) {
             return null;
         }
 
@@ -28,6 +28,7 @@ class ChannelMessageDispatcher
             return null;
         }
 
+        $isComment = str_ends_with($conversation->channel, '_comment');
         $text = $this->actionableText($message, $connection->provider);
 
         $delivery = ChannelMessage::query()->firstOrCreate(
@@ -38,7 +39,7 @@ class ChannelMessageDispatcher
                 'direction' => 'outbound',
                 'provider_sender_id' => $connection->external_account_id,
                 'provider_recipient_id' => $conversation->external_thread_id,
-                'message_type' => 'text',
+                'message_type' => $isComment ? 'comment_reply' : 'text',
                 'status' => 'queued',
                 'payload' => ['text' => $text, 'role' => $message->role],
                 'queued_at' => now(),

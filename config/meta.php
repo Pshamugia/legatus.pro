@@ -15,19 +15,19 @@ return [
     'max_webhook_bytes' => (int) env('META_MAX_WEBHOOK_BYTES', 1048576),
     'outbox_stale_seconds' => (int) env('META_OUTBOX_STALE_SECONDS', 60),
     'outbox_batch_size' => (int) env('META_OUTBOX_BATCH_SIZE', 100),
-    'comment_to_sale_enabled' => (bool) env('META_COMMENT_TO_SALE_ENABLED', false),
+    'comment_to_sale_enabled' => (bool) env('META_COMMENT_TO_SALE_ENABLED', true),
     'scopes' => [
         'meta' => array_values(array_filter(explode(',', (string) env(
             'META_SCOPES',
-            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_manage_messages,instagram_content_publish'
+            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts,pages_manage_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish'
         )))),
         'facebook' => array_values(array_filter(explode(',', (string) env(
             'META_FACEBOOK_SCOPES',
-            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts'
+            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts,pages_manage_engagement'
         )))),
         'instagram' => array_values(array_filter(explode(',', (string) env(
             'META_INSTAGRAM_SCOPES',
-            'pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_content_publish'
+            'pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish'
         )))),
     ],
 ];

@@ -8,9 +8,11 @@ use App\Models\ChannelConnection;
 use App\Models\ChannelMessage;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Models\SocialMediaPost;
 use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
 use App\Services\CustomerImageCatalogMatcher;
+use App\Services\PublicCommentGate;
 use App\Support\PrivacyRedactor;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -55,6 +57,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         ConversationEngine $engine,
         ChannelMessageDispatcher $dispatcher,
         ?CustomerImageCatalogMatcher $imageMatcher = null,
+        ?PublicCommentGate $commentGate = null,
     ): void {
         $record = ChannelMessage::query()->with('connection.agent')->find($this->channelMessageId);
         if (! $record || in_array($record->status, ['processed', 'ignored'], true)) {
@@ -123,7 +126,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         }
 
         Cache::lock('meta-inbound:'.$connection->id.':'.hash('sha256', $senderId), 120)
-            ->block(20, function () use ($record, $connection, $senderId, $text, $engine, $dispatcher, $imageMatcher): void {
+            ->block(20, function () use ($record, $connection, $senderId, $text, $engine, $dispatcher, $imageMatcher, $commentGate): void {
                 $record->refresh();
                 if (in_array($record->status, ['processed', 'ignored'], true)) {
                     return;
@@ -146,9 +149,31 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'failed_at' => null,
                 ]);
 
+                $isComment = $record->message_type === 'comment';
                 $customerInput = $text;
+                $postId = trim((string) data_get($record->payload, 'post_id', ''));
+                $customerId = $isComment
+                    ? "meta-comment:{$connection->provider}:{$connection->id}:".hash('sha256', $senderId.':'.$postId)
+                    : "meta:{$connection->provider}:{$connection->id}:{$senderId}";
+                $conversationChannel = $isComment ? $connection->provider.'_comment' : $connection->provider;
+
+                if ($isComment) {
+                    $this->prepareCommentConversation($record, $connection, $customerId, $postId);
+                    $conversation = $connection->agent->conversations()
+                        ->where('visitor_id', $customerId)
+                        ->where('channel', $conversationChannel)
+                        ->latest('id')
+                        ->firstOrFail();
+                    $decision = ($commentGate ?? app(PublicCommentGate::class))->decide($text, $conversation);
+                    if ($decision['action'] !== 'reply') {
+                        $this->finishCommentWithoutAutomaticReply($record, $conversation, $text, $decision);
+
+                        return;
+                    }
+                }
+
                 $imageRecord = $this->customerImageRecord($record);
-                if ($imageRecord) {
+                if (! $isComment && $imageRecord) {
                     $customerRecord = $record;
                     $imageQuestion = $text;
                     if ($imageRecord->is($record) && ($pairedText = $this->customerTextForImage($record))) {
@@ -167,17 +192,16 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
                     return;
                 }
-                if ($record->message_type === 'attachment') {
+                if (! $isComment && $record->message_type === 'attachment') {
                     $this->replyThatAttachmentCannotBeRead($record, $connection, $senderId, $text, $dispatcher);
 
                     return;
                 }
 
-                $customerId = "meta:{$connection->provider}:{$connection->id}:{$senderId}";
                 $result = $engine->handle(
                     $connection->agent,
                     $customerInput,
-                    $connection->provider,
+                    $conversationChannel,
                     $customerId,
                     $record->idempotency_key,
                     ucfirst($connection->provider).' customer',
@@ -186,7 +210,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 $conversation = Conversation::query()->findOrFail((int) $result['conversation_id']);
                 $conversation->update([
                     'channel_connection_id' => $connection->id,
-                    'external_thread_id' => $senderId,
+                    'external_thread_id' => $isComment ? (string) $record->provider_message_id : $senderId,
                 ]);
 
                 $customerMessage = Message::query()
@@ -206,7 +230,9 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     if ($assistant) {
                         $conversation->refresh();
                         if ($conversation->status === 'ai') {
-                            $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
+                            if (! $isComment) {
+                                $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);
+                            }
                             $dispatcher->dispatch($assistant);
                         } else {
                             $assistant->delete();
@@ -220,6 +246,84 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'processed_at' => now(),
                 ]);
             });
+    }
+
+    private function prepareCommentConversation(
+        ChannelMessage $record,
+        ChannelConnection $connection,
+        string $customerId,
+        string $postId,
+    ): void {
+        $conversation = $connection->agent->conversations()
+            ->where('visitor_id', $customerId)
+            ->where('channel', $connection->provider.'_comment')
+            ->whereIn('status', ['ai', 'open', 'human'])
+            ->latest('id')
+            ->first() ?? $connection->agent->conversations()->create([
+                'visitor_id' => $customerId,
+                'customer_name' => ucfirst($connection->provider).' commenter',
+                'channel' => $connection->provider.'_comment',
+                'status' => 'ai',
+            ]);
+
+        $context = is_array($conversation->context) ? $conversation->context : [];
+        $context['source_type'] = 'social_comment';
+        $context['provider'] = $connection->provider;
+        $context['post_id'] = $postId;
+        $context['reply_mode'] = 'public_comment';
+
+        $post = SocialMediaPost::query()
+            ->where('agent_id', $connection->agent_id)
+            ->where('provider', $connection->provider)
+            ->where('provider_post_id', $postId)
+            ->whereNotNull('product_id')
+            ->latest('id')
+            ->first();
+        if ($post?->product_id) {
+            $context['last_catalog_product_ids'] = [(int) $post->product_id];
+            $context['comment_product_id'] = (int) $post->product_id;
+        }
+
+        $conversation->update([
+            'channel_connection_id' => $connection->id,
+            'external_thread_id' => (string) $record->provider_message_id,
+            'context' => $context,
+            'last_message_at' => $record->received_at ?? now(),
+        ]);
+    }
+
+    /** @param array{action: 'silent'|'review', reason: string} $decision */
+    private function finishCommentWithoutAutomaticReply(
+        ChannelMessage $record,
+        Conversation $conversation,
+        string $text,
+        array $decision,
+    ): void {
+        $safeText = PrivacyRedactor::text($text);
+        $customer = $conversation->messages()->firstOrCreate(
+            ['request_id' => $record->idempotency_key],
+            ['role' => 'customer', 'content' => $safeText, 'metadata' => [
+                'public_comment_gate' => $decision['action'],
+                'pii_redacted' => $safeText !== $text,
+            ]],
+        );
+        $review = $decision['action'] === 'review';
+        $conversation->update([
+            'status' => $review ? 'human' : 'ai',
+            'intent' => 'social_comment',
+            'priority' => $review ? 'high' : 'normal',
+            'handoff_reason' => $review ? $decision['reason'] : null,
+            'handoff_summary' => $review ? 'This public comment needs human judgment before any response is posted.' : null,
+            'outcome' => $review ? 'human_handoff' : 'no_reply_needed',
+            'last_message_at' => now(),
+        ]);
+        $record->update([
+            'conversation_id' => $conversation->id,
+            'message_id' => $customer->id,
+            'status' => 'processed',
+            'payload' => $this->minimalPayload($record),
+            'processed_at' => now(),
+        ]);
     }
 
     private function hasEarlierPendingInbound(ChannelMessage $record): bool
@@ -625,6 +729,10 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
     private function replyAfterFinalFailure(ChannelMessage $record, string $text, bool $isImage): void
     {
+        if ($record->message_type === 'comment') {
+            return;
+        }
+
         try {
             $record->loadMissing(['connection.agent', 'conversation']);
             $connection = $record->connection;
@@ -695,16 +803,21 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     return false;
                 }
 
-                $customerId = "meta:{$connection->provider}:{$connection->id}:{$senderId}";
+                $isComment = $locked->message_type === 'comment';
+                $postId = trim((string) data_get($locked->payload, 'post_id', ''));
+                $customerId = $isComment
+                    ? "meta-comment:{$connection->provider}:{$connection->id}:".hash('sha256', $senderId.':'.$postId)
+                    : "meta:{$connection->provider}:{$connection->id}:{$senderId}";
+                $channel = $isComment ? $connection->provider.'_comment' : $connection->provider;
                 $conversation = $connection->agent->conversations()
                     ->where('visitor_id', $customerId)
-                    ->where('channel', $connection->provider)
+                    ->where('channel', $channel)
                     ->whereIn('status', ['ai', 'open', 'human'])
                     ->latest('id')
                     ->first() ?? $connection->agent->conversations()->create([
                         'visitor_id' => $customerId,
-                        'customer_name' => ucfirst($connection->provider).' customer',
-                        'channel' => $connection->provider,
+                        'customer_name' => ucfirst($connection->provider).($isComment ? ' commenter' : ' customer'),
+                        'channel' => $channel,
                         'status' => 'ai',
                     ]);
 
@@ -733,10 +846,26 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 );
                 $conversationUpdates = [
                     'channel_connection_id' => $connection->id,
-                    'external_thread_id' => $senderId,
+                    'external_thread_id' => $isComment ? (string) $locked->provider_message_id : $senderId,
                     'last_message_at' => now(),
                 ];
-                if ($conversation->status !== 'human') {
+                if ($isComment) {
+                    $context = is_array($conversation->context) ? $conversation->context : [];
+                    $context += [
+                        'source_type' => 'social_comment',
+                        'provider' => $connection->provider,
+                        'post_id' => $postId,
+                        'reply_mode' => 'public_comment',
+                    ];
+                    $conversationUpdates += [
+                        'status' => 'human',
+                        'priority' => 'high',
+                        'intent' => 'social_comment',
+                        'handoff_reason' => 'Automatic public comment processing failed safely. Review before replying.',
+                        'context' => $context,
+                    ];
+                }
+                if (! $isComment && $conversation->status !== 'human') {
                     $conversationUpdates += [
                         'status' => 'ai',
                         'assigned_to' => null,

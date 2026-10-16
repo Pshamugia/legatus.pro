@@ -94,6 +94,24 @@ class SettingsBusinessIdentityTest extends TestCase
         $this->assertNull($conversation->fresh()->handoff_reason);
     }
 
+    public function test_owner_can_control_automatic_public_comment_replies_per_tenant(): void
+    {
+        [$owner, $agent] = $this->tenant('comment-automation-workspace', 'owner', 'Comment Brand', 'Nia');
+        [, $otherAgent] = $this->tenant('other-comment-workspace', 'owner', 'Other Brand', 'Assistant');
+
+        $this->actingAs($owner)->get(route('settings.index'))
+            ->assertOk()
+            ->assertSee('Automatic Facebook & Instagram comment replies', false)
+            ->assertSee('name="automatic_comment_replies_enabled"', false);
+
+        $this->actingAs($owner)->put(route('settings.update'), $this->validSettings([
+            'automatic_comment_replies_enabled' => 0,
+        ]))->assertRedirect()->assertSessionHasNoErrors();
+
+        $this->assertFalse($agent->fresh()->automaticCommentRepliesEnabled());
+        $this->assertTrue($otherAgent->fresh()->automaticCommentRepliesEnabled());
+    }
+
     public function test_owner_can_set_a_tenant_scoped_free_delivery_minimum(): void
     {
         [$owner, $agent] = $this->tenant('free-delivery-workspace', 'owner', 'Free Delivery Brand', 'Assistant');

@@ -426,7 +426,7 @@ class OpenAiSalesOrchestrator
             $response = $this->postJson('/responses', [
                 'model' => $primaryModel,
                 'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
-                'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->responseStyleInstructions($conversation),
+                'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->publicCommentInstructions($conversation).$this->responseStyleInstructions($conversation),
                 'input' => $this->history($conversation, $orchestrationMessage),
                 'tools' => $this->tools->definitions($agent),
                 'tool_choice' => 'auto',
@@ -610,7 +610,7 @@ class OpenAiSalesOrchestrator
                 $response = $this->postJson('/responses', [
                     'model' => $chainModel,
                     'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
-                    'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation),
+                    'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->publicCommentInstructions($conversation),
                     'previous_response_id' => $response['id'],
                     'input' => $outputs,
                     'tools' => $this->tools->definitions($agent),
@@ -980,7 +980,7 @@ class OpenAiSalesOrchestrator
                     $repair = $this->postJson('/responses', [
                         'model' => $primaryModel,
                         'reasoning' => ['effort' => config('services.openai.reasoning_effort')],
-                        'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation)
+                        'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->publicCommentInstructions($conversation)
                             .' The previous draft was rejected by the factual verifier for this reason: '
                             .$escalationReason
                             .' Rewrite the answer naturally using only the successful tool evidence already present in this response chain. Answer the customer\'s actual question directly. If the verified search contains matches, present them; if it contains no matches, say that no additional matching item was found. Do not request human handoff merely because the first draft needed correction.',
@@ -2118,6 +2118,15 @@ class OpenAiSalesOrchestrator
         return $handoff.' Infer intent semantically from the complete conversation, never from isolated keywords. Resolve follow-ups against prior turns and ask one concise clarification when the reference is genuinely ambiguous. When the assistant asked a choice or refinement question and the customer answers briefly—including “yes”, “no”, “კი”, “არა”, a bare option such as “classic”/“კლასიკური”, or a relational phrase such as “this book”/“ეს წიგნი” and “by this author”/“ამ ავტორის”—treat that answer as a constraint on the unresolved request from the preceding turns. Expand the tool query with that earlier subject and the new constraint; never search only the isolated reply. For example, after asking "classic or modern?" about a product category, the answer "classic" means "classic [that category]", not every catalog item containing the word classic. If the customer challenges the previous availability answer with wording such as “კი მაგრამ წერია რომ ამოწურულია მარაგი”, bind the correction to the previously discussed product, call check_stock for that product, correct the answer from the verified result, and do not search for or offer other products. Preserve every still-active preference until the customer changes it. If exactly one matching product is presented, never ask "which one"; ask whether the customer wants to purchase that product or offer the single most useful next step. If the customer asks how to buy or purchase a product, resolve which recent product they mean, verify its availability, and explain that they can open the verified product card or link, add it to the business website cart, and complete checkout there. Never claim that Legatus itself completed payment or placed the order. Adapt vocabulary to the connected business and its actual catalog attributes; never assume it sells books or mention book-specific fields unless verified tenant data makes them relevant. General delivery rules, destinations, fees, and pre-order estimates are delivery-policy requests: call calculate_delivery and search_knowledge, and never return product cards. A request for the current status, courier verification, delay investigation, or same-day confirmation of an order already placed is not answerable from general policy; never repeat the policy as though it were live tracking and never invent an order update. Use human handoff when available. If no verified delivery fee is present in either tool result, clearly say that the exact fee could not be verified instead of guessing.';
     }
 
+    private function publicCommentInstructions(Conversation $conversation): string
+    {
+        if (data_get($conversation->context, 'reply_mode') !== 'public_comment') {
+            return '';
+        }
+
+        return ' This answer will be posted publicly as a reply to a social-media comment. Keep it concise and suitable for public display. Never ask for, repeat, or expose an order number, contact detail, address, account detail, payment detail, or any other personal information. Never investigate a customer-specific order, payment, delivery incident, complaint, dispute, refund, or return in public. Such cases require human review and no generated public explanation. Do not claim that the conversation has moved to a private channel unless a verified tool actually performed that action. Relative wording may use only the linked verified product context supplied by the server; if that context is absent or genuinely ambiguous, do not guess.';
+    }
+
     private function contextualCatalogInstructions(Agent $agent, Conversation $conversation): string
     {
         if (data_get($agent->settings, 'assistant_mode') === 'platform_support') {
@@ -2601,7 +2610,7 @@ class OpenAiSalesOrchestrator
         $response = $this->postJson('/responses', [
             'model' => $fallbackModel,
             'reasoning' => ['effort' => config('services.openai.fallback_reasoning_effort')],
-            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->responseStyleInstructions($conversation)
+            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->publicCommentInstructions($conversation).$this->responseStyleInstructions($conversation)
                 .' This is a fresh fallback orchestration chain. Re-evaluate the latest customer turn and use tools only when authorized. Never assume that the primary model\'s proposed state-changing action was correct.',
             'input' => $this->history($conversation, $recoveryInput),
             'tools' => $this->tools->definitions($agent),
@@ -2656,7 +2665,7 @@ class OpenAiSalesOrchestrator
         $response = $this->postJson('/responses', [
             'model' => $fallbackModel,
             'reasoning' => ['effort' => config('services.openai.fallback_reasoning_effort')],
-            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->responseStyleInstructions($conversation)
+            'instructions' => $this->instructions($agent).$this->routingInstructions($agent).$this->contextualCatalogInstructions($agent, $conversation).$this->publicCommentInstructions($conversation).$this->responseStyleInstructions($conversation)
                 .' This is the single server-authorized fallback attempt after the primary model failed validation. Produce one final strict response from the full dialogue and the server-controlled evidence in the latest user input. Do not claim that the absence of a match is a technical failure, and do not request human handoff merely because the primary draft failed.',
             'input' => $this->history($conversation, $recoveryInput),
             'max_output_tokens' => config('services.openai.max_output_tokens'),

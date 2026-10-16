@@ -74,8 +74,9 @@ META_APP_SECRET=use_a_secret_manager
 META_WEBHOOK_VERIFY_TOKEN=use_a_long_random_secret
 META_GRAPH_VERSION=v25.0
 META_REDIRECT_URI=https://your-domain.example/auth/meta/{provider}/callback
-META_FACEBOOK_SCOPES=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts
-META_INSTAGRAM_SCOPES=pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_content_publish
+META_FACEBOOK_SCOPES=pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts,pages_manage_engagement
+META_INSTAGRAM_SCOPES=pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish
+META_COMMENT_TO_SALE_ENABLED=true
 
 LINKEDIN_CLIENT_ID=use_a_secret_manager
 LINKEDIN_CLIENT_SECRET=use_a_secret_manager
@@ -121,7 +122,7 @@ QUEUE_CONNECTION=database
 DB_QUEUE_RETRY_AFTER=600
 ```
 
-In the Meta App Dashboard, enable the Instagram webhook object and subscribe it to `messages`, `messaging_postbacks`, and `messaging_seen` before onboarding businesses. This is a one-time platform-owner configuration: Instagram topics cannot be configured through the Facebook Page `/subscribed_apps` endpoint. Legatus uses that endpoint only to install the app on the selected Page with Page-supported fields.
+In the Meta App Dashboard, enable the Instagram webhook object and subscribe it to `messages`, `messaging_postbacks`, `messaging_seen`, and `comments` before onboarding businesses. This is a one-time platform-owner configuration: Instagram topics cannot be configured through the Facebook Page `/subscribed_apps` endpoint. Legatus uses that endpoint only to install the app on the selected Page with Page-supported fields. Before public comment automation is offered to external businesses, request Advanced Access/App Review for `pages_manage_engagement` and `instagram_manage_comments`, and include both permissions in the Meta Login configuration when `META_LOGIN_CONFIG_ID` is used. Existing businesses reconnect Meta once from Legatus to grant the new permissions; they do not install code or configure their own server.
 
 Use the host’s secret manager. Never commit the production `.env`, API keys, database credentials, `APP_KEY`, session data, or customer exports.
 

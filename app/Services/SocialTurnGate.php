@@ -12,7 +12,7 @@ class SocialTurnGate
 {
     public function shouldStaySilent(string $message, Conversation $conversation): bool
     {
-        if (! in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp'], true)
+        if (! in_array($conversation->channel, ['facebook', 'instagram', 'whatsapp', 'facebook_comment', 'instagram_comment'], true)
             || ! config('services.openai.key')) {
             return false;
         }

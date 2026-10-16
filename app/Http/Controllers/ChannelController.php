@@ -37,13 +37,13 @@ class ChannelController extends Controller
                 'name' => 'Facebook Messenger',
                 'short_name' => 'Facebook',
                 'icon' => 'f',
-                'description' => 'Answer every new Messenger conversation from the same Legatus inbox.',
+                'description' => 'Answer Messenger conversations and safe public Page comments from the same Legatus inbox.',
             ],
             'instagram' => [
                 'name' => 'Instagram Direct',
                 'short_name' => 'Instagram',
                 'icon' => '◎',
-                'description' => 'Turn product questions and recommendation requests in Direct into sales.',
+                'description' => 'Turn product questions in Direct and safe public comments into verified replies.',
             ],
         ])->map(function (array $channel, string $provider) use ($agent, $connections): array {
             $connection = $connections

@@ -150,20 +150,27 @@ class MetaWebhookController extends Controller
                     'provider_sender_id' => $senderId,
                     'provider_recipient_id' => $event['external_account_id'],
                     'message_type' => 'comment',
-                    'status' => 'processed',
+                    'status' => 'received',
                     'payload' => [
                         'text' => PrivacyRedactor::text($text),
                         'post_id' => (string) ($event['post_id'] ?? ''),
                         'source' => 'social_comment',
                     ],
                     'received_at' => $this->date($event['timestamp'] ?? null) ?? now(),
-                    'processed_at' => now(),
                 ],
             );
         } catch (UniqueConstraintViolationException) {
             return;
         }
-        if ($record->conversation_id) {
+        if ($record->conversation_id || $record->status !== 'received') {
+            return;
+        }
+
+        if ((bool) config('meta.comment_to_sale_enabled') && $connection->agent->automaticCommentRepliesEnabled()) {
+            ProcessMetaInboundMessage::dispatch($record->id)
+                ->onQueue('channels')
+                ->afterCommit();
+
             return;
         }
 
@@ -176,7 +183,7 @@ class MetaWebhookController extends Controller
             $conversation = $connection->agent->conversations()->create([
                 'channel_connection_id' => $connection->id,
                 'visitor_id' => "meta-comment:{$provider}:{$connection->id}:".hash('sha256', $senderId),
-                'external_thread_id' => 'comment:'.(string) $event['provider_message_id'],
+                'external_thread_id' => (string) $event['provider_message_id'],
                 'customer_name' => filled($event['sender_name'] ?? null)
                     ? mb_substr((string) $event['sender_name'], 0, 120)
                     : ucfirst($provider).' commenter',
@@ -201,7 +208,9 @@ class MetaWebhookController extends Controller
             $locked->update([
                 'conversation_id' => $conversation->id,
                 'message_id' => $message->id,
+                'status' => 'processed',
                 'payload' => ['source' => 'social_comment', 'content_removed' => true],
+                'processed_at' => now(),
             ]);
         });
     }
