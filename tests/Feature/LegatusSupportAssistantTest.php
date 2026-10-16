@@ -139,6 +139,27 @@ class LegatusSupportAssistantTest extends TestCase
             ->assertSee('Ask Legatus');
     }
 
+    public function test_production_landing_defers_support_widget_until_the_privacy_choice_is_resolved(): void
+    {
+        app()->instance('env', 'production');
+        config(['app.url' => 'https://legatus.example']);
+        $agent = app(LegatusSupportAssistant::class)->bootstrap();
+        $widgetUrl = URL::signedRoute('widget.install.script', [
+            'agent' => $agent->id,
+            'lang' => app()->getLocale(),
+        ]);
+
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('const legatusPrivacyResolvedEvent = \'legatus:privacy-choice-resolved\';', false)
+            ->assertSee('document.addEventListener(legatusPrivacyResolvedEvent, showLegatusSupportWidget);', false)
+            ->assertSee('document.addEventListener(legatusPrivacyPendingEvent, hideLegatusSupportWidget);', false)
+            ->assertSee('document.dispatchEvent(new Event(privacyResolvedEvent));', false)
+            ->assertSee('document.dispatchEvent(new Event(privacyPendingEvent));', false)
+            ->assertSee('/widget/install/'.$agent->id.'.js', false)
+            ->assertDontSee('<script src="'.$widgetUrl.'" async></script>', false);
+    }
+
     public function test_landing_language_choice_is_passed_to_the_support_launcher_and_frame(): void
     {
         config([
@@ -154,9 +175,9 @@ class LegatusSupportAssistantTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Language', 'en');
 
-        preg_match('/<script src="([^"]*\/widget\/install\/[^\"]+)" async><\/script>/', $landing->getContent(), $matches);
+        preg_match('/const legatusSupportWidgetUrl = ("[^"]+");/', $landing->getContent(), $matches);
         $this->assertCount(2, $matches);
-        $scriptUrl = html_entity_decode($matches[1], ENT_QUOTES | ENT_HTML5);
+        $scriptUrl = json_decode($matches[1], true, flags: JSON_THROW_ON_ERROR);
         $this->assertStringContainsString('lang=en', $scriptUrl);
 
         $launcher = $this->withServerVariables(['GEOIP_COUNTRY_CODE' => 'GE'])

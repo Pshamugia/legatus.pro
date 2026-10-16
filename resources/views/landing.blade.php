@@ -197,6 +197,31 @@
 
 @if($supportWidgetUrl)
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
+const legatusSupportWidgetUrl = @json($supportWidgetUrl, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+const legatusPrivacyResolvedEvent = 'legatus:privacy-choice-resolved';
+const legatusPrivacyPendingEvent = 'legatus:privacy-choice-pending';
+
+const loadLegatusSupportWidget = () => {
+    if (window.LegatusWidgetLoaded || document.querySelector('script[data-legatus-support-widget]')) return;
+
+    const script = document.createElement('script');
+    script.src = legatusSupportWidgetUrl;
+    script.async = true;
+    script.dataset.legatusSupportWidget = 'true';
+    document.body.appendChild(script);
+};
+
+const showLegatusSupportWidget = () => {
+    const root = document.getElementById('legatus-widget-root');
+    if (root) root.style.removeProperty('display');
+    loadLegatusSupportWidget();
+};
+
+const hideLegatusSupportWidget = () => {
+    const root = document.getElementById('legatus-widget-root');
+    if (root) root.style.setProperty('display', 'none', 'important');
+};
+
 document.querySelectorAll('[data-legatus-chat-open]').forEach(button => button.addEventListener('click', () => {
     if (window.LegatusWidget && typeof window.LegatusWidget.open === 'function') {
         window.LegatusWidget.open();
@@ -205,8 +230,14 @@ document.querySelectorAll('[data-legatus-chat-open]').forEach(button => button.a
 
     window.LegatusWidgetRequestedOpen = true;
 }));
+
+@production
+document.addEventListener(legatusPrivacyResolvedEvent, showLegatusSupportWidget);
+document.addEventListener(legatusPrivacyPendingEvent, hideLegatusSupportWidget);
+@else
+showLegatusSupportWidget();
+@endproduction
 </script>
-<script src="{{ $supportWidgetUrl }}" async></script>
 @endif
 
 @push('head')

@@ -44,6 +44,8 @@
             const storageKey = 'legatus_analytics_consent';
             const granted = 'granted';
             const denied = 'denied';
+            const privacyResolvedEvent = 'legatus:privacy-choice-resolved';
+            const privacyPendingEvent = 'legatus:privacy-choice-pending';
             let analyticsLoaded = false;
 
             window.dataLayer = window.dataLayer || [];
@@ -124,11 +126,13 @@
                 const showBanner = () => {
                     banner.hidden = false;
                     settings.hidden = true;
+                    document.dispatchEvent(new Event(privacyPendingEvent));
                 };
 
                 const hideBanner = () => {
                     banner.hidden = true;
                     settings.hidden = false;
+                    document.dispatchEvent(new Event(privacyResolvedEvent));
                 };
 
                 banner.querySelectorAll('[data-analytics-consent]').forEach((button) => {
