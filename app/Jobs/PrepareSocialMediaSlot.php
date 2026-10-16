@@ -21,7 +21,15 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
 
     private const AI_PRODUCT_ATTEMPTS = 3;
 
-    public int $timeout = 75;
+    // One slot prepares every provider before any post is published. Each
+    // provider may need both generation and verification requests, so the
+    // previous 75-second limit could terminate a healthy multi-channel slot
+    // between requests and leave every sibling post in `preparing`.
+    public int $timeout = 480;
+
+    // Ensure Laravel runs failed() on a worker timeout so the durable slot
+    // rows become eligible for the scheduler's safe retry immediately.
+    public bool $failOnTimeout = true;
 
     public int $tries = 3;
 
@@ -39,7 +47,7 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
 
     public function middleware(): array
     {
-        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(10)->expireAfter(90)];
+        return [(new WithoutOverlapping($this->uniqueId()))->releaseAfter(10)->expireAfter(510)];
     }
 
     public function handle(

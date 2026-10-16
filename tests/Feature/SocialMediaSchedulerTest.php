@@ -2600,6 +2600,59 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
     }
 
+    public function test_stale_slot_preparation_is_recovered_in_a_non_utc_application_timezone(): void
+    {
+        Queue::fake();
+        $originalTimezone = date_default_timezone_get();
+        date_default_timezone_set('Asia/Tbilisi');
+
+        try {
+            [, $agent] = $this->tenant('stale-slot-preparation-tbilisi');
+            $this->connections($agent);
+            $product = $agent->products()->create($this->product('Timezone Recovery Product', 'General', 3));
+            $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram', 'threads']);
+            $dueAt = now('UTC')->subMinutes(15);
+
+            foreach (['facebook', 'instagram', 'threads'] as $provider) {
+                $post = $schedule->posts()->create([
+                    'agent_id' => $agent->id,
+                    'product_id' => $product->id,
+                    'provider' => $provider,
+                    'status' => 'preparing',
+                    'scheduled_for' => $dueAt,
+                    'title' => $product->name,
+                    'description' => $product->description,
+                    'product_url' => data_get($product->metadata, 'product_url'),
+                    'image_url' => $product->publicImageUrl(),
+                    'caption' => 'Prepared caption',
+                ]);
+                $post->forceFill(['updated_at' => now()->subMinutes(15)])->saveQuietly();
+            }
+
+            $this->artisan('legatus:dispatch-social-posts')
+                ->expectsOutput('1 social slot queued for preparation.')
+                ->assertSuccessful();
+
+            $this->assertSame(
+                ['preparing'],
+                $schedule->posts()->orderBy('id')->pluck('status')->unique()->values()->all(),
+            );
+            Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
+        } finally {
+            date_default_timezone_set($originalTimezone);
+        }
+    }
+
+    public function test_slot_preparation_timeout_covers_multi_channel_ai_work_and_fails_safely(): void
+    {
+        $job = new PrepareSocialMediaSlot(23, '2026-10-16 06:00:00');
+
+        $this->assertSame(480, $job->timeout);
+        $this->assertTrue($job->failOnTimeout);
+        $this->assertGreaterThan($job->timeout, $job->uniqueFor);
+        $this->assertGreaterThan($job->timeout, config('queue.connections.database.retry_after'));
+    }
+
     public function test_ai_slot_prepares_every_channel_before_queueing_and_replaces_a_failed_product(): void
     {
         Queue::fake();

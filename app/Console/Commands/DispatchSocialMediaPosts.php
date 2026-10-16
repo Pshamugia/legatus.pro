@@ -21,7 +21,7 @@ class DispatchSocialMediaPosts extends Command
         // second Story automatically and create a duplicate in Meta.
         SocialMediaPost::query()
             ->where('story_status', 'publishing')
-            ->where('updated_at', '<=', now('UTC')->subMinutes(10))
+            ->where('updated_at', '<=', now()->subMinutes(10))
             ->update([
                 'story_status' => 'delivery_unknown',
                 'story_failure_reason' => 'The Story worker stopped before delivery could be confirmed. Verify it in the native app before retrying.',
@@ -41,11 +41,11 @@ class DispatchSocialMediaPosts extends Command
 
         // If a worker was terminated after a slot was claimed but before its
         // preparation job completed, make the slot eligible again. Active
-        // preparation jobs have a 75-second timeout, so ten minutes is safely
-        // beyond their normal lifetime.
+        // preparation jobs have an eight-minute timeout, so ten minutes is
+        // safely beyond their normal lifetime.
         SocialMediaPost::query()
             ->where('status', 'preparing')
-            ->where('updated_at', '<=', now('UTC')->subMinutes(10))
+            ->where('updated_at', '<=', now()->subMinutes(10))
             ->update([
                 'status' => 'scheduled',
                 'failure_reason' => 'A stale preparation claim was recovered automatically.',
@@ -58,7 +58,7 @@ class DispatchSocialMediaPosts extends Command
         // product slots from an orphaned queued claim.
         SocialMediaPost::query()
             ->where('status', 'queued')
-            ->where('updated_at', '<=', now('UTC')->subMinutes(10))
+            ->where('updated_at', '<=', now()->subMinutes(10))
             ->orderBy('id')
             ->limit(100)
             ->get(['id', 'attempts', 'updated_at'])
@@ -77,7 +77,7 @@ class DispatchSocialMediaPosts extends Command
                     ->where('status', 'queued')
                     ->where('updated_at', $post->updated_at)
                     ->update([
-                        'updated_at' => now('UTC'),
+                        'updated_at' => now(),
                         'failure_reason' => 'A lost publishing job was queued again automatically.',
                     ]);
                 if ($claimed === 1) {
