@@ -128,11 +128,13 @@ class SuperAdminTest extends TestCase
         $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
         Organization::create(['name' => 'Customer Store', 'slug' => 'customer-store']);
         app(ReliabilityFixtureManager::class)->provision();
+        app(LegatusSupportAssistant::class)->bootstrap();
 
         $this->actingAs($admin)->get(route('super-admin.index'))
             ->assertOk()
             ->assertSee('Customer Store')
             ->assertDontSee('Legatus Reliability Fixture')
+            ->assertDontSee('Internal Legatus website support workspace.')
             ->assertViewHas('metrics', fn (array $metrics): bool => $metrics['businesses'] === 1);
     }
 

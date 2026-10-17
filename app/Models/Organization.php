@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -11,6 +12,14 @@ class Organization extends Model
     protected $guarded = [];
 
     protected $casts = ['settings' => 'array'];
+
+    public function scopeCustomerBusiness(Builder $query): Builder
+    {
+        return $query
+            ->whereNull('settings->system_fixture')
+            ->whereDoesntHave('agents', fn (Builder $agents) => $agents
+                ->where('settings->assistant_mode', 'platform_support'));
+    }
 
     public function users(): BelongsToMany
     {

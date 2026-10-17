@@ -25,7 +25,7 @@ class SuperAdminController extends Controller
         $environment = config('paddle.environment');
         $search = trim((string) $request->query('search', ''));
         $organizations = Organization::query()
-            ->whereNull('settings->system_fixture')
+            ->customerBusiness()
             ->with([
                 'users' => fn ($query) => $query->orderBy('organization_user.created_at'),
                 'agents:id,organization_id,name,business_name,is_active',
@@ -50,6 +50,10 @@ class SuperAdminController extends Controller
             ->join('agents', 'agents.id', '=', 'agent_runs.agent_id')
             ->join('organizations', 'organizations.id', '=', 'agents.organization_id')
             ->whereNull('organizations.settings->system_fixture')
+            ->where(function ($query): void {
+                $query->whereNull('agents.settings->assistant_mode')
+                    ->orWhere('agents.settings->assistant_mode', '!=', 'platform_support');
+            })
             ->where('agent_runs.provider', 'openai')
             ->where('agent_runs.created_at', '>=', $monthStart)
             ->where(function ($query): void {
@@ -86,16 +90,17 @@ class SuperAdminController extends Controller
         );
 
         $currentSubscriptions = PaddleSubscription::where('environment', $environment)
+            ->whereHas('organization', fn ($query) => $query->customerBusiness())
             ->orderByDesc('paddle_occurred_at')
             ->orderByDesc('id')
             ->get()
             ->unique('organization_id');
         $metrics = [
-            'businesses' => Organization::whereNull('settings->system_fixture')->count(),
-            'new_this_month' => Organization::whereNull('settings->system_fixture')->where('created_at', '>=', now()->startOfMonth())->count(),
+            'businesses' => Organization::customerBusiness()->count(),
+            'new_this_month' => Organization::customerBusiness()->where('created_at', '>=', now()->startOfMonth())->count(),
             'active' => $currentSubscriptions->where('status', 'active')->filter(fn ($subscription) => ! $subscription->current_period_ends_at?->isPast())->count(),
             'trialing' => $currentSubscriptions->where('status', 'trialing')->filter(fn ($subscription) => ! $subscription->trial_ends_at?->isPast())->count(),
-            'complimentary' => Organization::whereHas('billingAccessGrants', fn ($query) => $query->active())->count(),
+            'complimentary' => Organization::customerBusiness()->whereHas('billingAccessGrants', fn ($query) => $query->active())->count(),
             'attention' => $currentSubscriptions->filter(fn ($subscription) => in_array($subscription->status, ['past_due', 'paused', 'canceled'], true)
                 || ($subscription->status === 'active' && $subscription->current_period_ends_at?->isPast())
                 || ($subscription->status === 'trialing' && $subscription->trial_ends_at?->isPast()))->count(),
