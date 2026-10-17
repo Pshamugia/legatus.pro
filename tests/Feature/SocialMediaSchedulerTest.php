@@ -3609,7 +3609,7 @@ class SocialMediaSchedulerTest extends TestCase
             '--scheduled-local' => '2026-10-17 19:00',
             '--timezone' => 'Asia/Tbilisi',
             '--confirm' => true,
-        ])->expectsOutputToContain('Corrected replacement queued as social post')->assertSuccessful();
+        ])->expectsOutputToContain('Corrected replacements queued as social posts')->assertSuccessful();
 
         $post->refresh();
         $retry = $schedule->posts()->whereKeyNot($post->id)->sole();
@@ -3623,6 +3623,65 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PublishSocialMediaPost::class, fn ($job): bool => $job->postId === $retry->id);
         Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
             && str_contains($request->url(), '/v25.0/page-1_karmila-post?'));
+    }
+
+    public function test_manually_deleted_instagram_and_threads_slot_is_queued_together_for_corrected_republication(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('multi-channel-republish-command');
+        $agent->update(['business_name' => 'bukinistebi.ge']);
+        $this->connections($agent);
+        $agent->channelConnections()->create([
+            'provider' => 'threads',
+            'status' => 'active',
+            'external_account_id' => 'threads-1',
+            'external_account_name' => 'Threads',
+            'access_token' => 'threads-token',
+            'connected_at' => now(),
+        ]);
+        $product = $agent->products()->create($this->product('კარმილა', 'Books', 2));
+        $schedule = $this->replacementSchedule($agent, ['instagram', 'threads']);
+        $scheduledFor = CarbonImmutable::parse('2026-10-17 19:00', 'Asia/Tbilisi')->utc();
+        foreach (['instagram', 'threads'] as $provider) {
+            $post = $schedule->posts()->create([
+                'agent_id' => $agent->id,
+                'product_id' => $product->id,
+                'provider' => $provider,
+                'status' => 'published',
+                'scheduled_for' => $scheduledFor,
+                'published_at' => $scheduledFor,
+                'provider_post_id' => $provider.'-karmila-post',
+                'title' => $product->name,
+                'description' => $product->description,
+                'product_url' => 'https://bukinistebi.ge/books/karmila/2313',
+                'image_url' => $product->publicImageUrl(),
+                'caption' => 'კარმილა',
+                'copy_mode' => 'ai',
+                'ai_generated_at' => now(),
+                'ai_model' => 'verified-title-fallback',
+            ]);
+            app(SocialMediaPublicationHistory::class)->rememberPublished($post);
+        }
+        Http::fake();
+
+        $this->artisan('legatus:republish-social-post', [
+            '--agent' => 'bukinistebi.ge',
+            '--provider' => 'instagram,threads',
+            '--url' => 'https://bukinistebi.ge/books/karmila/2313',
+            '--scheduled-local' => '2026-10-17 19:00',
+            '--timezone' => 'Asia/Tbilisi',
+            '--remote-posts-deleted' => true,
+            '--confirm' => true,
+        ])->expectsOutputToContain('Corrected replacements queued as social posts')->assertSuccessful();
+
+        $oldPosts = $schedule->posts()->where('status', 'skipped')->get();
+        $retryPosts = $schedule->posts()->where('status', 'queued')->get();
+        $this->assertSame(['instagram', 'threads'], $oldPosts->pluck('provider')->sort()->values()->all());
+        $this->assertTrue($oldPosts->every(fn (SocialMediaPost $post): bool => $post->provider_deleted_at !== null));
+        $this->assertSame(['instagram', 'threads'], $retryPosts->pluck('provider')->sort()->values()->all());
+        $this->assertTrue($retryPosts->every(fn (SocialMediaPost $post): bool => $post->caption === '' && $post->ai_generated_at === null));
+        Queue::assertPushed(PublishSocialMediaPost::class, 2);
+        Http::assertNothingSent();
     }
 
     public function test_legacy_facebook_photo_post_uses_caption_when_edited(): void
