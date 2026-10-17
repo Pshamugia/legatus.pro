@@ -128,18 +128,21 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                     $post->refresh();
                 } catch (\Throwable $exception) {
                     if ($this->attempts() >= $this->tries) {
+                        if (blank(trim((string) $post->description))) {
+                            $reason = 'The product has no verified description; title-only publishing is forbidden.';
+                            if (! $this->releaseUndeliveredSlotForReplacement($post, $reason)) {
+                                $post->update(['status' => 'failed', 'failure_reason' => $reason]);
+                            }
+
+                            return;
+                        }
                         try {
-                            $hasDescription = filled(trim((string) $post->description));
                             $post->update([
-                                'caption' => $hasDescription
-                                    ? $copywriter->generateFallback($post)
-                                    : $copywriter->verifiedFallback($post),
+                                'caption' => $copywriter->generateFallback($post),
                                 'ai_generated_at' => now(),
-                                'ai_model' => $hasDescription
-                                    ? (string) config('services.openai.fallback_model', 'gpt-5.6-sol')
-                                    : 'verified-title-fallback',
+                                'ai_model' => (string) config('services.openai.fallback_model', 'gpt-5.6-sol'),
                                 'failure_reason' => Str::limit(
-                                    ($hasDescription ? 'Primary AI copy failed; grounded fallback model used. ' : 'Product has no verified description; title-only fallback used. ').$exception->getMessage(),
+                                    'Primary AI copy failed; grounded fallback model used. '.$exception->getMessage(),
                                     2000,
                                     '',
                                 ),
@@ -162,7 +165,7 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                                 $post->update([
                                     'status' => 'failed',
                                     'failure_reason' => Str::limit(
-                                        'The slot could not be published because even its verified title fallback was unavailable. '.$verifiedFallbackException->getMessage(),
+                                        'The slot could not be published because its verified description fallback was unavailable. '.$verifiedFallbackException->getMessage(),
                                         2000,
                                         '',
                                     ),
@@ -215,6 +218,14 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                 return;
             }
         }
+        if ($copyMode === 'ai' && ! $copywriter->hasSubstantiveProductCopy($post, (string) $post->caption)) {
+            $reason = 'Title-only or otherwise non-substantive AI copy was blocked before delivery.';
+            if (! $this->releaseUndeliveredSlotForReplacement($post, $reason, true)) {
+                $post->update(['status' => 'failed', 'failure_reason' => $reason]);
+            }
+
+            return;
+        }
 
         $connection = $post->agent->channelConnections()
             ->where('provider', $post->provider)
@@ -256,7 +267,7 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                 // later edit or delete the actual feed post from Legatus.
                 'provider_post_id' => (string) ($result['post_id'] ?? $result['id'] ?? ''),
                 'published_at' => now(),
-                'failure_reason' => in_array($post->ai_model, ['verified-fallback', 'verified-title-fallback', (string) config('services.openai.fallback_model', 'gpt-5.6-sol')], true)
+                'failure_reason' => in_array($post->ai_model, ['verified-fallback', (string) config('services.openai.fallback_model', 'gpt-5.6-sol')], true)
                     ? $post->failure_reason
                     : null,
                 'story_status' => in_array($post->provider, ['facebook', 'instagram'], true) ? 'queued' : null,
@@ -303,9 +314,9 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
             ]);
     }
 
-    private function releaseUndeliveredSlotForReplacement(SocialMediaPost $post, string $reason): bool
+    private function releaseUndeliveredSlotForReplacement(SocialMediaPost $post, string $reason, bool $resetAiCopy = false): bool
     {
-        return DB::transaction(function () use ($post, $reason): bool {
+        return DB::transaction(function () use ($post, $reason, $resetAiCopy): bool {
             $slotPosts = SocialMediaPost::query()
                 ->where('social_media_schedule_id', $post->social_media_schedule_id)
                 ->where('scheduled_for', $post->scheduled_for)
@@ -318,10 +329,19 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                 return false;
             }
 
-            SocialMediaPost::query()->whereIn('id', $slotPosts->pluck('id'))->update([
+            $updates = [
                 'status' => 'scheduled',
                 'failure_reason' => Str::limit('Product skipped before delivery; the slot will try the next eligible product. '.$reason, 2000, ''),
-            ]);
+            ];
+            if ($resetAiCopy) {
+                $updates += [
+                    'caption' => '',
+                    'ai_generation_attempted_at' => null,
+                    'ai_generated_at' => null,
+                    'ai_model' => null,
+                ];
+            }
+            SocialMediaPost::query()->whereIn('id', $slotPosts->pluck('id'))->update($updates);
 
             return true;
         });

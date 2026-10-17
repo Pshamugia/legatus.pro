@@ -19,7 +19,7 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
 {
     use Queueable;
 
-    private const AI_PRODUCT_ATTEMPTS = 3;
+    private const AI_PRODUCT_ATTEMPTS = 8;
 
     // One slot prepares every provider before any post is published. Each
     // provider may need both generation and verification requests, so the
@@ -182,21 +182,25 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
 
         $primaryReason = collect($primaryFailures)->filter()->unique()->implode(' | ');
         $hasDescription = $posts->every(fn (SocialMediaPost $post): bool => filled(trim((string) $post->description)));
+        if (! $hasDescription) {
+            SocialMediaPost::query()->whereIn('id', $postIds)->update([
+                'status' => 'failed',
+                'failure_reason' => 'No product with a verified description was available. Title-only publishing was blocked.',
+            ]);
+
+            return false;
+        }
 
         try {
             foreach ($posts as $post) {
-                $caption = $hasDescription
-                    ? $copywriter->generateFallback($post->fresh(['agent', 'product', 'schedule']))
-                    : $copywriter->verifiedFallback($post);
+                $caption = $copywriter->generateFallback($post->fresh(['agent', 'product', 'schedule']));
                 $post->update([
                     'caption' => $caption,
                     'ai_generation_attempted_at' => $post->ai_generation_attempted_at ?: now(),
                     'ai_generated_at' => now(),
-                    'ai_model' => $hasDescription
-                        ? (string) config('services.openai.fallback_model', 'gpt-5.6-sol')
-                        : 'verified-title-fallback',
+                    'ai_model' => (string) config('services.openai.fallback_model', 'gpt-5.6-sol'),
                     'failure_reason' => Str::limit(
-                        ($hasDescription ? 'Primary AI copy failed; grounded fallback model used. ' : 'Product has no verified description; title-only fallback used. ').$primaryReason,
+                        'Primary AI copy failed; grounded fallback model used. '.$primaryReason,
                         2000,
                         '',
                     ),
@@ -221,7 +225,7 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
                 SocialMediaPost::query()->whereIn('id', $postIds)->update([
                     'status' => 'failed',
                     'failure_reason' => Str::limit(
-                        'The slot could not be published because even its verified title fallback was unavailable. '.$verifiedFallbackException->getMessage(),
+                        'The slot could not be published because its verified description fallback was unavailable. '.$verifiedFallbackException->getMessage(),
                         2000,
                         '',
                     ),

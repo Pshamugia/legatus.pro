@@ -652,7 +652,7 @@ class KnowledgeIngestionService
         // of an HTML entity. Never let that shorter preview replace the full
         // description that is visibly rendered for the customer.
         if ($candidates !== []) {
-            usort($candidates, fn (string $left, string $right): int => mb_strlen($left) <=> mb_strlen($right));
+            usort($candidates, fn (string $left, string $right): int => mb_strlen($right) <=> mb_strlen($left));
 
             return $candidates[0];
         }
@@ -665,7 +665,7 @@ class KnowledgeIngestionService
             return '';
         }
 
-        usort($candidates, fn (string $left, string $right): int => mb_strlen($left) <=> mb_strlen($right));
+        usort($candidates, fn (string $left, string $right): int => mb_strlen($right) <=> mb_strlen($left));
 
         return $candidates[0];
     }

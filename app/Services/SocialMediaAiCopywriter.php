@@ -94,6 +94,9 @@ class SocialMediaAiCopywriter
         }
 
         $caption = $this->renderCaption($post, $verification['caption']);
+        if (! $this->hasSubstantiveProductCopy($post, $caption)) {
+            throw new \RuntimeException('AI Copywriter produced title-only or otherwise non-substantive copy.');
+        }
 
         Log::info('Social media AI caption generated.', [
             'agent_id' => $post->agent_id,
@@ -115,22 +118,35 @@ class SocialMediaAiCopywriter
         }
 
         $description = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $post->description)) ?? '');
-        if (! $this->descriptionAppearsComplete($description)) {
-            $description = '';
+        if ($description === '') {
+            throw new \RuntimeException('A verified product description is required for the social media fallback; title-only publishing is forbidden.');
         }
-        $body = $description === '' ? $title : $title."\n\n".$description;
+        $body = $title."\n\n".$this->safeVerifiedDescription($description);
 
         try {
-            return $this->renderCaption($post, $body);
+            $caption = $this->renderCaption($post, $body);
+            if (! $this->hasSubstantiveProductCopy($post, $caption)) {
+                throw new \RuntimeException('Verified fallback produced title-only or otherwise non-substantive copy.');
+            }
+
+            return $caption;
         } catch (\RuntimeException $exception) {
             if (! str_contains($exception->getMessage(), 'exceeds the provider limit')) {
                 throw $exception;
             }
 
-            // Never cut a verified title or description mid-sentence merely
-            // to satisfy a provider limit. A complete title and exact link are
-            // the smallest safe fallback that still identifies the product.
-            return $this->renderCaption($post, $title);
+            $limit = SocialMediaTemplateRenderer::CHARACTER_LIMITS[$post->provider] ?? 2200;
+            $reserved = mb_strlen($title) + mb_strlen((string) $post->product_url) + 4;
+            $excerpt = $this->verifiedDescriptionExcerpt(
+                $this->safeVerifiedDescription($description),
+                max(0, $limit - $reserved),
+            );
+            $caption = $this->renderCaption($post, $title."\n\n".$excerpt);
+            if (! $this->hasSubstantiveProductCopy($post, $caption)) {
+                throw new \RuntimeException('The verified product description cannot fit the provider limit without becoming title-only.', previous: $exception);
+            }
+
+            return $caption;
         }
     }
 
@@ -564,6 +580,19 @@ PROMPT;
         return mb_strlen($copy) >= 20;
     }
 
+    public function hasSubstantiveProductCopy(SocialMediaPost $post, string $caption): bool
+    {
+        $body = preg_replace('~https?://\S+|#[\pL\pN_]+~u', ' ', strip_tags($caption)) ?? '';
+        $body = trim(preg_replace('/\s+/u', ' ', $body) ?? '');
+        $title = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $post->title)) ?? '');
+        if ($title !== '') {
+            $body = preg_replace('/'.preg_quote($title, '/').'/iu', ' ', $body, 1) ?? $body;
+        }
+        $substantive = preg_replace('/[^\pL\pN]+/u', '', $body) ?? '';
+
+        return mb_strlen($substantive) >= 20;
+    }
+
     private function completionFailure(string $caption): ?string
     {
         $body = trim(preg_replace('~https?://\S+|#[\pL\pN_]+~u', ' ', strip_tags($caption)) ?? '');
@@ -590,16 +619,60 @@ PROMPT;
         if (preg_match('/(?:\.{3}|…|[,;:–—-])\s*[”"»’\)\]]*$/u', $description) === 1) {
             return false;
         }
-        if (preg_match('/[.!?]\s*[”"»’\)\]]*$/u', $description) === 1) {
-            return true;
+
+        // Storefront descriptions frequently omit terminal punctuation. That
+        // is not evidence of truncation. Only explicit truncation or dangling
+        // punctuation is rejected here.
+        return true;
+    }
+
+    private function safeVerifiedDescription(string $description): string
+    {
+        if ($this->descriptionAppearsComplete($description)) {
+            return $description;
         }
 
-        // A compact catalogue label may be complete without prose punctuation.
-        // A sentence-like source ending in a word is treated as truncated even
-        // when it happens to be shorter than the usual description length.
-        preg_match_all('/[\pL\pN]+/u', $description, $words);
+        if (preg_match_all('/.*?[.!?](?=\s|$)/us', $description, $sentences) > 0) {
+            $complete = trim(implode(' ', $sentences[0]));
+            $letters = preg_replace('/[^\pL\pN]+/u', '', $complete) ?? '';
+            if (mb_strlen($letters) >= 20) {
+                return $complete;
+            }
+        }
 
-        return mb_strlen($description) <= 120 && count($words[0]) <= 8;
+        throw new \RuntimeException('The verified product description is explicitly truncated and has no complete passage safe to publish.');
+    }
+
+    private function verifiedDescriptionExcerpt(string $description, int $limit): string
+    {
+        if ($limit < 20) {
+            throw new \RuntimeException('The provider limit leaves no room for substantive verified product copy.');
+        }
+        if (mb_strlen($description) <= $limit) {
+            return $description;
+        }
+
+        preg_match_all('/.*?[.!?](?=\s|$)/us', $description, $sentences);
+        $excerpt = '';
+        foreach ($sentences[0] ?? [] as $sentence) {
+            $candidate = trim($excerpt.' '.trim($sentence));
+            if (mb_strlen($candidate) > $limit) {
+                break;
+            }
+            $excerpt = $candidate;
+        }
+        if (mb_strlen(preg_replace('/[^\pL\pN]+/u', '', $excerpt) ?? '') >= 20) {
+            return $excerpt;
+        }
+
+        $excerpt = rtrim(mb_substr($description, 0, max(0, $limit - 1)));
+        $excerpt = preg_replace('/\s+\S*$/u', '', $excerpt) ?? $excerpt;
+        $excerpt = rtrim($excerpt, " \t\n\r\0\x0B,;:–—-").'…';
+        if (mb_strlen(preg_replace('/[^\pL\pN]+/u', '', $excerpt) ?? '') < 20) {
+            throw new \RuntimeException('The provider limit leaves no room for substantive verified product copy.');
+        }
+
+        return $excerpt;
     }
 
     private function renderCaption(SocialMediaPost $post, string $caption): string

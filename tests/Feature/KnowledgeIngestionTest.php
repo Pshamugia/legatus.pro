@@ -26,6 +26,20 @@ class KnowledgeIngestionTest extends TestCase
         config(['services.openai.key' => null]);
     }
 
+    public function test_product_page_uses_the_longest_visible_verified_description(): void
+    {
+        $shortPreview = 'Short preview text that should never replace the full description';
+        $fullDescription = 'This is the complete visible product description with several distinctive verified details that provide enough evidence for grounded social copy even when a shorter preview is present.';
+        $html = '<html><body>'
+            .'<p itemprop="description">'.$shortPreview.'</p>'
+            .'<section class="description-card">'.$fullDescription.'</section>'
+            .'</body></html>';
+
+        $description = app(KnowledgeIngestionService::class)->productDescriptionFromHtml($html);
+
+        $this->assertSame($fullDescription, $description);
+    }
+
     public function test_csv_catalog_is_normalized_and_deduplicated(): void
     {
         $this->seed();

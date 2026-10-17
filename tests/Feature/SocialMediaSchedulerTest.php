@@ -11,10 +11,10 @@ use App\Models\User;
 use App\Services\KnowledgeIngestionService;
 use App\Services\MetaGraphClient;
 use App\Services\ProductPagePrimaryImageResolver;
-use App\Services\PublicProductAvailabilityVerifier;
 use App\Services\SocialMediaAiCopywriter;
 use App\Services\SocialMediaAiPhotoEditor;
 use App\Services\SocialMediaImageDesigner;
+use App\Services\SocialMediaPublicationHistory;
 use App\Services\SocialMediaScheduler;
 use App\Services\SocialMediaTemplateRenderer;
 use App\Services\SocialMediaTemplateService;
@@ -332,7 +332,7 @@ class SocialMediaSchedulerTest extends TestCase
             'image_url' => $product->publicImageUrl(),
             'caption' => 'Verified retry caption',
         ]);
-        $history = app(\App\Services\SocialMediaPublicationHistory::class);
+        $history = app(SocialMediaPublicationHistory::class);
 
         Http::fake([
             'https://graph.facebook.test/*/media*' => Http::sequence()
@@ -1596,7 +1596,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame($product->fresh()->description, $post->fresh()->description);
     }
 
-    public function test_incomplete_verified_description_uses_title_only_fallback_and_never_calls_ai(): void
+    public function test_explicitly_truncated_description_never_degrades_to_title_only_copy(): void
     {
         Http::fake();
         [, $agent] = $this->tenant('truncated-social-description');
@@ -1609,7 +1609,7 @@ class SocialMediaSchedulerTest extends TestCase
             'status' => 'preparing',
             'scheduled_for' => now('UTC')->subMinute(),
             'title' => $product->name,
-            'description' => 'This verified source starts normally with several factual catalogue details, continues as a long prose paragraph, and then stops unexpectedly in the middle of an unfinished wor',
+            'description' => 'This verified source starts normally with several factual catalogue details, continues as a long prose paragraph, and then stops unexpectedly…',
             'product_url' => data_get($product->metadata, 'product_url'),
             'image_url' => $product->publicImageUrl(),
             'caption' => '',
@@ -1624,11 +1624,69 @@ class SocialMediaSchedulerTest extends TestCase
             $this->assertStringContainsString('truncated source', $exception->getMessage());
         }
 
-        $this->assertSame(
-            $product->name."\n\n".data_get($product->metadata, 'product_url'),
-            $copywriter->verifiedFallback($post),
-        );
+        try {
+            $copywriter->verifiedFallback($post);
+            $this->fail('An explicitly truncated description must never degrade to title-only copy.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('explicitly truncated', $exception->getMessage());
+        }
         Http::assertNothingSent();
+    }
+
+    public function test_verified_description_without_terminal_punctuation_remains_usable(): void
+    {
+        [, $agent] = $this->tenant('punctuation-free-social-description');
+        $details = $this->product('კარმილა', 'Books', 2);
+        $details['description'] = 'ჯოზეფ შერიდან ლე ფანუს 1872 წლის ვამპირული საგა ბრემ სტოკერის მოგვიანებით გამოქვეყნებული და უფრო აღიარებული ნაწარმოების, „დრაკულას“ შთაგონების წყარო';
+        $product = $agent->products()->create($details);
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'preparing',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => '',
+            'copy_mode' => 'ai',
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->verifiedFallback($post);
+
+        $this->assertStringContainsString($product->description, $caption);
+        $this->assertNotSame($product->name."\n\n".$post->product_url, $caption);
+    }
+
+    public function test_verified_fallback_keeps_grounded_copy_within_a_short_provider_limit(): void
+    {
+        [, $agent] = $this->tenant('short-provider-grounded-fallback');
+        $details = $this->product('კარმილა', 'Books', 2);
+        $details['description'] = str_repeat('ეს არის გადამოწმებული ვრცელი აღწერა, რომელიც კონკრეტულ ნაწარმოებსა და მის ლიტერატურულ მნიშვნელობას აღწერს. ', 12);
+        $product = $agent->products()->create($details);
+        $schedule = $this->replacementSchedule($agent, ['threads']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'threads',
+            'status' => 'preparing',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => '',
+            'copy_mode' => 'ai',
+        ]);
+
+        $copywriter = app(SocialMediaAiCopywriter::class);
+        $caption = $copywriter->verifiedFallback($post);
+
+        $this->assertLessThanOrEqual(500, mb_strlen($caption));
+        $this->assertTrue($copywriter->hasSubstantiveProductCopy($post, $caption));
+        $this->assertStringContainsString('გადამოწმებული ვრცელი აღწერა', $caption);
     }
 
     public function test_ai_copywriter_rewrites_a_caption_that_ends_mid_sentence(): void
@@ -2906,14 +2964,14 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PublishSocialMediaPost::class, 3);
     }
 
-    public function test_ai_slot_uses_verified_title_fallback_when_no_other_described_product_exists(): void
+    public function test_ai_slot_replaces_a_title_only_product_with_a_described_product(): void
     {
         Queue::fake();
-        Http::fake();
         [, $agent] = $this->tenant('title-fallback-ai-slot');
         $details = $this->product('Verified Title Only', 'General', 2);
         $details['description'] = null;
         $product = $agent->products()->create($details);
+        $replacement = $agent->products()->create($this->product('Verified Described Replacement', 'General', 2));
         $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram', 'threads']);
         $schedule->update(['copy_mode' => 'ai', 'ai_tone' => 'simple']);
         $dueAt = now('UTC')->subMinute();
@@ -2926,17 +2984,63 @@ class SocialMediaSchedulerTest extends TestCase
             ]);
         }
 
+        $copywriter = \Mockery::mock(SocialMediaAiCopywriter::class);
+        $copywriter->shouldReceive('generate')->times(3)->andReturnUsing(
+            fn (SocialMediaPost $post): string => 'Grounded copy for '.$post->title."\n\n".$post->product_url,
+        );
+        $copywriter->shouldNotReceive('generateFallback');
+        $copywriter->shouldNotReceive('verifiedFallback');
+
         (new PrepareSocialMediaSlot($schedule->id, $dueAt->format('Y-m-d H:i:s')))->handle(
             app(SocialMediaScheduler::class),
+            null,
+            $copywriter,
         );
 
         $posts = $schedule->posts()->where('scheduled_for', $dueAt)->get();
         $this->assertTrue($posts->every(fn (SocialMediaPost $post): bool => $post->status === 'queued'
-            && $post->ai_model === 'verified-title-fallback'
-            && str_contains((string) $post->failure_reason, 'title-only fallback used')
-            && $post->caption === $product->name."\n\n".data_get($product->metadata, 'product_url')));
+            && (int) $post->product_id === (int) $replacement->id
+            && str_contains($post->caption, 'Grounded copy for '.$replacement->name)
+            && ! str_contains($post->caption, $product->name)));
         Queue::assertPushed(PublishSocialMediaPost::class, 3);
-        Http::assertNothingSent();
+    }
+
+    public function test_legacy_queued_title_only_ai_copy_is_blocked_before_meta_delivery(): void
+    {
+        Http::fake();
+        [, $agent] = $this->tenant('legacy-title-only-queue');
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('Legacy Title Only', 'General', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $schedule->update(['copy_mode' => 'ai']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'queued',
+            'scheduled_for' => now('UTC')->subMinute(),
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => $product->name."\n\n".data_get($product->metadata, 'product_url'),
+            'copy_mode' => 'ai',
+            'ai_generated_at' => now(),
+            'ai_model' => 'verified-title-fallback',
+        ]);
+
+        (new PublishSocialMediaPost($post->id))->handle(
+            app(MetaGraphClient::class),
+            app(SocialMediaTemplateRenderer::class),
+        );
+
+        $fresh = $post->fresh();
+        $this->assertSame('scheduled', $fresh->status);
+        $this->assertSame('', $fresh->caption);
+        $this->assertNull($fresh->ai_generated_at);
+        $this->assertNull($fresh->ai_model);
+        $this->assertStringContainsString('non-substantive AI copy was blocked', (string) $fresh->failure_reason);
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'graph.facebook.test'));
     }
 
     public function test_ai_slot_uses_grounded_fallback_model_without_publishing_raw_catalog_text(): void

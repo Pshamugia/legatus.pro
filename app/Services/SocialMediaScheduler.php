@@ -246,10 +246,19 @@ class SocialMediaScheduler
                 $pending->pluck('provider')->all(),
             )
         );
+        $requiresDescription = $pending->contains(
+            fn ($post): bool => ($post->copy_mode ?: $schedule->copy_mode) === 'ai',
+        );
 
         $currentProductIsEligible = $product && $productMatchesSchedule && ! $alreadyClaimedByEarlierSlot && ! $alreadyPublished && $pending->every(
             fn ($post): bool => $this->productIsPublishableForPost($product, $post),
         ) && $this->liveAvailabilityAllows($schedule->agent, $product);
+        if ($currentProductIsEligible && $requiresDescription) {
+            $product->refresh();
+            $currentProductIsEligible = $pending->every(
+                fn ($post): bool => $this->productHasSocialDescription($product, $post->language),
+            );
+        }
 
         if ($currentProductIsEligible && ! isset($excludedProductIds[(int) $product->id])) {
             $this->refreshPendingProductFacts($pending, $product);
@@ -281,6 +290,10 @@ class SocialMediaScheduler
             ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => isset($excludedProductIds[(int) $variant['product']->id]))
             ->unique(fn (array $variant): int => (int) $variant['product']->id)
+            ->sortByDesc(fn (array $variant): bool => $this->productHasSocialDescription(
+                $variant['product'],
+                $variant['language'],
+            ))
             ->values();
         $providers = $pending->pluck('provider')->all();
         $replacement = $allReplacements
@@ -289,16 +302,30 @@ class SocialMediaScheduler
                 $variant['product'],
                 $providers,
             ))
-            ->first(fn (array $variant): bool => $this->liveAvailabilityAllows(
-                $schedule->agent,
-                $variant['product'],
-            ));
+            ->first(function (array $variant) use ($schedule, $requiresDescription): bool {
+                if (! $this->liveAvailabilityAllows($schedule->agent, $variant['product'])) {
+                    return false;
+                }
+                $variant['product']->refresh();
+
+                return ! $requiresDescription || $this->productHasSocialDescription(
+                    $variant['product'],
+                    $variant['language'],
+                );
+            });
 
         if (! $replacement && $this->startNewCycleWhenExhausted($schedule->agent, $allReplacements, $providers)) {
-            $replacement = $allReplacements->first(fn (array $variant): bool => $this->liveAvailabilityAllows(
-                $schedule->agent,
-                $variant['product'],
-            ));
+            $replacement = $allReplacements->first(function (array $variant) use ($schedule, $requiresDescription): bool {
+                if (! $this->liveAvailabilityAllows($schedule->agent, $variant['product'])) {
+                    return false;
+                }
+                $variant['product']->refresh();
+
+                return ! $requiresDescription || $this->productHasSocialDescription(
+                    $variant['product'],
+                    $variant['language'],
+                );
+            });
         }
 
         if (! $replacement) {
@@ -645,5 +672,12 @@ class SocialMediaScheduler
             && $product->stock > 0
             && $this->publicHttpUrl($url)
             && (! in_array($post->provider, ['instagram', 'threads', 'linkedin'], true) || $this->publicHttpUrl($image));
+    }
+
+    private function productHasSocialDescription(Product $product, ?string $language): bool
+    {
+        $description = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $product->socialDescription($language))) ?? '');
+
+        return mb_strlen($description) >= 20;
     }
 }
