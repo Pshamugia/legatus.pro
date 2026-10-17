@@ -1761,6 +1761,88 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('', $event->query['query']);
     }
 
+    public function test_budget_recommendation_discards_an_ungrounded_translated_query_but_keeps_grounded_constraints(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $product = $agent->products()->create([
+            'name' => 'Verified atmospheric choice',
+            'sku' => 'BUDGET-GROUNDED',
+            'category' => 'Fiction',
+            'description' => 'იდუმალი ატმოსფერული თანამედროვე წიგნი.',
+            'search_text' => 'იდუმალი ატმოსფერული თანამედროვე წიგნი',
+            'price' => 27.50,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'translated-budget-query', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response($this->catalogContextResponse([
+                        'catalog_scope_action' => 'replace',
+                        'recommendation_scope' => 'constrained',
+                        // The resolver must not be allowed to turn translated
+                        // budget prose into a mandatory lexical product field.
+                        'recommendation_query' => 'contemporary book under 30 GEL',
+                        'recommendation_occasion' => 'mysterious atmosphere',
+                    ], 'translated-budget-context'));
+                }
+                if (! isset($request->data()['previous_response_id'])) {
+                    return Http::response(['id' => 'translated-budget-tool', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'translated-budget-call',
+                        'arguments' => json_encode([
+                            'query' => 'contemporary book under 30 GEL',
+                            'budget' => 30,
+                            'quantity' => null,
+                            'category' => null,
+                            'mood' => 'იდუმალი ატმოსფერო',
+                            'occasion' => 'mysterious atmosphere',
+                            'limit' => 5,
+                            'exclude_product_ids' => [],
+                        ]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'translated-budget-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'Here is a verified option.',
+                        'intent' => 'recommendation',
+                        'confidence' => 1,
+                        'handoff' => false,
+                        'escalation_reason' => null,
+                        'product_ids' => [],
+                        'sources' => [],
+                        'factual_claims' => [],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            '30 ლარამდე მირჩიე იდუმალი თანამედროვე წიგნი',
+            $conversation,
+        );
+
+        $this->assertSame([$product->id], collect($reply['products'])->pluck('id')->all());
+        $recommendation = RecommendationEvent::query()->latest('id')->firstOrFail();
+        $this->assertSame('', $recommendation->query['query']);
+        $this->assertSame('იდუმალი ატმოსფერო', $recommendation->query['mood']);
+        $this->assertEquals(30.0, $recommendation->query['budget']);
+    }
+
     public function test_personal_advice_quick_action_stays_in_ai_when_fallback_asks_for_a_preference(): void
     {
         $this->seed();

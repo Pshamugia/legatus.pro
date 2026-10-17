@@ -780,11 +780,12 @@ class SalesToolbox
         if ($candidateProductIds !== null) {
             $query->whereIn('products.id', $candidateProductIds);
         }
-        if ($candidateProductIds === null && filled($a['category'] ?? null)) {
-            $query->whereRaw("LOWER(products.category) LIKE ? ESCAPE '!'", [
-                $this->literalContainsPattern(Str::lower((string) $a['category'])),
-            ]);
-        }
+        // A model-supplied category is semantic search input until it resolves
+        // to this tenant's authoritative taxonomy above. Treating an arbitrary
+        // label as a literal products.category filter can discard the correct
+        // item even when that label is verified in its description, type, or
+        // other catalog evidence. The term groups below still require verified
+        // relevance; only an authoritative taxonomy match may constrain IDs.
         if ($a['budget']) {
             $query->where('price', '<=', (float) $a['budget']);
         }

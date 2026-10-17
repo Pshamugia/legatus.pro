@@ -86,7 +86,10 @@ class AnalyticsEvalTest extends TestCase
         $english = app(SalesToolbox::class)->execute('recommend_products', [
             'query' => 'mysterious modern novel',
             'budget' => null,
-            'category' => null,
+            // The model may describe a product type rather than repeat the
+            // tenant's literal category label. It must remain semantic input
+            // unless it resolves to authoritative tenant taxonomy.
+            'category' => 'novel',
             'mood' => 'mysterious',
             'occasion' => null,
             'limit' => 5,
@@ -94,7 +97,7 @@ class AnalyticsEvalTest extends TestCase
         $georgian = app(SalesToolbox::class)->execute('recommend_products', [
             'query' => 'იდუმალი თანამედროვე წიგნი',
             'budget' => 30,
-            'category' => null,
+            'category' => 'წიგნი',
             'mood' => 'იდუმალი',
             'occasion' => null,
             'limit' => 5,
