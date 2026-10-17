@@ -7,6 +7,7 @@ use App\Models\AgentRun;
 use App\Models\EvalCase;
 use App\Models\EvaluationRun;
 use App\Services\SalesAgentService;
+use Database\Seeders\EvalCaseSeeder;
 use Illuminate\Console\Command;
 
 class RunLegatusEvals extends Command
@@ -17,11 +18,17 @@ class RunLegatusEvals extends Command
 
     public function handle(SalesAgentService $service): int
     {
+        app(EvalCaseSeeder::class)->run();
         $agent = $this->resolveAgent();
+        $cases = EvalCase::where('active', true)->get();
 
         if (! $this->option('live')) {
             config(['services.openai.key' => null]);
             config(['legatus.offline_fallback_enabled' => true]);
+        } elseif ($fixtureError = $this->liveFixtureError($agent, $cases)) {
+            $this->error($fixtureError);
+
+            return self::FAILURE;
         }
 
         AgentRun::where('agent_id', $agent->id)
@@ -42,7 +49,7 @@ class RunLegatusEvals extends Command
         $passed = 0;
         $failed = 0;
 
-        foreach (EvalCase::where('active', true)->get() as $case) {
+        foreach ($cases as $case) {
             $conversation = $agent->conversations()->create([
                 'visitor_id' => 'eval-'.$case->id.'-'.now()->timestamp,
                 'status' => 'ai',
@@ -51,13 +58,18 @@ class RunLegatusEvals extends Command
             $conversation->messages()->create(['role' => 'customer', 'content' => $case->prompt]);
 
             $reply = $service->reply($agent, $case->prompt, $conversation);
-            $intentMatches = $reply['intent'] === $case->expected_intent;
+            $assertions = $case->assertions ?? [];
+            $allowedIntents = collect($assertions['allowed_intents'] ?? [$case->expected_intent]);
+            $intentMatches = $allowedIntents->containsStrict($reply['intent']);
             $handoffMatches = (bool) $reply['handoff'] === $case->expected_handoff;
             $toolsMatch = ! $this->option('live')
                 || collect($case->expected_tools ?? [])->every(
-                    fn ($tool) => collect($reply['tools_used'] ?? [])->contains($tool)
+                    function ($tool) use ($reply, $assertions): bool {
+                        $accepted = collect([$tool])->merge(data_get($assertions, "tool_aliases.{$tool}", []));
+
+                        return $accepted->intersect($reply['tools_used'] ?? [])->isNotEmpty();
+                    }
                 );
-            $assertions = $case->assertions ?? [];
             $products = collect($reply['products'] ?? []);
             $constraintsMatch = true;
             if (isset($assertions['max_price'])) {
@@ -70,6 +82,23 @@ class RunLegatusEvals extends Command
                 $constraintsMatch = $constraintsMatch && ! str_contains(strtolower($reply['text']), strtolower($forbidden));
             }
             $passedCase = $intentMatches && $handoffMatches && $toolsMatch && $constraintsMatch;
+            $failures = [];
+            if (! $intentMatches) {
+                $failures[] = 'intent expected='.$allowedIntents->implode('|').", actual={$reply['intent']}";
+            }
+            if (! $handoffMatches) {
+                $failures[] = 'handoff expected='.($case->expected_handoff ? 'true' : 'false')
+                    .', actual='.($reply['handoff'] ? 'true' : 'false');
+            }
+            if (! $toolsMatch) {
+                $missingTools = collect($case->expected_tools ?? [])
+                    ->diff($reply['tools_used'] ?? [])
+                    ->implode(', ');
+                $failures[] = 'missing tools='.$missingTools;
+            }
+            if (! $constraintsMatch) {
+                $failures[] = 'verified constraints failed';
+            }
 
             $passedCase ? $passed++ : $failed++;
             $results[] = [
@@ -79,9 +108,11 @@ class RunLegatusEvals extends Command
                 'actual_handoff' => $reply['handoff'],
                 'tools' => $reply['tools_used'] ?? [],
                 'constraints_passed' => $constraintsMatch,
+                'failures' => $failures,
             ];
 
-            $this->line(($passedCase ? 'PASS' : 'FAIL')." · {$case->name}");
+            $details = $passedCase ? '' : ' - '.implode('; ', $failures);
+            $this->line(($passedCase ? 'PASS' : 'FAIL')." - {$case->name}{$details}");
         }
 
         EvaluationRun::create([
@@ -94,6 +125,32 @@ class RunLegatusEvals extends Command
         $this->info("{$passed} passed, {$failed} failed");
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    private function liveFixtureError(Agent $agent, $cases): ?string
+    {
+        $requiredSkus = $cases
+            ->flatMap(fn (EvalCase $case) => data_get($case->assertions, 'required_skus', []))
+            ->unique()
+            ->values();
+        $visibleProducts = $agent->customerProducts()->where('is_active', true);
+        $missingSkus = $requiredSkus
+            ->reject(fn (string $sku): bool => (clone $visibleProducts)->where('sku', $sku)->exists())
+            ->values();
+
+        if ($missingSkus->isNotEmpty()) {
+            return 'Live evaluation fixture is invalid: customer-visible products are missing: '
+                .$missingSkus->implode(', ').'. Do not run model evaluations against a real business tenant.';
+        }
+
+        $minimumProducts = (int) $cases->max(
+            fn (EvalCase $case): int => (int) data_get($case->assertions, 'minimum_products', 0)
+        );
+        if ($minimumProducts > 0 && (clone $visibleProducts)->where('stock', '>', 0)->count() < $minimumProducts) {
+            return "Live evaluation fixture is invalid: at least {$minimumProducts} active in-stock products are required.";
+        }
+
+        return null;
     }
 
     private function resolveAgent(): Agent

@@ -52,6 +52,25 @@ class AnalyticsEvalTest extends TestCase
         $this->assertSame('offline', $run->mode);
     }
 
+    public function test_live_evaluation_stops_before_model_calls_when_fixture_products_are_hidden(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $agent = Agent::where('slug', 'legatus-demo')->firstOrFail();
+        $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Accidental live source',
+            'url' => 'https://shop.example/catalog',
+            'status' => 'ready',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        $this->artisan('legatus:eval --live --agent=legatus-demo')
+            ->expectsOutputToContain('Live evaluation fixture is invalid')
+            ->assertFailed();
+
+        $this->assertDatabaseCount('evaluation_runs', 0);
+    }
+
     public function test_evaluation_replaces_linked_eval_runs_and_cleans_legacy_local_orphans(): void
     {
         $this->seed(DatabaseSeeder::class);

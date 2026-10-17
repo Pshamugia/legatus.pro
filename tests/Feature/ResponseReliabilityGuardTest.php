@@ -109,4 +109,14 @@ class ResponseReliabilityGuardTest extends TestCase
 
         $this->assertDatabaseMissing('conversations', ['customer_name' => 'Synthetic reliability check']);
     }
+
+    public function test_live_reliability_command_fails_fast_without_an_api_key(): void
+    {
+        $this->seed();
+        config(['services.openai.key' => null]);
+
+        $this->artisan('legatus:reliability-check --live')
+            ->expectsOutputToContain('OPENAI_API_KEY is not configured.')
+            ->assertFailed();
+    }
 }

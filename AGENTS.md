@@ -123,6 +123,8 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 - Keep the application name `Legatus` and use only Legatus-owned branding. Never place Facebook, FB, Instagram, Meta, the Facebook `F`, modified/derivative Meta marks, or confusing `Face`/`Book` branding in the Legatus name, app icon, or logo. Product copy may accurately say that Legatus connects to or publishes through Facebook/Instagram, but must never imply partnership, sponsorship, endorsement, or ownership by Meta. Official Meta assets may appear only where their published brand rules expressly allow them and must not become the most prominent visual element.
 - Before every resubmission, audit the live app name, icon, descriptions, privacy URL, reviewer credentials, submission notes, permission list, successful-call recency, and each uploaded recording against these rules. Do not switch the app to Live mode prematurely when doing so would disable unapproved permissions for app-role testing.
 
+- `legatus:reliability-check --live` now streams every live eval result and its concrete failure reason. It synchronizes the code-defined eval cases first and validates required customer-visible fixture products before spending on model calls. Semantic intent/tool aliases may pass only when handoff and verified product constraints still pass.
+
 ## deployment
 
 ლოკალურად GitHub-ზე ატვირთვა:

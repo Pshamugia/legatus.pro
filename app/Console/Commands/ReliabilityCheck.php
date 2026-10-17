@@ -3,10 +3,10 @@
 namespace App\Console\Commands;
 
 use App\Models\Agent;
+use App\Models\EvalCase;
 use App\Services\ConversationEngine;
 use App\Services\ResponseReliabilityGuard;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -81,8 +81,25 @@ class ReliabilityCheck extends Command
         }
 
         if ($this->option('live')) {
-            $exit = Artisan::call('legatus:eval', ['--live' => true, '--agent' => (string) $agent->id]);
-            $checks[] = ['Live model evaluation', $exit === self::SUCCESS, trim(Artisan::output())];
+            if (blank(config('services.openai.key'))) {
+                $checks[] = ['Live model evaluation', false, 'OPENAI_API_KEY is not configured.'];
+            } else {
+                $caseCount = EvalCase::where('active', true)->count();
+                $this->newLine();
+                $this->components->info("Running {$caseCount} live evaluation cases. Progress will appear below.");
+
+                $exit = $this->call('legatus:eval', [
+                    '--live' => true,
+                    '--agent' => (string) $agent->id,
+                ]);
+                $checks[] = [
+                    'Live model evaluation',
+                    $exit === self::SUCCESS,
+                    $exit === self::SUCCESS
+                        ? "All {$caseCount} live cases passed."
+                        : 'One or more live cases failed. See the results above.',
+                ];
+            }
         }
 
         $this->table(
