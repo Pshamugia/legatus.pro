@@ -124,6 +124,7 @@ Legatus არის Laravel-ზე შექმნილი მრავალ�
 - Before every resubmission, audit the live app name, icon, descriptions, privacy URL, reviewer credentials, submission notes, permission list, successful-call recency, and each uploaded recording against these rules. Do not switch the app to Live mode prematurely when doing so would disable unapproved permissions for app-role testing.
 
 - `legatus:reliability-check --live` streams every live eval result and its concrete failure reason. Live model cases always use the inactive, platform-owned `legatus-reliability-fixture` tenant, never the selected customer tenant; provisioning is idempotent, required fixture products are validated before model calls, and the fixture is excluded from super-admin business counts and AI-spend reporting. Semantic intent/tool aliases may pass only when handoff and verified product constraints still pass.
+- A successful `recommend_products` call remains actionable when a model writes a recommendation reply but omits the structured `product_ids`: the orchestrator restores only the verified tool shortlist, so product cards and links are not silently lost. The private reliability fixture carries bilingual semantic product evidence so Georgian and English recommendation checks measure orchestration rather than fixture-language gaps.
 
 ## deployment
 

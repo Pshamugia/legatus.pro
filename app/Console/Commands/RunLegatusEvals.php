@@ -103,7 +103,7 @@ class RunLegatusEvals extends Command
                 $failures[] = 'missing tools='.$missingTools;
             }
             if (! $constraintsMatch) {
-                $failures[] = 'verified constraints failed';
+                $failures[] = 'verified constraints failed (products='.$products->count().')';
             }
 
             $passedCase ? $passed++ : $failed++;
@@ -113,6 +113,7 @@ class RunLegatusEvals extends Command
                 'actual_intent' => $reply['intent'],
                 'actual_handoff' => $reply['handoff'],
                 'tools' => $reply['tools_used'] ?? [],
+                'product_ids' => $products->pluck('id')->map(fn ($id): int => (int) $id)->all(),
                 'constraints_passed' => $constraintsMatch,
                 'failures' => $failures,
             ];

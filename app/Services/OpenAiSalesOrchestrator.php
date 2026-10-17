@@ -756,6 +756,22 @@ class OpenAiSalesOrchestrator
         $fallbackRecommendations = $fallbackRecommendationCalls
             ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
             ->filter(fn ($product): bool => is_array($product) && (int) ($product['id'] ?? 0) > 0);
+        if (! $fallbackUsed
+            && ($data['intent'] ?? null) === 'recommendation'
+            && collect($data['product_ids'] ?? [])->isEmpty()
+            && $fallbackRecommendations->isNotEmpty()) {
+            // The model may correctly use the recommendation tool and write a
+            // useful answer while accidentally omitting the structured IDs.
+            // Preserve the verified shortlist instead of delivering prose
+            // without the actionable product cards/links.
+            $data['product_ids'] = $fallbackRecommendations
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->unique()
+                ->values()
+                ->all();
+            $data['confidence'] = 1;
+        }
         if ($fallbackUsed
             && $fallbackRecommendationCalls->isNotEmpty()
             && $fallbackRecommendations->isEmpty()) {

@@ -1737,7 +1737,10 @@ class OpenAiOrchestrationTest extends TestCase
                         'intent' => 'recommendation', 'confidence' => 1,
                         'handoff' => false, 'escalation_reason' => null,
                         'clarification_next_tool' => null, 'clarification_missing_input' => null,
-                        'product_ids' => [$product->id], 'sources' => [],
+                        // A valid recommendation tool result remains
+                        // actionable even when the model omits its structured
+                        // product IDs from the final draft.
+                        'product_ids' => [], 'sources' => [],
                         'factual_claims' => [[
                             'type' => 'product', 'product_id' => $product->id,
                             'amount' => null, 'quantity' => null, 'reference' => null,

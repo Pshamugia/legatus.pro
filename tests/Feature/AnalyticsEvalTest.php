@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\EvaluationRun;
 use App\Services\ReliabilityFixtureManager;
+use App\Services\SalesToolbox;
 use App\Models\Organization;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
@@ -71,6 +72,39 @@ class AnalyticsEvalTest extends TestCase
         $this->assertDatabaseCount('organizations', 2);
         $this->assertSame($agentProductCount, $agent->fresh()->products()->count());
         $this->assertSame('reliability', data_get($fixture->organization->settings, 'system_fixture'));
+    }
+
+    public function test_reliability_fixture_supports_live_recommendation_scenarios(): void
+    {
+        $fixture = app(ReliabilityFixtureManager::class)->provision();
+        $conversation = $fixture->conversations()->create([
+            'visitor_id' => 'fixture-recommendation-test',
+            'channel' => 'eval',
+            'status' => 'ai',
+        ]);
+
+        $english = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'mysterious modern novel',
+            'budget' => null,
+            'category' => null,
+            'mood' => 'mysterious',
+            'occasion' => null,
+            'limit' => 5,
+        ], $fixture, $conversation);
+        $georgian = app(SalesToolbox::class)->execute('recommend_products', [
+            'query' => 'იდუმალი თანამედროვე წიგნი',
+            'budget' => 30,
+            'category' => null,
+            'mood' => 'იდუმალი',
+            'occasion' => null,
+            'limit' => 5,
+        ], $fixture, $conversation);
+
+        $this->assertNotEmpty($english['recommendations']);
+        $this->assertNotEmpty($georgian['recommendations']);
+        $this->assertTrue(collect($georgian['recommendations'])->every(
+            fn (array $product): bool => (float) $product['price'] <= 30 && (int) $product['stock'] > 0,
+        ));
     }
 
     public function test_evaluation_replaces_linked_eval_runs_and_cleans_legacy_local_orphans(): void
