@@ -1002,6 +1002,16 @@ class OpenAiSalesOrchestrator
                 $conversation->update(['context' => $context]);
             }
         }
+        [$data, $handoffBoundary] = $this->normalizeUnsupportedModelHandoff(
+            $data,
+            $catalogContext,
+            $conversation,
+            $message,
+        );
+        if ($handoffBoundary !== null) {
+            $used[] = $handoffBoundary;
+            $usedCollection->push($handoffBoundary);
+        }
         $data = $this->normalizeRecommendationClarification($data, $catalogContext, $usedCollection);
         $toolNames = $usedCollection->pluck('name')->unique()->values();
         $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
@@ -2591,6 +2601,51 @@ class OpenAiSalesOrchestrator
         $data['clarification_missing_input'] = 'query';
 
         return $data;
+    }
+
+    /** @return array{0: array, 1: ?array{name: string, arguments: array, result: array}} */
+    private function normalizeUnsupportedModelHandoff(
+        array $data,
+        ?array $catalogContext,
+        Conversation $conversation,
+        string $customerMessage,
+    ): array {
+        if (($data['handoff'] ?? false) !== true
+            || (is_array($catalogContext) && ($catalogContext['is_human_request'] ?? false) === true)
+            || $conversation->fresh()->status === 'human') {
+            return [$data, null];
+        }
+
+        // The semantic resolver and successful request_human tool are the
+        // authority for customer-requested handoff. A final model draft cannot
+        // independently pause a healthy conversation merely because it prefers
+        // escalation for an ordinary request or a safely refused instruction.
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage) === 1;
+        $wholesale = ($data['intent'] ?? null) === 'wholesale';
+        $data = [
+            'text' => $wholesale
+                ? ($georgian
+                    ? 'საბითუმო მოთხოვნის დაზუსტებაში დაგეხმარებით. რომელი პროდუქტი ან მომსახურება და რა რაოდენობა გაინტერესებთ?'
+                    : 'I can help clarify the wholesale request. Which product or service and what quantity do you need?')
+                : ($georgian
+                    ? 'ამ მოთხოვნით ოპერატორთან გადამისამართება საჭირო არ არის. შემიძლია დაგეხმაროთ ბიზნესის დადასტურებული პროდუქტების, მომსახურებებისა და წესების ფარგლებში.'
+                    : 'This request does not require an operator transfer. I can help within the business’s verified products, services, and policies.'),
+            'intent' => $wholesale ? 'wholesale' : 'conversation',
+            'confidence' => 1,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'clarification_next_tool' => null,
+            'clarification_missing_input' => null,
+            'product_ids' => [],
+            'sources' => [],
+            'factual_claims' => [],
+        ];
+
+        return [$data, [
+            'name' => 'handoff_boundary',
+            'arguments' => [],
+            'result' => ['ok' => true, 'reason' => 'model_handoff_without_semantic_or_tool_authority'],
+        ]];
     }
 
     private function claimsShortlistIsComplete(string $text, Collection $successful): bool
