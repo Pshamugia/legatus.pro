@@ -18,16 +18,26 @@ class MonitorPlatformHealth extends Command
 
     public function handle(PlatformHealthIncidentService $incidents): int
     {
-        if (! Schema::hasTable('platform_health_incidents')) {
+        if (! Schema::hasTable('platform_health_incidents')
+            || ! Schema::hasTable('platform_health_monitor_states')) {
             $this->error('Run database migrations before platform health monitoring.');
 
             return self::FAILURE;
         }
 
+        $monitoringStartedAt = DB::table('platform_health_monitor_states')
+            ->where('monitor_key', 'operational')
+            ->value('started_at');
+        if (! $monitoringStartedAt) {
+            $this->error('Platform health monitoring baseline is missing.');
+
+            return self::FAILURE;
+        }
+
         $incidents->syncCategories([
-            'queue' => $this->queueObservations(),
-            'meta_publishing' => $this->metaPublishingObservations(),
-            'catalog_sync' => $this->catalogSyncObservations(),
+            'queue' => $this->queueObservations($monitoringStartedAt),
+            'meta_publishing' => $this->metaPublishingObservations($monitoringStartedAt),
+            'catalog_sync' => $this->catalogSyncObservations($monitoringStartedAt),
         ]);
 
         $this->info('Platform health state synchronized.');
@@ -35,12 +45,15 @@ class MonitorPlatformHealth extends Command
         return self::SUCCESS;
     }
 
-    private function queueObservations(): array
+    private function queueObservations(mixed $monitoringStartedAt): array
     {
         $observations = [];
-        $failedCount = Schema::hasTable('failed_jobs') ? DB::table('failed_jobs')->count() : 0;
+        $failedJobs = Schema::hasTable('failed_jobs')
+            ? DB::table('failed_jobs')->where('failed_at', '>=', $monitoringStartedAt)
+            : null;
+        $failedCount = $failedJobs?->count() ?? 0;
         if ($failedCount > 0) {
-            $latest = DB::table('failed_jobs')->latest('id')->first(['queue', 'failed_at']);
+            $latest = (clone $failedJobs)->latest('id')->first(['queue', 'failed_at']);
             $observations[] = [
                 'key' => 'queue.failed_jobs',
                 'severity' => 'critical',
@@ -67,9 +80,10 @@ class MonitorPlatformHealth extends Command
         return $observations;
     }
 
-    private function metaPublishingObservations(): array
+    private function metaPublishingObservations(mixed $monitoringStartedAt): array
     {
         $posts = SocialMediaPost::query()
+            ->where('updated_at', '>=', $monitoringStartedAt)
             ->where(function ($query): void {
                 $query->whereIn('status', ['failed', 'delivery_unknown'])
                     ->orWhereIn('story_status', ['failed', 'delivery_unknown']);
@@ -101,9 +115,10 @@ class MonitorPlatformHealth extends Command
         return $observations;
     }
 
-    private function catalogSyncObservations(): array
+    private function catalogSyncObservations(mixed $monitoringStartedAt): array
     {
         $sources = KnowledgeSource::query()
+            ->where('updated_at', '>=', $monitoringStartedAt)
             ->where(function ($query): void {
                 $query->where('status', 'failed')
                     ->orWhere(function ($processing): void {

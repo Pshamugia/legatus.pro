@@ -90,6 +90,54 @@ class PlatformHealthMonitorTest extends TestCase
         );
     }
 
+    public function test_historical_failures_before_monitoring_started_are_not_reported_as_new_incidents(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        DB::table('failed_jobs')->insert([
+            'uuid' => (string) Str::uuid(),
+            'connection' => 'database',
+            'queue' => 'knowledge',
+            'payload' => '{}',
+            'exception' => 'Historical failure',
+            'failed_at' => now()->subDay(),
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url',
+            'name' => 'Historical catalog sync',
+            'status' => 'failed',
+            'error' => 'Historical failure',
+        ]);
+        $source->timestamps = false;
+        $source->update(['created_at' => now()->subDay(), 'updated_at' => now()->subDay()]);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today()->subDay(),
+            'ends_on' => today(),
+            'posts_per_day' => 1,
+            'categories' => [],
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+            'status' => 'active',
+        ]);
+        $post = $agent->socialMediaPosts()->create([
+            'social_media_schedule_id' => $schedule->id,
+            'provider' => 'facebook',
+            'status' => 'failed',
+            'scheduled_for' => now()->subDay(),
+            'title' => 'Historical product',
+            'product_url' => 'https://example.test/historical-product',
+            'caption' => 'Historical caption',
+            'failure_reason' => 'Historical failure',
+        ]);
+        $post->timestamps = false;
+        $post->update(['created_at' => now()->subDay(), 'updated_at' => now()->subDay()]);
+
+        $this->artisan('legatus:monitor-platform-health')->assertSuccessful();
+
+        $this->assertDatabaseMissing('platform_health_incidents', ['status' => 'open']);
+        Notification::assertNothingSent();
+    }
+
     public function test_scheduler_heartbeat_reports_a_gap_once_and_then_resolves_it(): void
     {
         Cache::forever('legatus:platform-health:scheduler-heartbeat', now()->subMinutes(10)->toIso8601String());
