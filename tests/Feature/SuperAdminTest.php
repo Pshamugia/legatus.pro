@@ -33,6 +33,27 @@ class SuperAdminTest extends TestCase
         $this->actingAs($admin)->get(route('super-admin.index'))->assertOk();
     }
 
+    public function test_platform_reliability_status_is_visible_only_in_super_admin(): void
+    {
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        Cache::put('legatus:reliability:last:live', [
+            'mode' => 'live',
+            'healthy' => false,
+            'checked_at' => '2026-10-18T12:00:00+04:00',
+            'checks' => [
+                ['name' => 'Live model evaluation', 'passed' => false],
+                ['name' => 'Final response contract', 'passed' => true],
+            ],
+        ]);
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Platform system health')
+            ->assertSee('Needs attention')
+            ->assertSee('Live model evaluation')
+            ->assertDontSee('Final response contract');
+    }
+
     public function test_super_admin_sees_business_owner_package_and_subscription_dates(): void
     {
         config([

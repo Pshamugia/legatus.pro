@@ -4,9 +4,12 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\Organization;
+use App\Notifications\PlatformReliabilityAlert;
 use App\Services\ResponseReliabilityGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 class ResponseReliabilityGuardTest extends TestCase
@@ -118,5 +121,28 @@ class ResponseReliabilityGuardTest extends TestCase
         $this->artisan('legatus:reliability-check --live')
             ->expectsOutputToContain('OPENAI_API_KEY is not configured.')
             ->assertFailed();
+    }
+
+    public function test_reliability_failure_alerts_super_admin_once_per_health_transition(): void
+    {
+        $this->seed();
+        config([
+            'services.openai.key' => null,
+            'legatus.super_admin_email' => 'operator@example.com',
+        ]);
+        Cache::forget('legatus:reliability:last:live');
+        Notification::fake();
+
+        $this->artisan('legatus:reliability-check --live')->assertFailed();
+        $this->artisan('legatus:reliability-check --live')->assertFailed();
+
+        Notification::assertSentOnDemandTimes(PlatformReliabilityAlert::class, 1);
+        Notification::assertSentOnDemand(
+            PlatformReliabilityAlert::class,
+            fn (PlatformReliabilityAlert $notification, array $channels, object $notifiable): bool => ! $notification->healthy
+                && $notification->mode === 'live'
+                && $channels === ['mail']
+                && $notifiable->routeNotificationFor('mail') === 'operator@example.com',
+        );
     }
 }

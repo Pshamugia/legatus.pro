@@ -11,7 +11,6 @@ use App\Models\Message;
 use App\Models\RecommendationEvent;
 use App\Services\TenantContext;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Cache;
 
 class AnalyticsController extends Controller
 {
@@ -121,8 +120,6 @@ class AnalyticsController extends Controller
             ->take(20)
             ->get();
         $eval = EvaluationRun::where('agent_id', $agent->id)->latest()->first();
-        $reliabilityStatus = Cache::get('legatus:reliability:last');
-
         $knowledgeSources = $agent->knowledgeSources()
             ->select(['id', 'name', 'source_scope', 'status', 'progress', 'error', 'last_synced_at', 'updated_at'])
             ->latest('updated_at')
@@ -228,7 +225,6 @@ class AnalyticsController extends Controller
             'qualityIssues',
             'attributionGroups',
             'attributionCampaigns',
-            'reliabilityStatus',
         ));
     }
 }

@@ -4,12 +4,14 @@ namespace App\Console\Commands;
 
 use App\Models\Agent;
 use App\Models\EvalCase;
+use App\Notifications\PlatformReliabilityAlert;
 use App\Services\ConversationEngine;
 use App\Services\ResponseReliabilityGuard;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -107,7 +109,11 @@ class ReliabilityCheck extends Command
         );
 
         $healthy = collect($checks)->every(fn (array $check): bool => (bool) $check[1]);
-        Cache::put('legatus:reliability:last', [
+        $mode = $this->option('live') ? 'live' : 'contract';
+        $cacheKey = 'legatus:reliability:last:'.$mode;
+        $previousStatus = Cache::get($cacheKey);
+        $currentStatus = [
+            'mode' => $mode,
             'healthy' => $healthy,
             'checked_at' => now()->toIso8601String(),
             'agent_id' => $agent->id,
@@ -115,7 +121,9 @@ class ReliabilityCheck extends Command
                 'name' => $check[0],
                 'passed' => (bool) $check[1],
             ])->all(),
-        ], now()->addDay());
+        ];
+        Cache::put($cacheKey, $currentStatus, now()->addDays(2));
+        $this->notifyHealthTransition(is_array($previousStatus) ? $previousStatus : null, $currentStatus);
         if (! $healthy) {
             Log::critical('Legatus reliability check failed.', [
                 'agent_id' => $agent->id,
@@ -141,5 +149,43 @@ class ReliabilityCheck extends Command
         return ctype_digit($selector)
             ? Agent::findOrFail((int) $selector)
             : Agent::where('slug', $selector)->firstOrFail();
+    }
+
+    /**
+     * @param  array{healthy?: bool}|null  $previous
+     * @param  array{mode: string, healthy: bool, checked_at: string, checks: array<int, array{name: string, passed: bool}>}  $current
+     */
+    private function notifyHealthTransition(?array $previous, array $current): void
+    {
+        $wasHealthy = $previous['healthy'] ?? null;
+        $isHealthy = $current['healthy'];
+        if (($wasHealthy === null && $isHealthy) || $wasHealthy === $isHealthy) {
+            return;
+        }
+
+        $email = trim((string) config('legatus.super_admin_email'));
+        if ($email === '') {
+            return;
+        }
+
+        $failedChecks = collect($current['checks'])
+            ->where('passed', false)
+            ->pluck('name')
+            ->values()
+            ->all();
+
+        try {
+            Notification::route('mail', $email)->notify(new PlatformReliabilityAlert(
+                $current['mode'],
+                $isHealthy,
+                $failedChecks,
+                $current['checked_at'],
+            ));
+        } catch (Throwable $exception) {
+            Log::error('Could not send the platform reliability alert.', [
+                'exception' => $exception::class,
+                'healthy' => $isHealthy,
+            ]);
+        }
     }
 }

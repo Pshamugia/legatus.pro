@@ -105,8 +105,13 @@ class SuperAdminController extends Controller
         ];
 
         $runway = $this->runwaySummary($runwayClient);
+        $reliabilityStatuses = collect(['contract', 'live'])
+            ->mapWithKeys(fn (string $mode): array => [$mode => Cache::get('legatus:reliability:last:'.$mode)])
+            ->filter(fn ($status): bool => is_array($status));
 
-        return view('super-admin.index', compact('organizations', 'metrics', 'runway', 'environment', 'search'));
+        return view('super-admin.index', compact(
+            'organizations', 'metrics', 'runway', 'reliabilityStatuses', 'environment', 'search',
+        ));
     }
 
     public function supportConversations(Request $request): View

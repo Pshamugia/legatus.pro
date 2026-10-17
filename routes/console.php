@@ -31,6 +31,7 @@ Schedule::command('legatus:resume-knowledge')->everyFiveMinutes()->withoutOverla
 // customer and makes no provider call, but proves the shared reply contract and
 // the controlled recommendation flow are still healthy in production.
 Schedule::command('legatus:reliability-check')->everyTenMinutes()->withoutOverlapping(10);
+Schedule::command('legatus:reliability-check --live')->dailyAt('08:10')->withoutOverlapping(60);
 
 // Shared-hosting production does not necessarily provide Supervisor. Run a
 // short-lived worker from the platform scheduler so every tenant's one-click

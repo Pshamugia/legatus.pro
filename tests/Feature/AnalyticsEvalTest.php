@@ -5,13 +5,14 @@ namespace Tests\Feature;
 use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\EvaluationRun;
-use App\Services\ReliabilityFixtureManager;
-use App\Services\SalesToolbox;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\ReliabilityFixtureManager;
+use App\Services\SalesToolbox;
 use Database\Seeders\DatabaseSeeder;
 use Database\Seeders\EvalCaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 class AnalyticsEvalTest extends TestCase
@@ -27,6 +28,23 @@ class AnalyticsEvalTest extends TestCase
             ->assertOk()
             ->assertSee('AI performance')
             ->assertSee('Automation rate');
+    }
+
+    public function test_tenant_analytics_never_exposes_platform_reliability_status(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $user = User::where('email', 'demo@legatus.ai')->firstOrFail();
+        Cache::put('legatus:reliability:last:live', [
+            'mode' => 'live',
+            'healthy' => false,
+            'checked_at' => now()->toIso8601String(),
+            'checks' => [['name' => 'Private platform failure', 'passed' => false]],
+        ]);
+
+        $this->actingAs($user)->get(route('analytics.index'))
+            ->assertOk()
+            ->assertDontSee('Platform system health')
+            ->assertDontSee('Private platform failure');
     }
 
     public function test_analytics_does_not_include_another_tenants_runs(): void
