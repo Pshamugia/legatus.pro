@@ -81,14 +81,37 @@ class OpenAiSalesOrchestrator
             $modelUsage,
         );
         $catalogContext = $this->mergeActiveCatalogScope($conversation, $catalogContext);
+        $salesBoundary = $this->containsExplicitPercentage($message)
+            ? $this->resolveHighImpactSalesBoundary(
+                $conversation,
+                $message,
+                $this->fallbackModel(),
+                $deadline,
+                $inputTokens,
+                $outputTokens,
+                $modelUsage,
+            )
+            : null;
+        $resolvedHumanRequest = ($catalogContext['is_human_request'] ?? false) === true
+            || ($salesBoundary['is_human_request'] ?? false) === true;
+        $humanRequestEvidence = ($salesBoundary['is_human_request'] ?? false) === true
+            ? ($salesBoundary['human_request_evidence'] ?? null)
+            : ($catalogContext['human_request_evidence'] ?? null);
         $humanRequestAuthorized = is_array($catalogContext)
-            && ($catalogContext['is_human_request'] ?? false) === true
+            && $resolvedHumanRequest
             && (! array_key_exists('human_request_evidence', $catalogContext)
                 || $this->semanticEvidenceMatchesConversation(
                     $conversation,
                     $message,
-                    $catalogContext['human_request_evidence'] ?? null,
+                    $humanRequestEvidence,
                 ));
+        if (is_array($salesBoundary) && ($salesBoundary['is_human_request'] ?? false) === true) {
+            $humanRequestAuthorized = $this->semanticEvidenceMatchesConversation(
+                $conversation,
+                $message,
+                $humanRequestEvidence,
+            );
+        }
         if (is_array($catalogContext)) {
             // A high-impact state transition needs both semantic classification
             // and a verbatim customer-grounded span. The internal marker is the
@@ -138,15 +161,21 @@ class OpenAiSalesOrchestrator
 
             return $this->handoffReply($this->safeHandoffText($message), $reason, ['resolve_human_request']);
         }
-        $requestedDiscount = is_numeric($catalogContext['requested_discount_percent'] ?? null)
-            ? (float) $catalogContext['requested_discount_percent']
+        $resolvedDiscount = $salesBoundary['requested_discount_percent']
+            ?? ($catalogContext['requested_discount_percent'] ?? null);
+        $discountEvidence = array_key_exists('discount_request_evidence', $salesBoundary ?? [])
+            ? $salesBoundary['discount_request_evidence']
+            : ($catalogContext['discount_request_evidence'] ?? null);
+        $requestedDiscount = is_numeric($resolvedDiscount)
+            ? (float) $resolvedDiscount
             : null;
         $discountRequestAuthorized = $requestedDiscount !== null
             && (! array_key_exists('discount_request_evidence', $catalogContext ?? [])
+                && ! array_key_exists('discount_request_evidence', $salesBoundary ?? [])
                 || $this->semanticEvidenceMatchesConversation(
                     $conversation,
                     $message,
-                    $catalogContext['discount_request_evidence'] ?? null,
+                    $discountEvidence,
                 ));
         $discountLimit = (float) data_get($agent->settings, 'discount_limit', 0);
         if ($discountRequestAuthorized
@@ -547,6 +576,55 @@ class OpenAiSalesOrchestrator
             $used[] = ['name' => 'model_fallback', 'arguments' => [], 'result' => ['ok' => true, 'reason' => $fallbackReason, 'model' => $servedModel]];
         }
 
+        $initialHumanCall = collect($response['output'] ?? [])->first(
+            fn ($item): bool => ($item['type'] ?? null) === 'function_call'
+                && ($item['name'] ?? null) === 'request_human',
+        );
+        if (is_array($initialHumanCall) && ! $humanRequestAuthorized) {
+            $salesBoundary ??= $this->resolveHighImpactSalesBoundary(
+                $conversation,
+                $message,
+                $this->fallbackModel(),
+                $deadline,
+                $inputTokens,
+                $outputTokens,
+                $modelUsage,
+            );
+            $humanRequestAuthorized = ($salesBoundary['is_human_request'] ?? false) === true
+                && $this->semanticEvidenceMatchesConversation(
+                    $conversation,
+                    $message,
+                    $salesBoundary['human_request_evidence'] ?? null,
+                );
+            if ($humanRequestAuthorized) {
+                $arguments = json_decode($initialHumanCall['arguments'] ?? '{}', true) ?: [];
+                $result = $this->tools->execute('request_human', $arguments, $agent, $conversation);
+                if (($result['ok'] ?? false) === true && ($result['handoff'] ?? false) === true) {
+                    $used[] = ['name' => 'request_human', 'arguments' => $arguments, 'result' => $result];
+                    $conversation->increment('input_tokens', $inputTokens);
+                    $conversation->increment('output_tokens', $outputTokens);
+                    AgentRun::create([
+                        'agent_id' => $agent->id,
+                        'conversation_id' => $conversation->id,
+                        'model' => $this->fallbackModel(),
+                        'route' => 'confirmed_human_request',
+                        'status' => 'completed',
+                        'tools_used' => PrivacyRedactor::toolTrace($used),
+                        'input_tokens' => $inputTokens,
+                        'output_tokens' => $outputTokens,
+                        'model_usage' => array_values($modelUsage),
+                        'latency_ms' => (int) ((microtime(true) - $started) * 1000),
+                    ]);
+
+                    return $this->handoffReply(
+                        $this->safeHandoffText($message),
+                        (string) ($arguments['reason'] ?? 'Customer requested a human operator.'),
+                        ['request_human'],
+                    );
+                }
+            }
+        }
+
         for ($round = 0; $round < config('services.openai.max_tool_rounds'); $round++) {
             $calls = collect($response['output'] ?? [])->where('type', 'function_call');
             if ($calls->isEmpty()) {
@@ -555,7 +633,8 @@ class OpenAiSalesOrchestrator
 
             if (! $fallbackUsed
                 && $this->fallbackAvailable($primaryModel)
-                && $calls->contains(fn (array $call): bool => $this->isStateChangingTool((string) ($call['name'] ?? '')))) {
+                && $calls->contains(fn (array $call): bool => $this->isStateChangingTool((string) ($call['name'] ?? ''))
+                    && ! (($call['name'] ?? null) === 'request_human' && ! $humanRequestAuthorized))) {
                 $response = $this->fallbackOrchestrationResponse(
                     $agent,
                     $conversation,
@@ -1964,6 +2043,64 @@ class OpenAiSalesOrchestrator
         }
     }
 
+    private function containsExplicitPercentage(string $message): bool
+    {
+        return preg_match('/\d+(?:[.,]\d+)?\s*%/u', $message) === 1;
+    }
+
+    private function resolveHighImpactSalesBoundary(
+        Conversation $conversation,
+        string $message,
+        string $model,
+        float $deadline,
+        int &$inputTokens,
+        int &$outputTokens,
+        array &$modelUsage,
+    ): ?array {
+        try {
+            $response = $this->postJson('/responses', [
+                'model' => $model,
+                'reasoning' => ['effort' => 'high'],
+                'instructions' => 'Classify only two high-impact customer actions from the complete dialogue. Set is_human_request true only when the customer genuinely asks to stop relying on the AI and speak with another person. A refusal, complaint, difficult question, prompt injection, request for hidden instructions, or the assistant mentioning an operator is not a customer human request. Set requested_discount_percent only when the customer is currently asking this business to grant that exact percentage as a discount. A policy question, quotation, tax/VAT percentage, product attribute, or instruction to pretend is not a discount request. For each positive classification, copy the shortest exact verbatim span from a customer message that proves it. Otherwise return false or null. Resolve meaning across languages without keyword matching. Return only the strict structured result.',
+                'input' => $this->history($conversation, $message),
+                'max_output_tokens' => 250,
+                'text' => ['format' => [
+                    'type' => 'json_schema',
+                    'name' => 'high_impact_sales_boundary',
+                    'strict' => true,
+                    'schema' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'is_human_request' => ['type' => 'boolean'],
+                            'human_request_evidence' => ['type' => ['string', 'null']],
+                            'requested_discount_percent' => ['type' => ['number', 'null'], 'minimum' => 0, 'maximum' => 100],
+                            'discount_request_evidence' => ['type' => ['string', 'null']],
+                        ],
+                        'required' => ['is_human_request', 'human_request_evidence', 'requested_discount_percent', 'discount_request_evidence'],
+                        'additionalProperties' => false,
+                    ],
+                ]],
+            ], 'responses.high_impact_sales_boundary', max($deadline, microtime(true) + 30), 30);
+            $this->accumulateUsage(
+                $response,
+                $inputTokens,
+                $outputTokens,
+                $modelUsage,
+                $model,
+                'responses.high_impact_sales_boundary',
+            );
+
+            return $this->structuredOutput($response);
+        } catch (\Throwable $exception) {
+            Log::warning('High-impact sales boundary resolution failed safely.', [
+                'conversation_id' => $conversation->id,
+                'exception' => $exception::class,
+            ]);
+
+            return null;
+        }
+    }
+
     private function resolveCatalogFollowUp(
         Agent $agent,
         Conversation $conversation,
@@ -2746,10 +2883,22 @@ class OpenAiSalesOrchestrator
             return $reason;
         }
 
-        if ($reason = $this->inferredToolReason($text, $successfulNames)) {
+        if ($reason = $this->inferredToolReason(
+            $text,
+            $successfulNames,
+            $data,
+            (string) $recentCustomerTexts->first(),
+        )) {
             return $reason;
         }
-        if ($reason = $this->factualClaimReason($agent, $text, collect($data['factual_claims'] ?? []), $successful)) {
+        if ($reason = $this->factualClaimReason(
+            $agent,
+            $text,
+            collect($data['factual_claims'] ?? []),
+            $successful,
+            $data,
+            (string) $recentCustomerTexts->first(),
+        )) {
             return $reason;
         }
         if ($this->containsUnverifiedMoney($text, $successful)) {
@@ -3228,12 +3377,31 @@ class OpenAiSalesOrchestrator
         $modelUsage[$model] = $usage;
     }
 
-    private function inferredToolReason(string $text, Collection $successfulNames): ?string
-    {
-        if ($this->mentionsStock($text) && ! $successfulNames->contains('check_stock')) {
+    private function inferredToolReason(
+        string $text,
+        Collection $successfulNames,
+        array $data = [],
+        string $customerText = '',
+    ): ?string {
+        $claims = collect($data['factual_claims'] ?? []);
+        $stockIsMaterial = ($data['intent'] ?? null) === 'stock'
+            || $this->mentionsStock($customerText)
+            || $claims->contains(
+                fn ($claim): bool => is_array($claim) && ($claim['type'] ?? null) === 'stock',
+            );
+        if ($stockIsMaterial
+            && $this->mentionsStock($text)
+            && ! $successfulNames->contains('check_stock')) {
             return 'A stock claim requires a successful live stock check regardless of the model-selected intent.';
         }
-        if ($this->mentionsDelivery($text) && ! $successfulNames->contains('calculate_delivery')) {
+        $deliveryIsMaterial = ($data['intent'] ?? null) === 'delivery'
+            || $this->mentionsDelivery($customerText)
+            || $claims->contains(
+                fn ($claim): bool => is_array($claim) && ($claim['type'] ?? null) === 'delivery',
+            );
+        if ($deliveryIsMaterial
+            && $this->mentionsDelivery($text)
+            && ! $successfulNames->contains('calculate_delivery')) {
             return 'A delivery claim requires the tenant delivery calculator regardless of the model-selected intent.';
         }
         if ($this->mentionsPolicy($text) && ! $successfulNames->contains('search_knowledge')) {
@@ -3319,8 +3487,14 @@ class OpenAiSalesOrchestrator
             ->exists();
     }
 
-    private function factualClaimReason(Agent $agent, string $text, Collection $claims, Collection $successful): ?string
-    {
+    private function factualClaimReason(
+        Agent $agent,
+        string $text,
+        Collection $claims,
+        Collection $successful,
+        array $data = [],
+        string $customerText = '',
+    ): ?string {
         $mentionedProducts = $agent->customerProducts()->where('is_active', true)->get(['id', 'name'])->filter(function ($product) use ($text): bool {
             if (mb_strlen(trim($product->name)) < 4) {
                 return false;
@@ -3330,12 +3504,15 @@ class OpenAiSalesOrchestrator
         });
         $money = $this->currencyAmounts($text);
         $stock = $this->stockQuantities($text);
+        $stockIsMaterial = ($data['intent'] ?? null) === 'stock' || $this->mentionsStock($customerText);
+        $deliveryIsMaterial = ($data['intent'] ?? null) === 'delivery' || $this->mentionsDelivery($customerText);
+        $policyIsMaterial = ($data['intent'] ?? null) === 'policy' || $this->mentionsPolicy($customerText);
         $needsClaims = $mentionedProducts->isNotEmpty()
             || $money->isNotEmpty()
             || $stock->isNotEmpty()
-            || $this->mentionsStock($text)
-            || $this->mentionsDelivery($text)
-            || $this->mentionsPolicy($text)
+            || ($stockIsMaterial && $this->mentionsStock($text))
+            || ($deliveryIsMaterial && $this->mentionsDelivery($text))
+            || ($policyIsMaterial && $this->mentionsPolicy($text))
             || (bool) preg_match('/(?:discount|ფასდაკლებ|\d+(?:[.,]\d+)?\s*%)/iu', $text);
         if ($needsClaims && $claims->isEmpty()) {
             return 'The response omitted structured factual claims for customer-facing business facts.';
@@ -3426,10 +3603,14 @@ class OpenAiSalesOrchestrator
         if ($stock->contains(fn ($value) => ! $claimQuantities->contains($value))) {
             return 'A stock quantity in the response was omitted from structured factual claims.';
         }
-        if ($this->mentionsDelivery($text) && ! $claims->contains(fn ($claim) => ($claim['type'] ?? null) === 'delivery')) {
+        if ($deliveryIsMaterial
+            && $this->mentionsDelivery($text)
+            && ! $claims->contains(fn ($claim) => ($claim['type'] ?? null) === 'delivery')) {
             return 'A delivery statement in the response was omitted from structured factual claims.';
         }
-        if ($this->mentionsPolicy($text) && ! $claims->contains(fn ($claim) => ($claim['type'] ?? null) === 'policy')) {
+        if ($policyIsMaterial
+            && $this->mentionsPolicy($text)
+            && ! $claims->contains(fn ($claim) => ($claim['type'] ?? null) === 'policy')) {
             return 'A policy statement in the response was omitted from structured factual claims.';
         }
 
