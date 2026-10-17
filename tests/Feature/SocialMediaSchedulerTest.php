@@ -3573,6 +3573,58 @@ class SocialMediaSchedulerTest extends TestCase
         ])->assertNotFound();
     }
 
+    public function test_exactly_identified_facebook_post_can_be_deleted_and_queued_once_for_corrected_republication(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('republish-command');
+        $agent->update(['business_name' => 'bukinistebi.ge']);
+        $this->connections($agent);
+        $product = $agent->products()->create($this->product('კარმილა', 'Books', 2));
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $scheduledFor = CarbonImmutable::parse('2026-10-17 19:00', 'Asia/Tbilisi')->utc();
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'published',
+            'scheduled_for' => $scheduledFor,
+            'published_at' => $scheduledFor,
+            'provider_post_id' => 'page-1_karmila-post',
+            'title' => $product->name,
+            'description' => $product->description,
+            'product_url' => 'https://bukinistebi.ge/books/karmila/2313',
+            'image_url' => $product->publicImageUrl(),
+            'caption' => 'კარმილა',
+            'copy_mode' => 'ai',
+            'ai_generated_at' => now(),
+            'ai_model' => 'verified-title-fallback',
+        ]);
+        app(SocialMediaPublicationHistory::class)->rememberPublished($post);
+        Http::fake(fn () => Http::response(['success' => true]));
+
+        $this->artisan('legatus:republish-social-post', [
+            '--agent' => 'bukinistebi.ge',
+            '--provider' => 'facebook',
+            '--url' => 'https://bukinistebi.ge/books/karmila/2313',
+            '--scheduled-local' => '2026-10-17 19:00',
+            '--timezone' => 'Asia/Tbilisi',
+            '--confirm' => true,
+        ])->expectsOutputToContain('Corrected replacement queued as social post')->assertSuccessful();
+
+        $post->refresh();
+        $retry = $schedule->posts()->whereKeyNot($post->id)->sole();
+        $this->assertSame('skipped', $post->status);
+        $this->assertNotNull($post->provider_deleted_at);
+        $this->assertSame('queued', $retry->status);
+        $this->assertSame('', $retry->caption);
+        $this->assertNull($retry->provider_post_id);
+        $this->assertNull($retry->ai_generated_at);
+        $this->assertDatabaseMissing('social_publication_identities', ['social_media_post_id' => $post->id]);
+        Queue::assertPushed(PublishSocialMediaPost::class, fn ($job): bool => $job->postId === $retry->id);
+        Http::assertSent(fn ($request): bool => $request->method() === 'DELETE'
+            && str_contains($request->url(), '/v25.0/page-1_karmila-post?'));
+    }
+
     public function test_legacy_facebook_photo_post_uses_caption_when_edited(): void
     {
         [$user, $agent] = $this->tenant('legacy-facebook-photo');
