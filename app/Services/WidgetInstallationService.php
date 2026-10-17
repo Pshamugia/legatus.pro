@@ -11,9 +11,9 @@ final class WidgetInstallationService
     {
         return [
             'wordpress' => [
-                'label' => 'WordPress / WooCommerce',
-                'description' => 'Add the universal script through a site-wide header/footer code tool.',
-                'steps' => ['Open WordPress Admin.', 'Open your site-wide header/footer code tool or plugin.', 'Add the Legatus script before the closing body tag, enable it for the whole site, and save.'],
+                'label' => 'WordPress',
+                'description' => 'Download the prepared Legatus plugin; no script editing is required.',
+                'steps' => ['Download the prepared Legatus plugin below.', 'Open WordPress Admin → Plugins → Add New Plugin → Upload Plugin.', 'Upload the ZIP, choose Install Now, then Activate Plugin.'],
             ],
             'drupal' => [
                 'label' => 'Drupal',

@@ -122,7 +122,8 @@ class WidgetChannelTest extends TestCase
             ->assertSee('data-default-label="Copy instructions for developer"', false)
             ->assertSee("target.textContent='Copied ✓'", false)
             ->assertSee("target.textContent='Copy failed'", false)
-            ->assertSee('WordPress / WooCommerce')
+            ->assertSee('WordPress')
+            ->assertSee('Download WordPress plugin (.zip)')
             ->assertSee('Drupal')
             ->assertSee('Shopify')
             ->assertSee('Other / Custom website')
@@ -133,6 +134,25 @@ class WidgetChannelTest extends TestCase
             ->assertDontSee('data-status="connected"', false)
             ->assertDontSee('access token', false)
             ->assertDontSee('webhook URL', false);
+    }
+
+    public function test_owner_downloads_a_tenant_specific_wordpress_plugin(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+
+        $response = $this->actingAs(User::first())->get(route('channels.widget.wordpress-plugin'))
+            ->assertOk()
+            ->assertHeader('Content-Disposition', 'attachment; filename="legatus-ai-sales-assistant.zip"');
+
+        $this->assertStringStartsWith('application/zip', (string) $response->headers->get('Content-Type'));
+
+        $archive = (string) $response->getContent();
+        $this->assertStringStartsWith("PK\x03\x04", $archive);
+        $this->assertStringContainsString('Plugin Name: Legatus AI Sales Assistant', $archive);
+        $this->assertStringContainsString('/widget/install/'.$agent->getKey().'.js', $archive);
+        $this->assertStringContainsString('signature=', $archive);
+        $this->assertStringNotContainsString('/widget/legatus-demo.js', $archive);
     }
 
     public function test_owner_can_detect_platform_and_verify_the_universal_widget(): void

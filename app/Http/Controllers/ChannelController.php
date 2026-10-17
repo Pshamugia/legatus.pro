@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Agent;
 use App\Services\TenantContext;
 use App\Services\WidgetInstallationService;
+use App\Services\WordPressWidgetPlugin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -225,6 +226,20 @@ class ChannelController extends Controller
                 ? 'Legatus is installed and visible in the website source.'
                 : 'Legatus was not found on the public homepage yet. Publish the website changes, clear its cache, and check again.',
         );
+    }
+
+    public function downloadWordPressPlugin(TenantContext $tenant, WordPressWidgetPlugin $plugin)
+    {
+        $tenant->authorize(['owner', 'admin']);
+        $archive = $plugin->archive($this->widgetScriptUrl($tenant->agent()));
+
+        return response($archive, 200, [
+            'Content-Type' => 'application/zip',
+            'Content-Disposition' => 'attachment; filename="legatus-ai-sales-assistant.zip"',
+            'Content-Length' => (string) strlen($archive),
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function updateWidget(Request $request, TenantContext $tenant)

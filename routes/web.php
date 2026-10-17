@@ -177,6 +177,9 @@ Route::middleware('auth')->group(function () {
         Route::post('/app/channels/widget/verify', [ChannelController::class, 'verifyWidgetInstallation'])
             ->middleware('throttle:10,1')
             ->name('channels.widget.verify');
+        Route::get('/app/channels/widget/wordpress-plugin', [ChannelController::class, 'downloadWordPressPlugin'])
+            ->middleware('throttle:10,1')
+            ->name('channels.widget.wordpress-plugin');
         Route::post('/app/channels/commerce', [CommerceConnectionController::class, 'connect'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.connect');
