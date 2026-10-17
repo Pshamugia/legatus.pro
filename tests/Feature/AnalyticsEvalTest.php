@@ -87,6 +87,9 @@ class AnalyticsEvalTest extends TestCase
         $this->assertFalse($fixture->is_active);
         $this->assertSame(3, $fixture->customerProducts()->where('is_active', true)->count());
         $this->assertTrue($fixture->customerProducts()->where('sku', 'BK-1001')->exists());
+        $fixtureProduct = $fixture->customerProducts()->where('sku', 'BK-1001')->firstOrFail();
+        $this->assertSame('Novel · რომანი', $fixtureProduct->category);
+        $this->assertContains('Magical realism', data_get($fixtureProduct->metadata, 'genres', []));
         $this->assertDatabaseCount('organizations', 2);
         $this->assertSame($agentProductCount, $agent->fresh()->products()->count());
         $this->assertSame('reliability', data_get($fixture->organization->settings, 'system_fixture'));

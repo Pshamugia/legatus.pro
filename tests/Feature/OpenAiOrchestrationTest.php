@@ -6,14 +6,13 @@ use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\RecommendationEvent;
 use App\Models\Reservation;
-use App\Notifications\OpenAiCreditAlert;
+use App\Notifications\PlatformHealthDigest;
 use App\Services\ConversationEngine;
 use App\Services\OpenAiSalesOrchestrator;
 use App\Services\SalesAgentService;
 use App\Services\SalesToolbox;
 use App\Support\SignedVisitorToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -3442,7 +3441,6 @@ class OpenAiOrchestrationTest extends TestCase
             'services.openai.key' => 'test-key',
             'legatus.super_admin_email' => 'operator@example.com',
         ]);
-        Cache::forget('openai-credit-exhausted-alert');
         Notification::fake();
         Http::fake(function ($request) {
             if (str_ends_with($request->url(), '/moderations')) {
@@ -3466,7 +3464,11 @@ class OpenAiOrchestrationTest extends TestCase
             'model' => 'verified-catalog-provider-fallback',
             'status' => 'fallback',
         ]);
-        Notification::assertSentOnDemand(OpenAiCreditAlert::class);
+        Notification::assertSentOnDemand(PlatformHealthDigest::class);
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'openai.credit_exhausted',
+            'status' => 'open',
+        ]);
     }
 
     public function test_raw_contact_is_only_ephemeral_while_the_persisted_transcript_is_immediately_redacted(): void
@@ -4104,6 +4106,106 @@ class OpenAiOrchestrationTest extends TestCase
 
         $this->assertSame('recommendation', $reply['intent']);
         $this->assertFalse($reply['handoff']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+        $this->assertContains('recommend_products', $reply['tools_used']);
+    }
+
+    public function test_budgeted_choice_uses_the_grounded_subject_even_when_semantic_model_calls_it_discovery(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->where('is_active', true)->where('stock', '>', 0)->firstOrFail();
+        $product->update(['price' => 25]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'budget-discovery-drift', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) use ($product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response($this->catalogContextResponse([
+                    'is_catalog_follow_up' => true,
+                    'catalog_scope_action' => 'replace',
+                    'recommendation_scope' => 'none',
+                    'resolved_query' => $product->name,
+                    'resolved_queries' => [$product->name],
+                ], 'budget-discovery-context'));
+            }
+
+            return Http::response(['id' => 'budget-discovery-final', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I could not find anything.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null, 'clarification_missing_input' => null,
+                    'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            "Recommend {$product->name} under 30 GEL",
+            $conversation,
+        );
+
+        $this->assertSame('recommendation', $reply['intent']);
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+        $this->assertContains('recommend_products', $reply['tools_used']);
+    }
+
+    public function test_budgeted_choice_upgrades_a_verified_search_when_semantic_recommendation_scope_is_missed(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->where('is_active', true)->where('stock', '>', 0)->firstOrFail();
+        $product->update(['price' => 25]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'budget-search-upgrade', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        $orchestrationCalls = 0;
+
+        Http::fake(function ($request) use (&$orchestrationCalls, $product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response($this->catalogContextResponse([], 'budget-search-upgrade-context'));
+            }
+
+            $orchestrationCalls++;
+            if ($orchestrationCalls === 1) {
+                return Http::response(['id' => 'budget-search-tool', 'output' => [[
+                    'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'budget-search-call',
+                    'arguments' => json_encode([
+                        'query' => $product->name, 'category' => null, 'max_price' => 30,
+                    ]),
+                ]], 'usage' => []]);
+            }
+
+            return Http::response(['id' => 'budget-search-final', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I found the title.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null,
+                    'clarification_next_tool' => null, 'clarification_missing_input' => null,
+                    'product_ids' => [$product->id], 'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            "Recommend {$product->name} under 30 GEL",
+            $conversation,
+        );
+
+        $this->assertSame('recommendation', $reply['intent']);
         $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
         $this->assertContains('recommend_products', $reply['tools_used']);
     }

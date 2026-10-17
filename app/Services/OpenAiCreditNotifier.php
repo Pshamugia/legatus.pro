@@ -2,14 +2,12 @@
 
 namespace App\Services;
 
-use App\Notifications\OpenAiCreditAlert;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
 class OpenAiCreditNotifier
 {
+    public function __construct(private PlatformHealthIncidentService $incidents) {}
+
     public function report(\Throwable $exception): void
     {
         $message = $exception->getMessage();
@@ -17,24 +15,17 @@ class OpenAiCreditNotifier
             return;
         }
 
-        $email = trim((string) config('legatus.super_admin_email'));
-        if ($email === '') {
-            return;
-        }
+        $this->incidents->syncCategory('openai_credit', [[
+            'key' => 'openai.credit_exhausted',
+            'severity' => 'critical',
+            'title' => 'OpenAI API credit is exhausted',
+            'summary' => 'OpenAI rejected a Legatus request because the API account has no credits remaining.',
+            'context' => ['provider_error_fingerprint' => hash('sha256', Str::limit($message, 300))],
+        ]]);
+    }
 
-        if (! Cache::add('openai-credit-exhausted-alert', true, now()->addDay())) {
-            return;
-        }
-
-        try {
-            Notification::route('mail', $email)->notify(
-                new OpenAiCreditAlert(Str::limit($message, 300)),
-            );
-        } catch (\Throwable $notificationError) {
-            Cache::forget('openai-credit-exhausted-alert');
-            Log::error('Could not send the OpenAI credit exhaustion alert.', [
-                'exception' => $notificationError::class,
-            ]);
-        }
+    public function resolved(): void
+    {
+        $this->incidents->syncCategory('openai_credit', []);
     }
 }

@@ -23,8 +23,7 @@ class SalesAgentService
         string $message,
         ?Conversation $conversation = null,
         ?string $interactionIntent = null,
-    ): array
-    {
+    ): array {
         if ($conversation && $this->socialTurnGate->shouldStaySilent($message, $conversation)) {
             return [
                 'text' => null,
@@ -72,7 +71,10 @@ class SalesAgentService
             }
 
             try {
-                return $this->orchestrator->respond($agent, $conversation, $message);
+                $reply = $this->orchestrator->respond($agent, $conversation, $message);
+                $this->creditNotifier->resolved();
+
+                return $reply;
             } catch (\Throwable $e) {
                 report($e);
                 $this->creditNotifier->report($e);

@@ -4,7 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Agent;
 use App\Models\Organization;
-use App\Notifications\PlatformReliabilityAlert;
+use App\Notifications\PlatformHealthDigest;
 use App\Services\ResponseReliabilityGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -136,13 +136,17 @@ class ResponseReliabilityGuardTest extends TestCase
         $this->artisan('legatus:reliability-check --live')->assertFailed();
         $this->artisan('legatus:reliability-check --live')->assertFailed();
 
-        Notification::assertSentOnDemandTimes(PlatformReliabilityAlert::class, 1);
+        Notification::assertSentOnDemandTimes(PlatformHealthDigest::class, 1);
         Notification::assertSentOnDemand(
-            PlatformReliabilityAlert::class,
-            fn (PlatformReliabilityAlert $notification, array $channels, object $notifiable): bool => ! $notification->healthy
-                && $notification->mode === 'live'
+            PlatformHealthDigest::class,
+            fn (PlatformHealthDigest $notification, array $channels, object $notifiable): bool => count($notification->opened) === 1
+                && str_contains($notification->opened[0]['title'], 'Live AI')
                 && $channels === ['mail']
                 && $notifiable->routeNotificationFor('mail') === 'operator@example.com',
         );
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'ai.reliability.live',
+            'status' => 'open',
+        ]);
     }
 }

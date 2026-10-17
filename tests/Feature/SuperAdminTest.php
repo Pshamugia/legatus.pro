@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AgentRun;
 use App\Models\Organization;
 use App\Models\PaddleSubscription;
+use App\Models\PlatformHealthIncident;
 use App\Models\User;
 use App\Services\LegatusSupportAssistant;
 use App\Services\ReliabilityFixtureManager;
@@ -52,6 +53,32 @@ class SuperAdminTest extends TestCase
             ->assertSee('Needs attention')
             ->assertSee('Live model evaluation')
             ->assertDontSee('Final response contract');
+    }
+
+    public function test_open_platform_incidents_are_visible_only_in_super_admin(): void
+    {
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        PlatformHealthIncident::create([
+            'incident_key' => 'meta.agent.42',
+            'category' => 'meta_publishing',
+            'severity' => 'critical',
+            'status' => 'open',
+            'title' => 'Meta publishing needs attention · Example Store',
+            'summary' => 'One feed delivery requires review.',
+            'context' => ['agent_id' => 42],
+            'occurrences' => 1,
+            'first_detected_at' => now(),
+            'last_detected_at' => now(),
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Meta publishing needs attention · Example Store')
+            ->assertSee('One feed delivery requires review.');
+        $this->assertStringContainsString('System Health & Alerts', $response->getContent());
+
+        $regular = User::factory()->create(['email' => 'owner@example.com']);
+        $this->actingAs($regular)->get(route('super-admin.index'))->assertForbidden();
     }
 
     public function test_super_admin_sees_business_owner_package_and_subscription_dates(): void

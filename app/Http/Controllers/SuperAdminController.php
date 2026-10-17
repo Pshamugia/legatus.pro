@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Agent;
 use App\Models\Organization;
 use App\Models\PaddleSubscription;
+use App\Models\PlatformHealthIncident;
 use App\Services\LegatusSupportAssistant;
 use App\Services\OpenAiCostEstimator;
 use App\Services\RunwayClient;
@@ -14,6 +15,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\View\View;
 
 class SuperAdminController extends Controller
@@ -108,9 +110,22 @@ class SuperAdminController extends Controller
         $reliabilityStatuses = collect(['contract', 'live'])
             ->mapWithKeys(fn (string $mode): array => [$mode => Cache::get('legatus:reliability:last:'.$mode)])
             ->filter(fn ($status): bool => is_array($status));
+        $openHealthIncidents = Schema::hasTable('platform_health_incidents')
+            ? PlatformHealthIncident::query()->where('status', 'open')->latest('last_detected_at')->get()
+            : collect();
+        $resolvedHealthIncidents = Schema::hasTable('platform_health_incidents')
+            ? PlatformHealthIncident::query()->where('status', 'resolved')->latest('resolved_at')->limit(10)->get()
+            : collect();
+        $platformHealth = [
+            'healthy' => $openHealthIncidents->isEmpty(),
+            'open' => $openHealthIncidents->count(),
+            'critical' => $openHealthIncidents->where('severity', 'critical')->count(),
+            'notification_email' => trim((string) config('legatus.super_admin_email')),
+        ];
 
         return view('super-admin.index', compact(
-            'organizations', 'metrics', 'runway', 'reliabilityStatuses', 'environment', 'search',
+            'organizations', 'metrics', 'runway', 'reliabilityStatuses', 'platformHealth',
+            'openHealthIncidents', 'resolvedHealthIncidents', 'environment', 'search',
         ));
     }
 

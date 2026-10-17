@@ -462,6 +462,21 @@ class OpenAiSalesOrchestrator
                 .'. First classify the current turn semantically. If it refines or continues that shopping request, call recommend_products and preserve these constraints. If it is gratitude, farewell, a reaction, or a new unrelated request, do not treat it as a catalog query or budget refinement.]';
         }
         $recommendationScope = (string) ($catalogContext['recommendation_scope'] ?? 'none');
+        if ($newBudgetRequest
+            && $recommendationScope === 'none'
+            && ($catalogContext['is_catalog_follow_up'] ?? false) === true
+            && filled($catalogContext['resolved_query'] ?? null)) {
+            // A semantic resolver may describe a budgeted "choose/recommend"
+            // request as a direct catalogue lookup while still returning the
+            // correct searchable subject. The server-parsed budget and the
+            // explicit recommendation request are authoritative: reuse that
+            // grounded subject for a recommendation instead of allowing model
+            // sampling to turn the same request into an empty discovery turn.
+            $recommendationScope = 'constrained';
+            $catalogContext['recommendation_scope'] = 'constrained';
+            $catalogContext['recommendation_query'] = $catalogContext['resolved_query'];
+            $catalogContext['recommendation_category'] = $catalogContext['resolved_category'] ?? null;
+        }
         $hasGroundedRecommendationConstraint = filled($catalogContext['recommendation_query'] ?? null)
             || filled($catalogContext['recommendation_category'] ?? null)
             || filled($catalogContext['recommendation_occasion'] ?? null);
@@ -984,6 +999,40 @@ class OpenAiSalesOrchestrator
                     'scope' => $recoveredScope,
                     'recovered_after_omitted_tool' => true,
                 ]];
+                $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
+                $recommendations = collect($result['recommendations'] ?? []);
+                if (($result['ok'] ?? false) === true && $recommendations->isNotEmpty()) {
+                    $data = $this->verifiedRecommendationReply($message, $recommendations);
+                }
+            }
+        }
+        if ($newBudgetRequest
+            && $budgetConstraint !== null
+            && ! collect($used)->contains(fn (array $call): bool => ($call['name'] ?? null) === 'recommend_products'
+                && data_get($call, 'result.ok') === true)) {
+            $verifiedSearch = collect($used)
+                ->where('name', 'search_products')
+                ->filter(fn (array $call): bool => data_get($call, 'result.ok') === true
+                    && filled(data_get($call, 'arguments.query')))
+                ->last();
+            if (is_array($verifiedSearch)) {
+                // If both semantic passes drift but the model still performs a
+                // grounded catalogue search, reuse that verified subject for
+                // the promised budget recommendation. A sampled discovery
+                // label must not erase an explicit request to choose.
+                $arguments = [
+                    'query' => (string) data_get($verifiedSearch, 'arguments.query'),
+                    'budget' => $budgetConstraint,
+                    'quantity' => $quantityConstraint,
+                    'category' => data_get($verifiedSearch, 'arguments.category'),
+                    'mood' => null,
+                    'occasion' => null,
+                    'limit' => $quantityConstraint !== null ? min(5, max(1, $quantityConstraint)) : 5,
+                    'exclude_product_ids' => in_array($scopeAction, ['continue', 'refine'], true)
+                        ? $this->activeCatalogProductIds($conversation)->all()
+                        : [],
+                ];
+                $result = $this->tools->execute('recommend_products', $arguments, $agent, $conversation);
                 $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
                 $recommendations = collect($result['recommendations'] ?? []);
                 if (($result['ok'] ?? false) === true && $recommendations->isNotEmpty()) {
