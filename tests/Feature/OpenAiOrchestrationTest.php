@@ -1165,7 +1165,7 @@ class OpenAiOrchestrationTest extends TestCase
             $conversation,
         );
 
-        $this->assertSame('clarification', $reply['intent'], json_encode($reply, JSON_UNESCAPED_UNICODE));
+        $this->assertSame('clarification', $reply['intent']);
         $this->assertDatabaseHas('agent_runs', [
             'conversation_id' => $conversation->id,
             'provider' => 'openai',
@@ -1843,6 +1843,73 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertEquals(30.0, $recommendation->query['budget']);
     }
 
+    public function test_semantically_constrained_recommendation_is_verified_even_when_the_model_skips_the_tool(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $product = $agent->products()->create([
+            'name' => 'Verified Mysterious Novel',
+            'sku' => 'SERVER-RECOMMENDATION',
+            'category' => 'Fiction',
+            'description' => 'A mysterious atmospheric modern novel.',
+            'search_text' => 'mysterious atmospheric modern novel',
+            'price' => 24,
+            'stock' => 4,
+            'is_active' => true,
+            'metadata' => [],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'server-owned-recommendation', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fake(function ($request) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response($this->catalogContextResponse([
+                        'catalog_scope_action' => 'replace',
+                        'recommendation_scope' => 'constrained',
+                        'recommendation_query' => 'mysterious modern novel',
+                    ], 'server-owned-recommendation-context'));
+                }
+
+                return Http::response(['id' => 'server-owned-recommendation-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => 'I could not find a matching product.',
+                        'intent' => 'discovery',
+                        'confidence' => 1,
+                        'handoff' => false,
+                        'escalation_reason' => null,
+                        'clarification_next_tool' => null,
+                        'clarification_missing_input' => null,
+                        'product_ids' => [],
+                        'sources' => [],
+                        'factual_claims' => [],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('', 404);
+        });
+
+        $reply = app(SalesAgentService::class)->reply(
+            $agent,
+            'Recommend a mysterious modern novel',
+            $conversation,
+        );
+
+        $this->assertSame('recommendation', $reply['intent']);
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+        $this->assertContains('resolve_recommendation_context', $reply['tools_used']);
+        $this->assertContains('recommend_products', $reply['tools_used']);
+        $this->assertStringContainsString($product->name, $reply['text']);
+    }
+
     public function test_personal_advice_quick_action_stays_in_ai_when_fallback_asks_for_a_preference(): void
     {
         $this->seed();
@@ -1906,7 +1973,7 @@ class OpenAiOrchestrationTest extends TestCase
             $conversation,
         );
 
-        $this->assertSame('clarification', $reply['intent']);
+        $this->assertSame('clarification', $reply['intent'], json_encode($reply, JSON_UNESCAPED_UNICODE));
         $this->assertFalse($reply['handoff']);
         $this->assertSame('რომელი ჟანრი ან განწყობა გაინტერესებთ?', $reply['text']);
         $this->assertSame('ai', $conversation->fresh()->status);

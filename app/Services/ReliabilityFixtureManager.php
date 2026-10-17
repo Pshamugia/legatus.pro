@@ -63,6 +63,7 @@ class ReliabilityFixtureManager
             ]);
             $policy = $agent->knowledgeSources()->create([
                 'type' => 'text',
+                'source_scope' => 'terms',
                 'name' => 'Reliability business policies',
                 'status' => 'ready',
                 'progress' => 100,

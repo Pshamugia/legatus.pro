@@ -375,6 +375,38 @@ class OpenAiSalesOrchestrator
                 .($quantityConstraint ?? 'not specified')
                 .'. First classify the current turn semantically. If it refines or continues that shopping request, call recommend_products and preserve these constraints. If it is gratitude, farewell, a reaction, or a new unrelated request, do not treat it as a catalog query or budget refinement.]';
         }
+        $recommendationScope = (string) ($catalogContext['recommendation_scope'] ?? 'none');
+        $hasGroundedRecommendationConstraint = filled($catalogContext['recommendation_query'] ?? null)
+            || filled($catalogContext['recommendation_category'] ?? null)
+            || filled($catalogContext['recommendation_occasion'] ?? null);
+        if ($recommendationScope !== 'none' && $hasGroundedRecommendationConstraint) {
+            // Once the semantic resolver has established a sufficiently
+            // constrained recommendation, catalog verification is a server
+            // responsibility. Do not leave the required tool call to model
+            // sampling: an omitted call would otherwise turn the same request
+            // into a false empty result or a human handoff on another run.
+            $arguments = [
+                'query' => (string) ($catalogContext['recommendation_query'] ?? ''),
+                'budget' => $budgetConstraint,
+                'quantity' => $quantityConstraint,
+                'category' => $catalogContext['recommendation_category'] ?? null,
+                'mood' => null,
+                'occasion' => $catalogContext['recommendation_occasion'] ?? null,
+                'limit' => $quantityConstraint !== null ? min(5, max(1, $quantityConstraint)) : 5,
+                'exclude_product_ids' => in_array($scopeAction, ['continue', 'refine'], true)
+                    ? $this->activeCatalogProductIds($conversation)->all()
+                    : [],
+            ];
+            $result = $this->tools->execute('recommend_products', $arguments, $agent, $conversation);
+            $used[] = ['name' => 'resolve_recommendation_context', 'arguments' => [], 'result' => [
+                'ok' => true,
+                'scope' => $recommendationScope,
+            ]];
+            $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
+            $orchestrationMessage .= "\n\n[Server-verified recommendation result: "
+                .json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                .'. Use these verified recommendations to answer the request. Do not replace a non-empty result with a catalog miss, clarification, or human handoff.]';
+        }
         if ($pendingSuggestion !== '' && $this->isShortAffirmation($message)) {
             $arguments = ['query' => $pendingSuggestion, 'category' => null, 'max_price' => null];
             $result = $this->tools->execute('search_products', $arguments, $agent, $conversation);
@@ -759,6 +791,54 @@ class OpenAiSalesOrchestrator
                 $used[] = ['name' => 'model_fallback', 'arguments' => [], 'result' => ['ok' => true, 'reason' => $fallbackReason, 'model' => $servedModel]];
             }
         }
+        if ($catalogContext === null
+            && in_array($data['intent'] ?? null, ['recommendation', 'discovery'], true)
+            && collect($data['product_ids'] ?? [])->isEmpty()
+            && collect($used)->whereIn('name', ['search_products', 'recommend_products'])->isEmpty()
+            && $agent->customerProducts()->where('is_active', true)->exists()) {
+            $recoveredContext = $this->resolveCatalogFollowUp(
+                $agent,
+                $conversation,
+                $message,
+                $primaryModel,
+                $deadline,
+                $inputTokens,
+                $outputTokens,
+                $modelUsage,
+                true,
+            );
+            $recoveredContext = $this->mergeActiveCatalogScope($conversation, $recoveredContext);
+            $recoveredScope = (string) ($recoveredContext['recommendation_scope'] ?? 'none');
+            $recoveredHasConstraint = filled($recoveredContext['recommendation_query'] ?? null)
+                || filled($recoveredContext['recommendation_category'] ?? null)
+                || filled($recoveredContext['recommendation_occasion'] ?? null);
+            if ($recoveredScope !== 'none' && $recoveredHasConstraint) {
+                $catalogContext = $recoveredContext;
+                $arguments = [
+                    'query' => (string) ($catalogContext['recommendation_query'] ?? ''),
+                    'budget' => $budgetConstraint,
+                    'quantity' => $quantityConstraint,
+                    'category' => $catalogContext['recommendation_category'] ?? null,
+                    'mood' => null,
+                    'occasion' => $catalogContext['recommendation_occasion'] ?? null,
+                    'limit' => $quantityConstraint !== null ? min(5, max(1, $quantityConstraint)) : 5,
+                    'exclude_product_ids' => in_array((string) ($catalogContext['catalog_scope_action'] ?? 'replace'), ['continue', 'refine'], true)
+                        ? $this->activeCatalogProductIds($conversation)->all()
+                        : [],
+                ];
+                $result = $this->tools->execute('recommend_products', $arguments, $agent, $conversation);
+                $used[] = ['name' => 'resolve_recommendation_context', 'arguments' => [], 'result' => [
+                    'ok' => true,
+                    'scope' => $recoveredScope,
+                    'recovered_after_omitted_tool' => true,
+                ]];
+                $used[] = ['name' => 'recommend_products', 'arguments' => $arguments, 'result' => $result];
+                $recommendations = collect($result['recommendations'] ?? []);
+                if (($result['ok'] ?? false) === true && $recommendations->isNotEmpty()) {
+                    $data = $this->verifiedRecommendationReply($message, $recommendations);
+                }
+            }
+        }
         $usedCollection = collect($used);
         $fallbackRecommendationCalls = $usedCollection
             ->where('name', 'recommend_products')
@@ -781,6 +861,13 @@ class OpenAiSalesOrchestrator
                 ->values()
                 ->all();
             $data['confidence'] = 1;
+        }
+        if (! $fallbackUsed
+            && is_array($catalogContext)
+            && ($catalogContext['recommendation_scope'] ?? 'none') !== 'none'
+            && $fallbackRecommendations->isNotEmpty()
+            && ($data['intent'] ?? null) !== 'recommendation') {
+            $data = $this->verifiedRecommendationReply($message, $fallbackRecommendations);
         }
         if ($fallbackUsed
             && $fallbackRecommendationCalls->isNotEmpty()
@@ -1176,6 +1263,39 @@ class OpenAiSalesOrchestrator
             $used[] = ['name' => 'clarify_product_identity', 'arguments' => [], 'result' => ['ok' => true]];
         }
 
+        if (is_string($escalationReason)
+            && str_starts_with($escalationReason, 'The clarification question')
+            && $conversation->fresh()->status !== 'human') {
+            // Invalid model metadata is not a customer safety incident. Keep
+            // the conversation in AI mode instead of punishing the customer
+            // with an operator transfer for a malformed clarification draft.
+            $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+            $wholesale = ($data['intent'] ?? null) === 'wholesale';
+            $data = [
+                'text' => $wholesale
+                    ? ($georgian
+                        ? 'საბითუმო მოთხოვნის დაზუსტებაში დაგეხმარებით. რომელი პროდუქტი ან მომსახურება და რა რაოდენობა გაინტერესებთ?'
+                        : 'I can help clarify the wholesale request. Which product or service and what quantity do you need?')
+                    : ($georgian
+                        ? 'მოთხოვნა სხვა ფორმით მომწერეთ და დადასტურებული ინფორმაციის ფარგლებში დაგეხმარებით.'
+                        : 'Please rephrase the request and I will help using verified business information.'),
+                'intent' => $wholesale ? 'wholesale' : 'conversation',
+                'confidence' => 1,
+                'handoff' => false,
+                'escalation_reason' => null,
+                'clarification_next_tool' => null,
+                'clarification_missing_input' => null,
+                'product_ids' => [],
+                'sources' => [],
+                'factual_claims' => [],
+            ];
+            $escalationReason = null;
+            $used[] = ['name' => 'clarification_boundary', 'arguments' => [], 'result' => [
+                'ok' => true,
+                'reason' => 'invalid_model_clarification_metadata',
+            ]];
+        }
+
         if ($escalationReason) {
             $handoffEnabled = $agent->humanHandoffEnabled();
             if ($handoffEnabled) {
@@ -1312,6 +1432,38 @@ class OpenAiSalesOrchestrator
 
             return null;
         }
+    }
+
+    private function verifiedRecommendationReply(string $customerMessage, Collection $recommendations): array
+    {
+        $products = $recommendations
+            ->filter(fn ($product): bool => is_array($product) && (int) ($product['id'] ?? 0) > 0)
+            ->unique(fn (array $product): int => (int) $product['id'])
+            ->take(3)
+            ->values();
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage) === 1;
+        $names = $products->pluck('name')->filter()->map(fn ($name): string => '“'.trim((string) $name).'”')->implode(', ');
+
+        return [
+            'text' => $georgian
+                ? "თქვენი მოთხოვნის მიხედვით კატალოგიდან ეს შესაბამისი ვარიანტები შევარჩიე: {$names}."
+                : "Based on your request, I selected these matching options from the verified catalog: {$names}.",
+            'intent' => 'recommendation',
+            'confidence' => 1,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'clarification_next_tool' => null,
+            'clarification_missing_input' => null,
+            'product_ids' => $products->pluck('id')->map(fn ($id): int => (int) $id)->all(),
+            'sources' => [],
+            'factual_claims' => $products->map(fn (array $product): array => [
+                'type' => 'product',
+                'product_id' => (int) $product['id'],
+                'amount' => null,
+                'quantity' => null,
+                'reference' => null,
+            ])->all(),
+        ];
     }
 
     private function client(int $timeout): PendingRequest
@@ -1745,6 +1897,7 @@ class OpenAiSalesOrchestrator
         int &$inputTokens,
         int &$outputTokens,
         array &$modelUsage,
+        bool $force = false,
     ): ?array {
         $recentIds = $this->recentCatalogProductIds($conversation)->take(5);
         $hasActiveCatalogScope = is_array(data_get($conversation->context, 'active_catalog_scope'));
@@ -1754,7 +1907,8 @@ class OpenAiSalesOrchestrator
             ->whereIn('source_scope', ['business', 'terms', 'delivery'])
             ->where('status', 'ready')
             ->exists();
-        if ($recentIds->isEmpty()
+        if (! $force
+            && $recentIds->isEmpty()
             && ! $hasActiveCatalogScope
             && blank(data_get($agent->settings, 'catalog_search_url'))
             && ! $hasReadyKnowledge
