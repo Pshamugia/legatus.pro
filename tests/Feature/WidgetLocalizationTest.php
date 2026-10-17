@@ -48,6 +48,7 @@ class WidgetLocalizationTest extends TestCase
             ], 'ka'))
             ->assertSee(trans('widget.personal_advice', [], 'ka'))
             ->assertSee('data-q="'.e(trans('widget.personal_advice_prompt', [], 'ka')).'"', false)
+            ->assertSee('data-intent="guided_recommendation"', false)
             ->assertSee(trans('widget.delivery', [], 'ka'))
             ->assertSee('data-q="'.e(trans('widget.delivery_prompt', [], 'ka')).'"', false)
             ->assertDontSee(trans('widget.personal_advice', [], 'en'));
@@ -87,6 +88,7 @@ class WidgetLocalizationTest extends TestCase
             ->assertSee('<html lang="en">', false)
             ->assertSee(trans('widget.personal_advice', [], 'en'))
             ->assertSee('data-q="'.e(trans('widget.personal_advice_prompt', [], 'en')).'"', false)
+            ->assertSee('data-intent="guided_recommendation"', false)
             ->assertSee(trans('widget.delivery', [], 'en'))
             ->assertSee('data-q="'.e(trans('widget.delivery_prompt', [], 'en')).'"', false)
             ->assertDontSee(trans('widget.personal_advice', [], 'ka'));

@@ -30,6 +30,7 @@ class ConversationEngine
         string $customerId,
         ?string $requestId = null,
         ?string $customerName = null,
+        ?string $interactionIntent = null,
     ): array {
         $customerMessage = $requestId === null ? null : Message::query()
             ->where('role', 'customer')
@@ -63,6 +64,9 @@ class ConversationEngine
                 $messageMetadata = [
                     'contact_evidence' => PrivacyRedactor::contactEvidence($text),
                 ];
+                if ($interactionIntent !== null) {
+                    $messageMetadata['interaction_intent'] = $interactionIntent;
+                }
                 if ($redactedText !== $text) {
                     $messageMetadata['pii_redacted'] = true;
                 }
@@ -115,7 +119,9 @@ class ConversationEngine
             ));
         }
 
-        $reply = $this->salesAgent->reply($agent, $text, $conversation);
+        $reply = $interactionIntent === null
+            ? $this->salesAgent->reply($agent, $text, $conversation)
+            : $this->salesAgent->reply($agent, $text, $conversation, $interactionIntent);
 
         // The model call happens outside a database lock and can take several
         // seconds. An operator may open/take over the conversation meanwhile.

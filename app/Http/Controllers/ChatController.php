@@ -39,6 +39,7 @@ class ChatController extends Controller
             'visitor_token' => 'nullable|string|max:512',
             'request_id' => 'nullable|uuid',
             'channel' => 'nullable|in:web,widget',
+            'interaction_intent' => 'nullable|in:guided_recommendation',
         ]);
 
         $providedToken = $this->providedToken($request);
@@ -61,6 +62,7 @@ class ChatController extends Controller
                 $visitorId,
                 $visitorToken,
                 $data['request_id'] ?? null,
+                ($data['channel'] ?? 'web') === 'widget' ? ($data['interaction_intent'] ?? null) : null,
             ));
 
         if (! isset($data['request_id'])) {
@@ -226,8 +228,9 @@ class ChatController extends Controller
         string $visitorId,
         string $visitorToken,
         ?string $requestId,
+        ?string $interactionIntent,
     ): array {
-        $payload = $engine->handle($agent, $text, $channel, $visitorId, $requestId);
+        $payload = $engine->handle($agent, $text, $channel, $visitorId, $requestId, null, $interactionIntent);
         unset($payload['conversation_id']);
 
         return $this->ownedResponse($payload, $visitorToken, $requestId);

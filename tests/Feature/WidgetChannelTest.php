@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Agent;
+use App\Models\AgentRun;
 use App\Models\ChannelConnection;
+use App\Models\Conversation;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -43,6 +45,65 @@ class WidgetChannelTest extends TestCase
         $this->assertMatchesRegularExpression("/script-src 'self' 'nonce-([^']+)'/", $csp);
         preg_match("/script-src 'self' 'nonce-([^']+)'/", $csp, $matches);
         $this->assertStringContainsString('<script nonce="'.$matches[1].'">', (string) $response->getContent());
+    }
+
+    public function test_personal_advice_quick_action_starts_with_one_clarifying_question(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $requestId = (string) \Illuminate\Support\Str::uuid();
+
+        $frame = $this->get(route('widget.frame', $agent))
+            ->assertOk()
+            ->assertSee('data-intent="guided_recommendation"', false)
+            ->assertSee('interaction_intent: interactionIntent', false);
+
+        $response = $this->postJson(route('chat.message', $agent), [
+            'message' => trans('widget.personal_advice_prompt', [], 'ka'),
+            'request_id' => $requestId,
+            'channel' => 'widget',
+            'interaction_intent' => 'guided_recommendation',
+        ])->assertOk()
+            ->assertJsonPath('text', 'ვისთვის ან რა მიზნით არჩევთ?')
+            ->assertJsonPath('intent', 'clarification')
+            ->assertJsonPath('confidence', 1)
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('products', [])
+            ->assertJsonPath('tools_used.0', 'ask_recommendation_clarification');
+
+        $conversation = Conversation::where('agent_id', $agent->id)->latest('id')->firstOrFail();
+        $this->assertSame(
+            'guided_recommendation',
+            $conversation->messages()->where('role', 'customer')->firstOrFail()->metadata['interaction_intent'],
+        );
+        $this->assertSame('awaiting_needs', data_get($conversation->context, 'guided_recommendation.status'));
+        $this->assertSame(1, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame('guided-recommendation-contract', AgentRun::where('conversation_id', $conversation->id)->value('model'));
+
+        $this->withHeader('X-Legatus-Visitor-Token', $response->json('visitor_token'))
+            ->postJson(route('chat.message', $agent), [
+                'message' => trans('widget.personal_advice_prompt', [], 'ka'),
+                'request_id' => $requestId,
+                'channel' => 'widget',
+                'interaction_intent' => 'guided_recommendation',
+            ])->assertOk()
+            ->assertJsonPath('text', 'ვისთვის ან რა მიზნით არჩევთ?');
+
+        $this->assertSame(1, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame(1, AgentRun::where('conversation_id', $conversation->id)->count());
+    }
+
+    public function test_unknown_widget_interaction_intent_is_rejected(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+
+        $this->postJson(route('chat.message', $agent), [
+            'message' => 'Help me choose.',
+            'channel' => 'widget',
+            'interaction_intent' => 'skip_verification',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('interaction_intent');
     }
 
     public function test_installation_snippet_uses_a_signed_identifier_instead_of_the_demo_slug(): void

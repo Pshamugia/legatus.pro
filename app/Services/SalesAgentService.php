@@ -18,7 +18,12 @@ class SalesAgentService
         private OpenAiCreditNotifier $creditNotifier,
     ) {}
 
-    public function reply(Agent $agent, string $message, ?Conversation $conversation = null): array
+    public function reply(
+        Agent $agent,
+        string $message,
+        ?Conversation $conversation = null,
+        ?string $interactionIntent = null,
+    ): array
     {
         if ($conversation && $this->socialTurnGate->shouldStaySilent($message, $conversation)) {
             return [
@@ -32,6 +37,10 @@ class SalesAgentService
                 'sources' => [],
                 'tools_used' => ['social_turn_gate'],
             ];
+        }
+
+        if ($conversation && $interactionIntent === 'guided_recommendation') {
+            return $this->guidedRecommendationClarification($agent, $conversation, $message);
         }
 
         if ($socialReply = $this->socialReply($message, $conversation)) {
@@ -142,6 +151,43 @@ class SalesAgentService
 
         return (int) (clone $runs)->sum('input_tokens') + (int) (clone $runs)->sum('output_tokens')
             >= max(1000, (int) config('legatus.daily_ai_token_limit'));
+    }
+
+    private function guidedRecommendationClarification(
+        Agent $agent,
+        Conversation $conversation,
+        string $message,
+    ): array {
+        $context = is_array($conversation->context) ? $conversation->context : [];
+        $context['guided_recommendation'] = [
+            'status' => 'awaiting_needs',
+            'started_at' => now()->toIso8601String(),
+        ];
+        $conversation->update(['context' => $context]);
+
+        AgentRun::create([
+            'agent_id' => $agent->id,
+            'conversation_id' => $conversation->id,
+            'provider' => 'local',
+            'model' => 'guided-recommendation-contract',
+            'status' => 'completed',
+            'tools_used' => [['name' => 'ask_recommendation_clarification']],
+        ]);
+
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+
+        return [
+            'text' => $georgian
+                ? 'ვისთვის ან რა მიზნით არჩევთ?'
+                : 'Who is it for, or what do you need it for?',
+            'intent' => 'clarification',
+            'confidence' => 1.0,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'products' => [],
+            'sources' => [],
+            'tools_used' => ['ask_recommendation_clarification'],
+        ];
     }
 
     private function socialReply(string $message, ?Conversation $conversation): ?array

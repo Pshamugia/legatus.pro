@@ -51,7 +51,7 @@
             <button type="button" data-q="{{ $widgetCopy['platform_pricing_prompt'] }}">$ {{ $widgetCopy['platform_pricing'] }}</button>
             <button type="button" data-q="{{ $widgetCopy['platform_channels_prompt'] }}">↗ {{ $widgetCopy['platform_channels'] }}</button>
         @else
-            <button type="button" data-q="{{ $widgetCopy['personal_advice_prompt'] }}">✨ {{ $widgetCopy['personal_advice'] }}</button>
+            <button type="button" data-q="{{ $widgetCopy['personal_advice_prompt'] }}" data-intent="guided_recommendation">✨ {{ $widgetCopy['personal_advice'] }}</button>
             <button type="button" data-q="{{ $widgetCopy['delivery_prompt'] }}">🚚 {{ $widgetCopy['delivery'] }}</button>
         @endif
     </div>
@@ -452,7 +452,7 @@
         return response.json();
     }
 
-    async function send(text, image = null) {
+    async function send(text, image = null, interactionIntent = null) {
         const message = text.trim();
         if ((!message && !image) || sending) return;
 
@@ -471,7 +471,7 @@
             const id = requestId();
             const response = image
                 ? await postImage(image, message, id, controller.signal)
-                : await postMessage({message, visitor_token: visitorToken, request_id: id, channel: 'widget'}, controller.signal);
+                : await postMessage({message, visitor_token: visitorToken, request_id: id, channel: 'widget', interaction_intent: interactionIntent}, controller.signal);
 
             const data = await responseData(response);
 
@@ -505,7 +505,7 @@
         send(input.value, selectedImage);
     });
     document.querySelectorAll('[data-q]').forEach(button => {
-        button.addEventListener('click', () => send(button.dataset.q));
+        button.addEventListener('click', () => send(button.dataset.q, null, button.dataset.intent || null));
     });
     pollHistory();
     setInterval(pollHistory, 2500);
