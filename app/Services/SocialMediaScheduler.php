@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Agent;
+use App\Models\Product;
 use App\Models\SocialMediaSchedule;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -249,6 +250,8 @@ class SocialMediaScheduler
         ) && $this->liveAvailabilityAllows($schedule->agent, $product);
 
         if ($currentProductIsEligible && ! isset($excludedProductIds[(int) $product->id])) {
+            $this->refreshPendingProductFacts($pending, $product);
+
             return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
         }
 
@@ -527,6 +530,26 @@ class SocialMediaScheduler
             'caption' => $this->renderer->render($provider, $template, $agent, $renderProduct),
             'copy_mode' => $copyMode,
         ];
+    }
+
+    private function refreshPendingProductFacts(Collection $posts, Product $product): void
+    {
+        $product->refresh();
+
+        foreach ($posts as $post) {
+            $localized = $post->language
+                ? (array) data_get($product->metadata, 'localized.'.$post->language, [])
+                : [];
+            $descriptionValue = $product->socialDescription($post->language) ?: $post->description;
+            $description = trim(strip_tags((string) $descriptionValue));
+            $description = Str::limit(preg_replace('/\s+/u', ' ', $description) ?? '', 1600, '…');
+
+            $post->update([
+                'title' => (string) ($localized['name'] ?? $product->name),
+                'description' => $description ?: null,
+                'product_url' => (string) ($localized['product_url'] ?? data_get($product->metadata, 'product_url')),
+            ]);
+        }
     }
 
     private function pendingProductAttributes(Agent $agent, string $provider, CarbonImmutable $slot, string $copyMode): array

@@ -646,6 +646,17 @@ class KnowledgeIngestionService
             }
         }
 
+        // A dedicated description block on the rendered product page is more
+        // authoritative than structured metadata. Storefronts often truncate
+        // meta/JSON-LD descriptions for previews, sometimes even in the middle
+        // of an HTML entity. Never let that shorter preview replace the full
+        // description that is visibly rendered for the customer.
+        if ($candidates !== []) {
+            usort($candidates, fn (string $left, string $right): int => mb_strlen($left) <=> mb_strlen($right));
+
+            return $candidates[0];
+        }
+
         foreach ($this->structuredProductsFromHtml($html) as $product) {
             $this->addDescriptionCandidate($candidates, $product['description'] ?? null);
         }

@@ -1453,6 +1453,7 @@ class SocialMediaSchedulerTest extends TestCase
                     '@context' => 'https://schema.org',
                     '@type' => 'Product',
                     'name' => 'ჭიათურა',
+                    'description' => 'Truncated structured preview ending',
                     'offers' => [
                         '@type' => 'Offer',
                         'url' => 'https://example.com/books/chiatura/142',
@@ -1466,7 +1467,25 @@ class SocialMediaSchedulerTest extends TestCase
             ),
         ]);
 
-        app(PublicProductAvailabilityVerifier::class)->verify($product);
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $schedule->update(['categories' => [], 'copy_mode' => 'ai']);
+        $dueAt = now('UTC')->subMinute();
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id,
+            'product_id' => $product->id,
+            'provider' => 'facebook',
+            'status' => 'preparing',
+            'scheduled_for' => $dueAt,
+            'title' => $product->name,
+            'description' => 'Truncated localized description that stops in the middle of a longer verified source text',
+            'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(),
+            'caption' => '',
+            'copy_mode' => 'ai',
+        ]);
+
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule, $dueAt);
+        $this->assertSame([$post->id], $safeIds);
         $this->assertSame(
             'ეკონომიკურ-გეოგრაფიული სამეცნიერო ნარკვევი ჭიათურის შესახებ',
             $product->fresh()->description,
@@ -1475,6 +1494,7 @@ class SocialMediaSchedulerTest extends TestCase
             $product->fresh()->description,
             data_get($product->fresh()->metadata, 'localized.Georgian.description'),
         );
+        $this->assertSame($product->fresh()->description, $post->fresh()->description);
     }
 
     public function test_incomplete_verified_description_uses_title_only_fallback_and_never_calls_ai(): void
