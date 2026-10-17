@@ -27,6 +27,11 @@ Schedule::command('legatus:reconcile-meta-inbox')->everyMinute()->withoutOverlap
 Schedule::command('legatus:rebuild-category-indexes')->everyFiveMinutes()->withoutOverlapping(10);
 Schedule::command('legatus:resume-knowledge')->everyFiveMinutes()->withoutOverlapping(10);
 
+// This is a transaction-rolled-back synthetic check: it sends nothing to a
+// customer and makes no provider call, but proves the shared reply contract and
+// the controlled recommendation flow are still healthy in production.
+Schedule::command('legatus:reliability-check')->everyTenMinutes()->withoutOverlapping(10);
+
 // Shared-hosting production does not necessarily provide Supervisor. Run a
 // short-lived worker from the platform scheduler so every tenant's one-click
 // sync continues after the browser request ends. The scheduler is configured

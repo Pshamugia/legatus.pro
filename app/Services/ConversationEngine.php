@@ -21,6 +21,7 @@ class ConversationEngine
     public function __construct(
         private SalesAgentService $salesAgent,
         private CommerceAttributionService $attributions,
+        private ?ResponseReliabilityGuard $reliabilityGuard = null,
     ) {}
 
     public function handle(
@@ -122,6 +123,8 @@ class ConversationEngine
         $reply = $interactionIntent === null
             ? $this->salesAgent->reply($agent, $text, $conversation)
             : $this->salesAgent->reply($agent, $text, $conversation, $interactionIntent);
+        $reply = ($this->reliabilityGuard ?? app(ResponseReliabilityGuard::class))
+            ->enforce($agent, $conversation, $text, $reply);
 
         // The model call happens outside a database lock and can take several
         // seconds. An operator may open/take over the conversation meanwhile.
@@ -165,6 +168,7 @@ class ConversationEngine
             $conversation->save();
         }
 
+        $reliabilityIssues = $reply['reliability_issues'] ?? [];
         $assistant = $conversation->messages()->create([
             'role' => 'assistant',
             'content' => $reply['text'],
@@ -176,6 +180,7 @@ class ConversationEngine
                 'escalation_reason' => $reply['escalation_reason'] ?? null,
                 'products' => $reply['products'],
                 'handoff' => (bool) $reply['handoff'],
+                'reliability_issues' => $reliabilityIssues,
                 'request_id' => $requestId,
             ],
         ]);
@@ -184,6 +189,8 @@ class ConversationEngine
             'status' => $reply['handoff'] ? 'human' : 'ai',
             'last_message_at' => now(),
         ]);
+
+        unset($reply['reliability_issues']);
 
         return $this->rememberResponse($customerMessage, $reply + [
             'message_id' => $assistant->public_id,

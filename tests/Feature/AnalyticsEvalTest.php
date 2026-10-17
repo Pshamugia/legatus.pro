@@ -185,6 +185,18 @@ class AnalyticsEvalTest extends TestCase
             'status' => 'failed',
             'error' => 'Visible run error.',
         ]);
+        $guardedConversation = $agent->conversations()->create([
+            'visitor_id' => 'quality-guarded',
+            'channel' => 'widget',
+            'status' => 'ai',
+            'last_message_at' => now()->subMinutes(8),
+        ]);
+        $guardedConversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'Which product or need do you have in mind?',
+            'confidence' => 1,
+            'metadata' => ['reliability_issues' => ['empty_text', 'invalid_intent']],
+        ]);
         $silentConversation = $agent->conversations()->create([
             'visitor_id' => 'completed-social-turn',
             'channel' => 'facebook',
@@ -216,15 +228,22 @@ class AnalyticsEvalTest extends TestCase
             ->assertSee('Open the conversation')
             ->assertSee($source->name)
             ->assertSee('visible-quality-model')
+            ->assertSee('An unsafe or malformed answer was corrected before delivery')
+            ->assertSee('Prevented replies')
             ->assertSee(route('knowledge.index'), false)
             ->assertDontSee('Thank you, that is all.')
             ->assertDontSee('Hidden broken source');
 
         $this->assertSame(1, $response->viewData('quality')['knowledge_issues']);
+        $this->assertSame(1, $response->viewData('quality')['reliability_interventions']);
         $this->assertGreaterThanOrEqual(1, $response->viewData('quality')['actionable_issues']);
         $this->assertTrue($response->viewData('qualityIssues')->contains(
             fn (array $issue): bool => $issue['type'] === 'unanswered_question'
                 && $issue['conversation_id'] === $conversation->id,
+        ));
+        $this->assertTrue($response->viewData('qualityIssues')->contains(
+            fn (array $issue): bool => $issue['type'] === 'reliability_intervention'
+                && $issue['conversation_id'] === $guardedConversation->id,
         ));
         $this->assertTrue($response->viewData('degradedRuns')->contains('id', AgentRun::latest('id')->value('id')));
     }

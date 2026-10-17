@@ -11,6 +11,7 @@ use App\Models\Message;
 use App\Models\RecommendationEvent;
 use App\Services\TenantContext;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
 
 class AnalyticsController extends Controller
 {
@@ -120,6 +121,7 @@ class AnalyticsController extends Controller
             ->take(20)
             ->get();
         $eval = EvaluationRun::where('agent_id', $agent->id)->latest()->first();
+        $reliabilityStatus = Cache::get('legatus:reliability:last');
 
         $knowledgeSources = $agent->knowledgeSources()
             ->select(['id', 'name', 'source_scope', 'status', 'progress', 'error', 'last_synced_at', 'updated_at'])
@@ -151,6 +153,22 @@ class AnalyticsController extends Controller
                 'suggestion' => $question
                     ? 'Review the answer and add or correct verified business information that directly answers this question.'
                     : 'Review the answer in context and add the missing verified fact to Knowledge if needed.',
+                'conversation_id' => $message->conversation_id,
+            ]);
+        }
+        $reliabilityInterventions = (clone $assistantMessages)
+            ->latest('id')
+            ->take(100)
+            ->get()
+            ->filter(fn (Message $message): bool => (array) data_get($message->metadata, 'reliability_issues', []) !== []);
+        foreach ($reliabilityInterventions->take(10) as $message) {
+            $issues = (array) data_get($message->metadata, 'reliability_issues', []);
+            $qualityIssues->push([
+                'type' => 'reliability_intervention',
+                'label' => 'Prevented',
+                'title' => 'An unsafe or malformed answer was corrected before delivery',
+                'detail' => Str::limit(implode(', ', $issues), 180),
+                'suggestion' => 'Review the conversation and trace. Add a regression case if this input is not already covered.',
                 'conversation_id' => $message->conversation_id,
             ]);
         }
@@ -195,6 +213,7 @@ class AnalyticsController extends Controller
             'products_missing_image' => $agent->products()->where('is_active', true)
                 ->where(fn ($query) => $query->whereNull('image')->orWhere('image', ''))->count(),
             'actionable_issues' => $qualityIssues->count(),
+            'reliability_interventions' => $reliabilityInterventions->count(),
         ];
 
         return view('analytics', compact(
@@ -209,6 +228,7 @@ class AnalyticsController extends Controller
             'qualityIssues',
             'attributionGroups',
             'attributionCampaigns',
+            'reliabilityStatus',
         ));
     }
 }
