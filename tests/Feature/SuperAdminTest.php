@@ -7,6 +7,7 @@ use App\Models\Organization;
 use App\Models\PaddleSubscription;
 use App\Models\User;
 use App\Services\LegatusSupportAssistant;
+use App\Services\ReliabilityFixtureManager;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -72,6 +73,19 @@ class SuperAdminTest extends TestCase
             ->assertOk()
             ->assertSee('Visible Store')
             ->assertDontSee('Hidden Store');
+    }
+
+    public function test_platform_reliability_fixture_is_not_counted_or_listed_as_a_business(): void
+    {
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        Organization::create(['name' => 'Customer Store', 'slug' => 'customer-store']);
+        app(ReliabilityFixtureManager::class)->provision();
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Customer Store')
+            ->assertDontSee('Legatus Reliability Fixture')
+            ->assertViewHas('metrics', fn (array $metrics): bool => $metrics['businesses'] === 1);
     }
 
     public function test_super_admin_sees_tenant_scoped_estimated_ai_spend_and_hybrid_usage(): void

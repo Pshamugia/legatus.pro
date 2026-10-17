@@ -90,7 +90,6 @@ class ReliabilityCheck extends Command
 
                 $exit = $this->call('legatus:eval', [
                     '--live' => true,
-                    '--agent' => (string) $agent->id,
                 ]);
                 $checks[] = [
                     'Live model evaluation',

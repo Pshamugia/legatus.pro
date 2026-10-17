@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\EvaluationRun;
+use App\Services\ReliabilityFixtureManager;
 use App\Models\Organization;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
@@ -52,23 +53,24 @@ class AnalyticsEvalTest extends TestCase
         $this->assertSame('offline', $run->mode);
     }
 
-    public function test_live_evaluation_stops_before_model_calls_when_fixture_products_are_hidden(): void
+    public function test_reliability_fixture_is_isolated_from_the_selected_business(): void
     {
         $this->seed(DatabaseSeeder::class);
         $agent = Agent::where('slug', 'legatus-demo')->firstOrFail();
-        $agent->knowledgeSources()->create([
-            'type' => 'url',
-            'name' => 'Accidental live source',
-            'url' => 'https://shop.example/catalog',
-            'status' => 'ready',
-        ]);
-        config(['services.openai.key' => 'test-key']);
+        $agentProductCount = $agent->products()->count();
 
-        $this->artisan('legatus:eval --live --agent=legatus-demo')
-            ->expectsOutputToContain('Live evaluation fixture is invalid')
-            ->assertFailed();
+        $fixture = app(ReliabilityFixtureManager::class)->provision();
+        $sameFixture = app(ReliabilityFixtureManager::class)->provision();
 
-        $this->assertDatabaseCount('evaluation_runs', 0);
+        $this->assertNotSame($agent->id, $fixture->id);
+        $this->assertSame($fixture->id, $sameFixture->id);
+        $this->assertSame(ReliabilityFixtureManager::AGENT_SLUG, $fixture->slug);
+        $this->assertFalse($fixture->is_active);
+        $this->assertSame(3, $fixture->customerProducts()->where('is_active', true)->count());
+        $this->assertTrue($fixture->customerProducts()->where('sku', 'BK-1001')->exists());
+        $this->assertDatabaseCount('organizations', 2);
+        $this->assertSame($agentProductCount, $agent->fresh()->products()->count());
+        $this->assertSame('reliability', data_get($fixture->organization->settings, 'system_fixture'));
     }
 
     public function test_evaluation_replaces_linked_eval_runs_and_cleans_legacy_local_orphans(): void

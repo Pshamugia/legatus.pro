@@ -23,6 +23,7 @@ class SuperAdminController extends Controller
         $environment = config('paddle.environment');
         $search = trim((string) $request->query('search', ''));
         $organizations = Organization::query()
+            ->whereNull('settings->system_fixture')
             ->with([
                 'users' => fn ($query) => $query->orderBy('organization_user.created_at'),
                 'agents:id,organization_id,name,business_name,is_active',
@@ -45,6 +46,8 @@ class SuperAdminController extends Controller
         $todayStart = now()->startOfDay();
         $usageRows = DB::table('agent_runs')
             ->join('agents', 'agents.id', '=', 'agent_runs.agent_id')
+            ->join('organizations', 'organizations.id', '=', 'agents.organization_id')
+            ->whereNull('organizations.settings->system_fixture')
             ->where('agent_runs.provider', 'openai')
             ->where('agent_runs.created_at', '>=', $monthStart)
             ->where(function ($query): void {
@@ -86,8 +89,8 @@ class SuperAdminController extends Controller
             ->get()
             ->unique('organization_id');
         $metrics = [
-            'businesses' => Organization::count(),
-            'new_this_month' => Organization::where('created_at', '>=', now()->startOfMonth())->count(),
+            'businesses' => Organization::whereNull('settings->system_fixture')->count(),
+            'new_this_month' => Organization::whereNull('settings->system_fixture')->where('created_at', '>=', now()->startOfMonth())->count(),
             'active' => $currentSubscriptions->where('status', 'active')->filter(fn ($subscription) => ! $subscription->current_period_ends_at?->isPast())->count(),
             'trialing' => $currentSubscriptions->where('status', 'trialing')->filter(fn ($subscription) => ! $subscription->trial_ends_at?->isPast())->count(),
             'complimentary' => Organization::whereHas('billingAccessGrants', fn ($query) => $query->active())->count(),

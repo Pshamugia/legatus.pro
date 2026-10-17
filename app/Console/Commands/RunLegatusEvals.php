@@ -6,26 +6,32 @@ use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\EvalCase;
 use App\Models\EvaluationRun;
+use App\Services\ReliabilityFixtureManager;
 use App\Services\SalesAgentService;
 use Database\Seeders\EvalCaseSeeder;
 use Illuminate\Console\Command;
 
 class RunLegatusEvals extends Command
 {
-    protected $signature = 'legatus:eval {--live : Use the configured OpenAI model instead of deterministic fallback} {--agent= : Agent ID or slug}';
+    protected $signature = 'legatus:eval {--live : Use the configured OpenAI model with the isolated platform fixture} {--agent= : Agent ID or slug for offline evaluation}';
 
     protected $description = 'Run repeatable Legatus sales-agent quality evaluations';
 
-    public function handle(SalesAgentService $service): int
+    public function handle(SalesAgentService $service, ReliabilityFixtureManager $fixtureManager): int
     {
         app(EvalCaseSeeder::class)->run();
-        $agent = $this->resolveAgent();
         $cases = EvalCase::where('active', true)->get();
 
-        if (! $this->option('live')) {
+        if ($this->option('live')) {
+            $agent = $fixtureManager->provision();
+            $this->components->info('Using isolated platform reliability fixture; no customer tenant data will be changed.');
+        } else {
+            $agent = $this->resolveAgent();
             config(['services.openai.key' => null]);
             config(['legatus.offline_fallback_enabled' => true]);
-        } elseif ($fixtureError = $this->liveFixtureError($agent, $cases)) {
+        }
+
+        if ($this->option('live') && $fixtureError = $this->liveFixtureError($agent, $cases)) {
             $this->error($fixtureError);
 
             return self::FAILURE;
