@@ -65,6 +65,7 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
         $scheduledFor = CarbonImmutable::createFromFormat('Y-m-d H:i:s', $this->scheduledFor, 'UTC');
         $excludedProductIds = [];
         $safeIds = [];
+        $copyFailures = [];
         $copywriter ??= app(SocialMediaAiCopywriter::class);
 
         for ($attempt = 1; $attempt <= self::AI_PRODUCT_ATTEMPTS; $attempt++) {
@@ -87,7 +88,9 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
             }
 
             if ($alreadyRejected) {
-                $this->prepareVerifiedFallback($safeIds, $copywriter);
+                if (! $this->prepareSafeFallback($safeIds, $copywriter, $copyFailures)) {
+                    return;
+                }
                 break;
             }
 
@@ -95,13 +98,16 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
                 $this->prepareAiCopy($safeIds, $copywriter);
                 break;
             } catch (\Throwable $exception) {
+                $copyFailures[] = $exception->getMessage();
                 if ($productId > 0 && $attempt < self::AI_PRODUCT_ATTEMPTS) {
                     $excludedProductIds[] = $productId;
 
                     continue;
                 }
 
-                $this->prepareVerifiedFallback($safeIds, $copywriter);
+                if (! $this->prepareSafeFallback($safeIds, $copywriter, $copyFailures)) {
+                    return;
+                }
                 break;
             }
         }
@@ -162,7 +168,7 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
     }
 
     /** @param list<int> $postIds */
-    private function prepareVerifiedFallback(array $postIds, SocialMediaAiCopywriter $copywriter): void
+    private function prepareSafeFallback(array $postIds, SocialMediaAiCopywriter $copywriter, array $primaryFailures): bool
     {
         $posts = SocialMediaPost::query()
             ->with(['agent', 'product', 'schedule'])
@@ -174,15 +180,58 @@ class PrepareSocialMediaSlot implements ShouldBeUnique, ShouldQueue
             throw new \RuntimeException('Verified fallback could not prepare the complete multi-channel product slot.');
         }
 
-        foreach ($posts as $post) {
-            $post->update([
-                'caption' => $copywriter->verifiedFallback($post),
-                'ai_generation_attempted_at' => $post->ai_generation_attempted_at ?: now(),
-                'ai_generated_at' => now(),
-                'ai_model' => 'verified-fallback',
-                'failure_reason' => null,
-            ]);
+        $primaryReason = collect($primaryFailures)->filter()->unique()->implode(' | ');
+        $hasDescription = $posts->every(fn (SocialMediaPost $post): bool => filled(trim((string) $post->description)));
+
+        try {
+            foreach ($posts as $post) {
+                $caption = $hasDescription
+                    ? $copywriter->generateFallback($post->fresh(['agent', 'product', 'schedule']))
+                    : $copywriter->verifiedFallback($post);
+                $post->update([
+                    'caption' => $caption,
+                    'ai_generation_attempted_at' => $post->ai_generation_attempted_at ?: now(),
+                    'ai_generated_at' => now(),
+                    'ai_model' => $hasDescription
+                        ? (string) config('services.openai.fallback_model', 'gpt-5.6-sol')
+                        : 'verified-title-fallback',
+                    'failure_reason' => Str::limit(
+                        ($hasDescription ? 'Primary AI copy failed; grounded fallback model used. ' : 'Product has no verified description; title-only fallback used. ').$primaryReason,
+                        2000,
+                        '',
+                    ),
+                ]);
+            }
+        } catch (\Throwable $fallbackException) {
+            try {
+                foreach ($posts as $post) {
+                    $post->update([
+                        'caption' => $copywriter->verifiedFallback($post),
+                        'ai_generation_attempted_at' => $post->ai_generation_attempted_at ?: now(),
+                        'ai_generated_at' => now(),
+                        'ai_model' => 'verified-fallback',
+                        'failure_reason' => Str::limit(
+                            'Primary and grounded fallback AI copy failed; verified catalog text used so the slot was not lost. Primary: '.$primaryReason.' Fallback: '.$fallbackException->getMessage(),
+                            2000,
+                            '',
+                        ),
+                    ]);
+                }
+            } catch (\Throwable $verifiedFallbackException) {
+                SocialMediaPost::query()->whereIn('id', $postIds)->update([
+                    'status' => 'failed',
+                    'failure_reason' => Str::limit(
+                        'The slot could not be published because even its verified title fallback was unavailable. '.$verifiedFallbackException->getMessage(),
+                        2000,
+                        '',
+                    ),
+                ]);
+
+                return false;
+            }
         }
+
+        return true;
     }
 
     public function failed(?\Throwable $exception): void

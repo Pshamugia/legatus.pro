@@ -128,13 +128,49 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                     $post->refresh();
                 } catch (\Throwable $exception) {
                     if ($this->attempts() >= $this->tries) {
-                        $post->update([
-                            'caption' => $copywriter->verifiedFallback($post),
-                            'ai_generated_at' => now(),
-                            'ai_model' => 'verified-fallback',
-                            'failure_reason' => null,
-                        ]);
-                        $post->refresh();
+                        try {
+                            $hasDescription = filled(trim((string) $post->description));
+                            $post->update([
+                                'caption' => $hasDescription
+                                    ? $copywriter->generateFallback($post)
+                                    : $copywriter->verifiedFallback($post),
+                                'ai_generated_at' => now(),
+                                'ai_model' => $hasDescription
+                                    ? (string) config('services.openai.fallback_model', 'gpt-5.6-sol')
+                                    : 'verified-title-fallback',
+                                'failure_reason' => Str::limit(
+                                    ($hasDescription ? 'Primary AI copy failed; grounded fallback model used. ' : 'Product has no verified description; title-only fallback used. ').$exception->getMessage(),
+                                    2000,
+                                    '',
+                                ),
+                            ]);
+                            $post->refresh();
+                        } catch (\Throwable $fallbackException) {
+                            try {
+                                $post->update([
+                                    'caption' => $copywriter->verifiedFallback($post),
+                                    'ai_generated_at' => now(),
+                                    'ai_model' => 'verified-fallback',
+                                    'failure_reason' => Str::limit(
+                                        'Primary and grounded fallback AI copy failed; verified catalog text used so the slot was not lost. Primary: '.$exception->getMessage().' Fallback: '.$fallbackException->getMessage(),
+                                        2000,
+                                        '',
+                                    ),
+                                ]);
+                                $post->refresh();
+                            } catch (\Throwable $verifiedFallbackException) {
+                                $post->update([
+                                    'status' => 'failed',
+                                    'failure_reason' => Str::limit(
+                                        'The slot could not be published because even its verified title fallback was unavailable. '.$verifiedFallbackException->getMessage(),
+                                        2000,
+                                        '',
+                                    ),
+                                ]);
+
+                                return;
+                            }
+                        }
                     } else {
                         $post->update([
                             'status' => 'queued',
@@ -220,7 +256,9 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                 // later edit or delete the actual feed post from Legatus.
                 'provider_post_id' => (string) ($result['post_id'] ?? $result['id'] ?? ''),
                 'published_at' => now(),
-                'failure_reason' => null,
+                'failure_reason' => in_array($post->ai_model, ['verified-fallback', 'verified-title-fallback', (string) config('services.openai.fallback_model', 'gpt-5.6-sol')], true)
+                    ? $post->failure_reason
+                    : null,
                 'story_status' => in_array($post->provider, ['facebook', 'instagram'], true) ? 'queued' : null,
             ]);
             $publishedPost = $post->fresh(['product']);

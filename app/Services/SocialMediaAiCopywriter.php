@@ -13,6 +13,29 @@ class SocialMediaAiCopywriter
     public function generate(SocialMediaPost $post): string
     {
         $model = (string) config('services.openai.social_media_model', 'gpt-5.6-luna');
+
+        return $this->generateWithModel($post, $model);
+    }
+
+    public function generateFallback(SocialMediaPost $post): string
+    {
+        $primaryModel = trim((string) config('services.openai.social_media_model', 'gpt-5.6-luna'));
+        $fallbackModel = trim((string) config('services.openai.fallback_model', 'gpt-5.6-sol'));
+        if (! config('services.openai.fallback_enabled', true)
+            || $fallbackModel === ''
+            || $fallbackModel === $primaryModel) {
+            throw new \RuntimeException('A distinct social copy fallback model is not available.');
+        }
+
+        return $this->generateWithModel(
+            $post,
+            $fallbackModel,
+            'The primary social copywriter could not produce an acceptable caption. Start again from the verified evidence. Write restrained but natural product-specific copy; preserve every concrete fact, do not embellish sparse evidence, and never return raw catalog fields.',
+        );
+    }
+
+    private function generateWithModel(SocialMediaPost $post, string $model, ?string $initialInstruction = null): string
+    {
         $facts = $this->verifiedFacts($post);
         $description = (string) data_get($facts, 'description.value', '');
         if (blank($description)) {
@@ -22,7 +45,7 @@ class SocialMediaAiCopywriter
             throw new \RuntimeException('AI Copywriter requires a complete verified product description and will not write from a truncated source.');
         }
         $recentCaptions = $this->recentCaptions($post);
-        $generation = $this->requestCaption($post, $facts, $model, $recentCaptions);
+        $generation = $this->requestCaption($post, $facts, $model, $recentCaptions, $initialInstruction);
         $verification = $this->sanitizeCaption($post, $generation['caption'], $facts, $recentCaptions, $model);
         $diversityFailure = $this->diversityFailure($verification['caption'], $recentCaptions, $verification);
         $identityFailure = $this->identityFailure($verification);
