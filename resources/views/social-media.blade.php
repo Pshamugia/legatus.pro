@@ -245,6 +245,22 @@
                                         @endforeach
                                     </div>
                                 </fieldset>
+                                <fieldset>
+                                    <legend>Website languages</legend>
+                                    <input type="hidden" name="language_selection_present" value="1">
+                                    <p class="field-help">Leave every language unchecked to use all synchronized languages.</p>
+                                    <div class="category-grid">
+                                        @forelse($languages as $language)<label class="category-choice"><input type="checkbox" name="languages[]" value="{{ $language }}" @checked(in_array($language, $schedule->languages ?? [], true))><span>{{ $language }}</span></label>@empty<p>The primary catalog language will be used.</p>@endforelse
+                                    </div>
+                                </fieldset>
+                                <fieldset>
+                                    <legend>Categories</legend>
+                                    <input type="hidden" name="category_selection_present" value="1">
+                                    <p class="field-help">Leave every category unchecked only when you want products from the whole public catalog.</p>
+                                    <div class="category-grid">
+                                        @forelse($categories as $category)<label class="category-choice"><input type="checkbox" name="categories[]" value="{{ $category }}" @checked(in_array($category, $schedule->categories ?? [], true))><span>{{ $category }}</span></label>@empty<p>No public catalog categories are indexed yet.</p>@endforelse
+                                    </div>
+                                </fieldset>
                                 <div class="edit-timing-options">
                                     <label><input type="radio" name="timing_mode" value="auto" @checked(!$schedule->posting_times)> Automatically distribute</label>
                                     <label><input type="radio" name="timing_mode" value="custom" @checked($schedule->posting_times)> Choose exact times</label>

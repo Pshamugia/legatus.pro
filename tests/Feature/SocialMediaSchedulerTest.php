@@ -459,6 +459,46 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame($replacement->id, $post->fresh()->product_id);
     }
 
+    public function test_storefront_card_markup_does_not_invent_a_product_category(): void
+    {
+        $html = <<<'HTML'
+            <div class="book-card">
+              <a class="card-link" href="https://shop.example/products/plate/1"></a>
+              <h2 class="book-title-strong" title="Decorative plate">Decorative plate</h2>
+              <span>&#8382; 18.00</span>
+              <button class="toggle-cart-btn">Add to cart</button>
+            </div>
+            <div class="book-card">
+              <a class="card-link" href="https://shop.example/products/novel/2"></a>
+              <h2 class="book-title-strong" title="Verified novel">Verified novel</h2>
+              <span itemprop="category" content="Literature">Literature</span>
+              <span>&#8382; 22.00</span>
+              <button class="toggle-cart-btn">Add to cart</button>
+            </div>
+            HTML;
+
+        $products = app(KnowledgeIngestionService::class)->storefrontProductsFromHtml($html, 'https://shop.example');
+
+        $this->assertNull($products[0]['category']);
+        $this->assertSame('Literature', $products[1]['category']);
+    }
+
+    public function test_uncategorized_merchandise_is_never_eligible_for_social_rotation(): void
+    {
+        [, $agent] = $this->tenant('uncategorized-social-product');
+        $categorized = $agent->products()->create($this->product('Catalogued product', 'Literature', 2));
+        $uncategorized = $agent->products()->create($this->product('Uncategorized merchandise', 'Temporary', 2));
+        $uncategorized->update([
+            'category' => null,
+            'metadata' => array_replace($uncategorized->metadata, ['genres' => [], 'taxonomy' => []]),
+        ]);
+
+        $eligible = app(SocialMediaScheduler::class)->eligibleProducts($agent);
+
+        $this->assertTrue($eligible->contains('id', $categorized->id));
+        $this->assertFalse($eligible->contains('id', $uncategorized->id));
+    }
+
     public function test_due_multi_channel_slot_replaces_a_product_already_claimed_by_an_earlier_slot(): void
     {
         [, $agent] = $this->tenant('earlier-slot-claim');
@@ -3248,6 +3288,7 @@ class SocialMediaSchedulerTest extends TestCase
             'starts_on' => $newDate,
             'ends_on' => $newDate,
             'providers' => ['facebook', 'threads'],
+            'categories' => ['General'],
             'timing_mode' => 'custom',
             'posting_times' => ['11:15', '19:45'],
         ])->assertSessionHasNoErrors();
@@ -3256,6 +3297,7 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame($newDate, $schedule->starts_on->toDateString());
         $this->assertSame($newDate, $schedule->ends_on->toDateString());
         $this->assertSame(['facebook', 'threads'], $schedule->providers);
+        $this->assertSame(['General'], $schedule->categories);
         $this->assertSame(['11:15', '19:45'], $schedule->posting_times);
         $this->assertArrayHasKey('threads', $schedule->template_snapshots);
         $this->assertSame('published', $published->fresh()->status);

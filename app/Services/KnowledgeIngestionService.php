@@ -704,10 +704,14 @@ class KnowledgeIngestionService
                 ?? $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-hover-title ")]', $card)->item(0);
             $linkNode = $xpath->query('.//a[contains(concat(" ", normalize-space(@class), " "), " card-link ")]', $card)->item(0);
             $authorNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " book-author-link ") or contains(concat(" ", normalize-space(@class), " "), " book-author-text ")]', $card)->item(0);
+            $categoryNode = $xpath->query('.//*[@itemprop="category" or @data-product-category]', $card)->item(0);
             $imageNode = $xpath->query('.//img[@src]', $card)->item(0);
             $cartNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " toggle-cart-btn ")]', $card)->item(0);
             $oldPriceNode = $xpath->query('.//*[contains(concat(" ", normalize-space(@class), " "), " text-secondary ") or contains(translate(@style, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "line-through")]', $card)->item(0);
             $name = trim((string) ($titleNode?->getAttribute('title') ?: $titleNode?->textContent));
+            $category = trim((string) ($categoryNode?->getAttribute('content')
+                ?: $categoryNode?->getAttribute('data-product-category')
+                ?: $categoryNode?->textContent));
             $url = $this->absoluteCatalogUrl($origin, (string) $linkNode?->getAttribute('href'));
             $text = preg_replace('/\s+/u', ' ', trim((string) $card->textContent)) ?? '';
             preg_match('/\x{20BE}\s*([0-9]+(?:[.,][0-9]{1,2})?)/u', $text, $nativePriceMatch);
@@ -724,7 +728,11 @@ class KnowledgeIngestionService
                 'name' => $name,
                 'sku' => $idMatch[1] ?? null,
                 'author' => trim((string) $authorNode?->textContent) ?: null,
-                'category' => 'Books',
+                // A CSS class such as `book-card` describes storefront markup,
+                // not a verified product type. Some stores reuse the same card
+                // for gifts, services, and other merchandise, so never invent
+                // an industry-specific category from the component name.
+                'category' => $category !== '' ? $category : null,
                 'price' => str_replace(',', '.', $priceMatch[1]),
                 'original_price' => $this->priceFromText((string) $oldPriceNode?->textContent),
                 'priceCurrency' => 'GEL',

@@ -141,6 +141,8 @@ class SocialMediaScheduler
             $lockedSchedule->update([
                 'starts_on' => $data['starts_on'],
                 'ends_on' => $data['ends_on'],
+                'categories' => array_values($data['categories'] ?? $lockedSchedule->categories ?? []),
+                'languages' => array_values($data['languages'] ?? $lockedSchedule->languages ?? []),
                 'providers' => $providers,
                 'posting_times' => $data['posting_times'] ?? null,
                 'template_snapshots' => $templateSnapshots,
@@ -365,15 +367,23 @@ class SocialMediaScheduler
                 if (! $this->publicHttpUrl($url) || ($imageRequired && $product->publicImageUrl() === null)) {
                     return false;
                 }
-                if ($wanted->isEmpty()) {
-                    return true;
-                }
-
                 $taxonomy = collect([
                     $product->category,
                     ...((array) data_get($product->metadata, 'genres', [])),
                     ...((array) data_get($product->metadata, 'taxonomy', [])),
-                ])->filter(fn ($value): bool => is_scalar($value))->map(fn ($value) => Str::lower(trim((string) $value)));
+                ])->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
+                    ->map(fn ($value) => Str::lower(trim((string) $value)))
+                    ->unique();
+
+                // "All categories" means every product represented in the
+                // synchronized category list, not arbitrary uncategorized
+                // merchandise discovered through shared storefront markup.
+                if ($taxonomy->isEmpty()) {
+                    return false;
+                }
+                if ($wanted->isEmpty()) {
+                    return true;
+                }
 
                 return $wanted->contains(fn (string $category): bool => $taxonomy->contains(
                     fn (string $label): bool => $label === $category || Str::contains($label, $category) || Str::contains($category, $label),

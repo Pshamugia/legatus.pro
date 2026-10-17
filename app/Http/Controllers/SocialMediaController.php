@@ -202,13 +202,46 @@ class SocialMediaController extends Controller
             'ends_on' => ['required', 'date', 'after_or_equal:starts_on', 'before_or_equal:'.now()->addYear()->toDateString()],
             'providers' => ['required', 'array', 'min:1'],
             'providers.*' => [Rule::in(SocialMediaTemplateService::PROVIDERS)],
+            'categories' => ['nullable', 'array'],
+            'categories.*' => ['string', 'max:255'],
+            'category_selection_present' => ['nullable', 'boolean'],
+            'languages' => ['nullable', 'array'],
+            'languages.*' => ['string', 'max:150'],
+            'language_selection_present' => ['nullable', 'boolean'],
             'timing_mode' => ['required', Rule::in(['auto', 'custom'])],
             'posting_times' => ['nullable', 'array'],
             'posting_times.*' => ['required', 'date_format:H:i'],
         ]);
         $data['providers'] = collect($data['providers'])->unique()->values()->all();
+        if ($request->boolean('category_selection_present') || $request->has('categories')) {
+            $data['categories'] = collect($data['categories'] ?? [])->map(fn ($value): string => trim((string) $value))->filter()->unique()->values()->all();
+        } else {
+            unset($data['categories']);
+        }
+        if ($request->boolean('language_selection_present') || $request->has('languages')) {
+            $data['languages'] = collect($data['languages'] ?? [])->map(fn ($value): string => trim((string) $value))->filter()->unique()->values()->all();
+        } else {
+            unset($data['languages']);
+        }
         $data['posts_per_day'] = $schedule->posts_per_day;
         $data['timezone'] = $schedule->timezone;
+
+        $agent = $tenant->agent();
+        $availableCategories = $agent->customerProducts()->where('is_active', true)->get()
+            ->flatMap(fn ($product) => [
+                $product->category,
+                ...((array) data_get($product->metadata, 'genres', [])),
+                ...((array) data_get($product->metadata, 'taxonomy', [])),
+            ])->filter(fn ($value): bool => is_scalar($value) && trim((string) $value) !== '')
+            ->map(fn ($value): string => trim((string) $value));
+        if (collect($data['categories'] ?? [])->diff($availableCategories)->isNotEmpty()) {
+            throw ValidationException::withMessages(['categories' => 'Choose only synchronized product categories.']);
+        }
+        $configuredLanguages = $agent->knowledgeSources()->where('source_scope', 'language')
+            ->where('status', 'ready')->pluck('taxonomy_label')->filter();
+        if (collect($data['languages'] ?? [])->diff($configuredLanguages)->isNotEmpty()) {
+            throw ValidationException::withMessages(['languages' => 'Choose only synchronized website languages.']);
+        }
 
         if ($data['timing_mode'] === 'custom') {
             $times = collect($data['posting_times'] ?? [])->map(fn ($time): string => (string) $time);
@@ -229,7 +262,7 @@ class SocialMediaController extends Controller
             $data['posting_times'] = null;
         }
 
-        $active = $tenant->agent()->channelConnections()
+        $active = $agent->channelConnections()
             ->whereIn('provider', $data['providers'])
             ->where('status', 'active')
             ->pluck('provider');
