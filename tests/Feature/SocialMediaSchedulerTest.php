@@ -1435,6 +1435,57 @@ class SocialMediaSchedulerTest extends TestCase
         Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'graph.facebook.test'));
     }
 
+    public function test_ai_fact_audit_uses_product_image_as_a_veto_for_conflicting_catalog_identity(): void
+    {
+        [, $agent] = $this->tenant('ai-image-identity-conflict');
+        config()->set('services.openai.key', 'test-openai-key');
+        $details = $this->product('Poetic Energy', 'Books', 2);
+        $details['description'] = 'This verified study examines Georgian poetry through literary criticism and close reading.';
+        $details['metadata']['author'] = 'Wrong Catalog Author';
+        $product = $agent->products()->create($details);
+        $schedule = $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today(), 'posts_per_day' => 1,
+            'categories' => [], 'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+            'copy_mode' => 'ai', 'ai_tone' => 'academic',
+        ]);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => $product->id, 'provider' => 'facebook',
+            'status' => 'queued', 'scheduled_for' => now(), 'title' => $product->name,
+            'description' => $product->description, 'product_url' => data_get($product->metadata, 'product_url'),
+            'image_url' => $product->publicImageUrl(), 'caption' => 'Fallback', 'language' => 'English',
+        ]);
+        $conflictingSentence = 'Wrong Catalog Author presents a study of Georgian poetry.';
+        $safeSentence = 'Literary criticism and close reading shape this study of Georgian poetry.';
+        $draft = $conflictingSentence."\n\n".$safeSentence;
+        Http::fake([
+            'https://api.openai.com/v1/responses' => Http::sequence()
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode(['caption' => $draft])]]]]])
+                ->push(['output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                    'supported' => false, 'unsupported_fragments' => [$conflictingSentence],
+                    'distinct_from_recent' => true, 'similarity_reason' => '',
+                    'core_identity_preserved' => true, 'identity_reason' => '',
+                ])]]]]]),
+        ]);
+
+        $caption = app(SocialMediaAiCopywriter::class)->generate($post);
+
+        $this->assertStringNotContainsString('Wrong Catalog Author', $caption);
+        $this->assertStringContainsString($safeSentence, $caption);
+        $this->assertStringContainsString((string) data_get($product->metadata, 'product_url'), $caption);
+        Http::assertSent(function ($request): bool {
+            if (data_get($request->data(), 'text.format.name') !== 'social_media_fact_audit') {
+                return false;
+            }
+
+            $prompt = (string) data_get($request->data(), 'input.0.content.0.text');
+
+            return data_get($request->data(), 'input.0.content.1.type') === 'input_image'
+                && data_get($request->data(), 'input.0.content.1.detail') === 'high'
+                && str_contains($prompt, 'contradiction veto')
+                && str_contains($prompt, 'even when the textual evidence lists it');
+        });
+    }
+
     public function test_terminal_ai_and_fallback_failure_still_publishes_verified_catalog_text(): void
     {
         Queue::fake();
