@@ -19,15 +19,15 @@ return [
     'scopes' => [
         'meta' => array_values(array_filter(explode(',', (string) env(
             'META_SCOPES',
-            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts,pages_manage_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish'
+            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_read_user_content,pages_manage_posts,pages_manage_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish'
         )))),
         'facebook' => array_values(array_filter(explode(',', (string) env(
             'META_FACEBOOK_SCOPES',
-            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_manage_posts,pages_manage_engagement'
+            'pages_show_list,pages_manage_metadata,pages_messaging,pages_read_engagement,pages_read_user_content,pages_manage_posts,pages_manage_engagement'
         )))),
         'instagram' => array_values(array_filter(explode(',', (string) env(
             'META_INSTAGRAM_SCOPES',
-            'pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish'
+            'pages_show_list,pages_manage_metadata,pages_read_engagement,pages_read_user_content,instagram_basic,instagram_manage_messages,instagram_manage_comments,instagram_content_publish'
         )))),
     ],
 ];

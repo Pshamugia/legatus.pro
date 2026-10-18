@@ -1221,7 +1221,10 @@ class MetaTransportTest extends TestCase
 
         $response->assertRedirectContains('https://www.facebook.test/v25.0/dialog/oauth?');
         $response->assertSessionHas('meta_oauth.provider', 'facebook');
-        $this->assertStringNotContainsString('meta-app-secret', $response->headers->get('Location'));
+        $location = (string) $response->headers->get('Location');
+        parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+        $this->assertContains('pages_read_user_content', explode(',', (string) ($query['scope'] ?? '')));
+        $this->assertStringNotContainsString('meta-app-secret', $location);
     }
 
     public function test_business_login_configuration_is_sent_without_exposing_a_secret(): void
