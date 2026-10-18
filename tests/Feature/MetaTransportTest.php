@@ -349,7 +349,6 @@ class MetaTransportTest extends TestCase
                     'verb' => 'add',
                     'comment_id' => 'comment-auto-1',
                     'post_id' => 'page-auto-comments_post-1',
-                    'message' => 'Is it available?',
                     'from' => ['id' => 'commenter-auto'],
                     'created_time' => 1784512800,
                 ],
@@ -369,6 +368,13 @@ class MetaTransportTest extends TestCase
     public function test_comment_job_uses_linked_post_product_context_and_queues_a_public_reply(): void
     {
         Queue::fake();
+        Http::fake([
+            'https://graph.facebook.test/v25.0/comment-product-1*' => Http::response([
+                'id' => 'comment-product-1',
+                'message' => 'Is this available?',
+                'from' => ['id' => 'commenter-product', 'name' => 'Customer'],
+            ]),
+        ]);
         $connection = $this->connection('facebook', 'page-product-comments');
         $product = $connection->agent->products()->create([
             'name' => 'Verified Product',
@@ -408,7 +414,7 @@ class MetaTransportTest extends TestCase
             'message_type' => 'comment',
             'status' => 'received',
             'payload' => [
-                'text' => 'Is this available?',
+                'text' => '',
                 'post_id' => 'page-product-comments_post-77',
                 'source' => 'social_comment',
             ],
@@ -446,7 +452,13 @@ class MetaTransportTest extends TestCase
         $gate = \Mockery::mock(PublicCommentGate::class);
         $gate->shouldReceive('decide')->once()->andReturn(['action' => 'reply', 'reason' => 'Safe public question.']);
 
-        (new ProcessMetaInboundMessage($inbound->id))->handle($engine, app(ChannelMessageDispatcher::class), null, $gate);
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            $engine,
+            app(ChannelMessageDispatcher::class),
+            null,
+            $gate,
+            app(MetaGraphClient::class),
+        );
 
         $conversation = $connection->agent->conversations()->sole();
         $this->assertSame('facebook_comment', $conversation->channel);
@@ -459,6 +471,9 @@ class MetaTransportTest extends TestCase
             'status' => 'queued',
         ]);
         Queue::assertPushed(SendMetaMessage::class, 1);
+        $this->assertTrue((bool) data_get($inbound->fresh()->payload, 'content_removed'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/comment-product-1?')
+            && data_get($request->data(), 'fields') === 'id,message,from{id,name},created_time,parent{id}');
     }
 
     #[DataProvider('publicCommentNonReplyDecisions')]

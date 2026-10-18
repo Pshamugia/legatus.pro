@@ -164,6 +164,21 @@ class MetaGraphClient
             ->json();
     }
 
+    public function commentDetails(ChannelConnection $connection, string $commentId): array
+    {
+        throw_unless($connection->isActive(), new \RuntimeException('The Meta channel connection is not active.'));
+        throw_if($commentId === '', new \InvalidArgumentException('A Meta comment ID is required.'));
+
+        $fields = $connection->provider === 'instagram'
+            ? 'id,text,from{id,username},timestamp,media{id}'
+            : 'id,message,from{id,name},created_time,parent{id}';
+
+        return $this->authorizedRequest($connection->access_token)
+            ->get($this->url($commentId), ['fields' => $fields])
+            ->throw()
+            ->json();
+    }
+
     public function publishFacebookPost(ChannelConnection $connection, string $message, string $link, ?string $imageUrl = null): array
     {
         throw_unless($connection->provider === 'facebook' && $connection->isActive(), new \RuntimeException('An active Facebook Page connection is required.'));

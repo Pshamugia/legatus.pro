@@ -12,6 +12,7 @@ use App\Models\SocialMediaPost;
 use App\Services\ChannelMessageDispatcher;
 use App\Services\ConversationEngine;
 use App\Services\CustomerImageCatalogMatcher;
+use App\Services\MetaGraphClient;
 use App\Services\PublicCommentGate;
 use App\Support\PrivacyRedactor;
 use Illuminate\Bus\Queueable;
@@ -58,6 +59,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         ChannelMessageDispatcher $dispatcher,
         ?CustomerImageCatalogMatcher $imageMatcher = null,
         ?PublicCommentGate $commentGate = null,
+        ?MetaGraphClient $meta = null,
     ): void {
         $record = ChannelMessage::query()->with('connection.agent')->find($this->channelMessageId);
         if (! $record || in_array($record->status, ['processed', 'ignored'], true)) {
@@ -83,6 +85,22 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
 
         $senderId = (string) $record->provider_sender_id;
         $text = trim((string) data_get($record->payload, 'text', ''));
+        if ($record->message_type === 'comment' && $text === '') {
+            $details = ($meta ?? app(MetaGraphClient::class))->commentDetails(
+                $connection,
+                (string) $record->provider_message_id,
+            );
+            $text = trim((string) ($connection->provider === 'instagram'
+                ? ($details['text'] ?? '')
+                : ($details['message'] ?? '')));
+            if ($text !== '') {
+                $text = PrivacyRedactor::text($text);
+                $payload = is_array($record->payload) ? $record->payload : [];
+                $payload['text'] = $text;
+                $payload['comment_text_hydrated'] = true;
+                $record->update(['payload' => $payload]);
+            }
+        }
         if ($senderId === '' || $text === '') {
             $record->update([
                 'status' => 'ignored',

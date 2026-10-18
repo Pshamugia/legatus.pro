@@ -100,7 +100,10 @@ class MetaWebhookNormalizer
                 : $this->timestamp($value['timestamp'] ?? null);
         }
 
-        if ($commentId === '' || $text === '' || $senderId === '' || hash_equals($accountId, $senderId)) {
+        // Current Page feed webhooks can omit the comment message while still
+        // supplying its ID. Keep the signed event and let the queue hydrate the
+        // text from Graph instead of silently dropping a real customer comment.
+        if ($commentId === '' || $senderId === '' || hash_equals($accountId, $senderId)) {
             return null;
         }
 

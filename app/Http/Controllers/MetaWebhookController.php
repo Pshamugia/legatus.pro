@@ -157,7 +157,7 @@ class MetaWebhookController extends Controller
     {
         $text = trim((string) ($event['text'] ?? ''));
         $senderId = (string) ($event['sender_id'] ?? '');
-        if ($text === '' || $senderId === '') {
+        if ($senderId === '') {
             return;
         }
 
