@@ -27,6 +27,31 @@ class WooCommerceConnectionController extends Controller
             return to_route('channels.index')->with('commerce_error', $exception->getMessage());
         }
 
+        return $this->beginConnection($tenant, $baseUrl);
+    }
+
+    public function connectWordPress(Request $request, TenantContext $tenant, CommerceOriginValidator $origins): RedirectResponse
+    {
+        $tenant->authorize(['owner', 'admin']);
+        abort_unless($request->hasValidSignatureWhileIgnoring(['store_url']), 403);
+        $data = $request->validate([
+            'agent' => ['required', 'integer'],
+            'store_url' => ['required', 'url:https', 'max:500'],
+        ]);
+        abort_unless((int) $data['agent'] === $tenant->agent()->id, 404);
+
+        try {
+            $baseUrl = $origins->normalize($data['store_url']);
+        } catch (\InvalidArgumentException $exception) {
+            return to_route('channels.index')->with('commerce_error', $exception->getMessage());
+        }
+
+        return $this->beginConnection($tenant, $baseUrl);
+    }
+
+    private function beginConnection(TenantContext $tenant, string $baseUrl): RedirectResponse
+    {
+
         $token = Str::random(64);
         CommerceInstallation::query()
             ->where('agent_id', $tenant->agent()->id)

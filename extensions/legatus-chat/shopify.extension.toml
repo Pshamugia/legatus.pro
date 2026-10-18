@@ -1,0 +1,7 @@
+api_version = "2026-07"
+
+[[extensions]]
+name = "Legatus chat"
+handle = "legatus-chat"
+type = "theme"
+

@@ -122,6 +122,15 @@ class ChannelController extends Controller
         }
         $widgetInstallation = data_get($agent->settings, 'widget_installation', []);
         $widgetInstallation = is_array($widgetInstallation) ? $widgetInstallation : [];
+        $shopifyThemeActivationUrl = null;
+        if ($commerceConnection?->provider === 'shopify'
+            && $commerceConnection->status === 'active'
+            && config('services.shopify.client_id')
+            && config('services.shopify.theme_extension_id')) {
+            $shopifyThemeActivationUrl = rtrim($commerceConnection->base_url, '/')
+                .'/admin/themes/current/editor?context=apps&activateAppId='
+                .rawurlencode((string) config('services.shopify.client_id').'/'.(string) config('services.shopify.theme_extension_id'));
+        }
         $widgetDomains = collect(data_get($agent->settings, 'widget_allowed_origins', []))
             ->filter(fn (mixed $origin): bool => is_string($origin))
             ->map(fn (string $origin): string => (string) (parse_url($origin, PHP_URL_HOST) ?: $origin))
@@ -150,6 +159,7 @@ class ChannelController extends Controller
             'widgetPlatforms',
             'widgetPlatform',
             'widgetInstallation',
+            'shopifyThemeActivationUrl',
         );
     }
 
@@ -231,7 +241,11 @@ class ChannelController extends Controller
     public function downloadWordPressPlugin(TenantContext $tenant, WordPressWidgetPlugin $plugin)
     {
         $tenant->authorize(['owner', 'admin']);
-        $archive = $plugin->archive($this->widgetScriptUrl($tenant->agent()));
+        $agent = $tenant->agent();
+        $archive = $plugin->archive(
+            $this->widgetScriptUrl($agent),
+            URL::signedRoute('channels.commerce.woocommerce.wordpress', ['agent' => $agent->getKey()]),
+        );
 
         return response($archive, 200, [
             'Content-Type' => 'application/zip',

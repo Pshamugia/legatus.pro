@@ -8,11 +8,42 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class HostedCommerceConnectionTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_tenant_wordpress_plugin_can_start_woocommerce_approval_for_its_own_store(): void
+    {
+        [$user, $agent] = $this->tenant('wordpress-woo-install');
+        $url = URL::signedRoute('channels.commerce.woocommerce.wordpress', ['agent' => $agent->id]);
+
+        $response = $this->actingAs($user)->get($url.'&'.http_build_query([
+            'store_url' => 'https://8.8.8.8',
+        ]));
+
+        $response->assertRedirect();
+        $this->assertStringStartsWith('https://8.8.8.8/wc-auth/v1/authorize?', (string) $response->headers->get('Location'));
+        $this->assertDatabaseHas('commerce_installations', [
+            'agent_id' => $agent->id,
+            'provider' => 'woocommerce',
+            'status' => 'pending',
+        ]);
+    }
+
+    public function test_wordpress_woocommerce_handoff_is_signed_and_tenant_scoped(): void
+    {
+        [$owner, $agent] = $this->tenant('wordpress-woo-owner');
+        [$otherOwner, $otherAgent] = $this->tenant('wordpress-woo-other');
+        $url = URL::signedRoute('channels.commerce.woocommerce.wordpress', ['agent' => $agent->id]);
+        $requestUrl = $url.'&'.http_build_query(['store_url' => 'https://8.8.8.8']);
+
+        $this->actingAs($otherOwner)->get($requestUrl)->assertNotFound();
+        $this->actingAs($owner)->get(str_replace('signature=', 'signature=invalid', $requestUrl))->assertForbidden();
+        $this->assertDatabaseMissing('commerce_installations', ['agent_id' => $otherAgent->id]);
+    }
 
     public function test_woocommerce_connects_with_its_own_approval_screen_without_business_api_keys(): void
     {

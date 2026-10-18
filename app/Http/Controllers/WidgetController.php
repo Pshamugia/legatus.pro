@@ -3,13 +3,32 @@
 namespace App\Http\Controllers;
 
 use App\Models\Agent;
+use App\Models\CommerceConnection;
 use App\Support\WidgetLocaleResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Http\JsonResponse;
 
 class WidgetController extends Controller
 {
+    public function shopify(Request $request)
+    {
+        $data = $request->validate(['shop' => ['required', 'string', 'max:255', 'regex:/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/D']]);
+        $connection = CommerceConnection::query()
+            ->where('provider', 'shopify')
+            ->where('status', 'active')
+            ->where('key_id', strtolower($data['shop']))
+            ->with('agent')
+            ->firstOrFail();
+        abort_unless($connection->agent?->is_active, 404);
+
+        $scriptUrl = URL::signedRoute('widget.install.script', ['agent' => $connection->agent_id]);
+        $encoded = json_encode($scriptUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
+
+        return $this->javascript("(function(){var s=document.createElement('script');s.src={$encoded};s.async=true;document.head.appendChild(s);})();\n");
+    }
+
     public function script(Request $request, Agent $agent, WidgetLocaleResolver $locales)
     {
         abort_unless($agent->is_active, 404);

@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\AgentRun;
 use App\Models\ChannelConnection;
 use App\Models\Conversation;
+use App\Models\CommerceConnection;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -189,6 +190,10 @@ class WidgetChannelTest extends TestCase
             ->assertSee('Shopify')
             ->assertSee('Other / Custom website')
             ->assertSee('Check installation')
+            ->assertSee('data-capability="chat" data-ready="false"', false)
+            ->assertSee('data-capability="catalog" data-ready="true"', false)
+            ->assertSee('data-capability="orders" data-ready="false"', false)
+            ->assertSee('data-capability="publishing" data-ready="false"', false)
             ->assertSee('data-channel="facebook"', false)
             ->assertSee('data-channel="instagram"', false)
             ->assertSee('data-status="disconnected"', false)
@@ -213,7 +218,56 @@ class WidgetChannelTest extends TestCase
         $this->assertStringContainsString('Plugin Name: Legatus AI Sales Assistant', $archive);
         $this->assertStringContainsString('/widget/install/'.$agent->getKey().'.js', $archive);
         $this->assertStringContainsString('signature=', $archive);
+        $this->assertStringContainsString('/app/channels/commerce/woocommerce/wordpress', $archive);
+        $this->assertStringContainsString('Connect or reconnect WooCommerce', $archive);
         $this->assertStringNotContainsString('/widget/legatus-demo.js', $archive);
+    }
+
+    public function test_shopify_theme_extension_bootstraps_only_the_connected_tenants_widget(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        CommerceConnection::query()->create([
+            'agent_id' => $agent->id,
+            'provider' => 'shopify',
+            'name' => 'merchant.myshopify.com · Shopify',
+            'base_url' => 'https://merchant.myshopify.com',
+            'key_id' => 'merchant.myshopify.com',
+            'secret' => json_encode(['access_token' => 'test', 'refresh_token' => 'test']),
+            'status' => 'active',
+        ]);
+
+        $this->get(route('widget.shopify', ['shop' => 'merchant.myshopify.com']))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/javascript; charset=UTF-8')
+            ->assertSee('widget\\/install\\/'.$agent->id.'.js', false)
+            ->assertSee('signature=', false);
+        $this->get(route('widget.shopify', ['shop' => 'unknown.myshopify.com']))->assertNotFound();
+        $this->getJson(route('widget.shopify', ['shop' => 'https://merchant.myshopify.com']))->assertUnprocessable();
+    }
+
+    public function test_connected_shopify_store_shows_the_official_theme_embed_activation_action(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        config()->set('services.shopify.client_id', 'shopify-client');
+        config()->set('services.shopify.theme_extension_id', 'legatus-chat-extension');
+        $agent->commerceConnection()->create([
+            'provider' => 'shopify',
+            'name' => 'merchant.myshopify.com · Shopify',
+            'base_url' => 'https://merchant.myshopify.com',
+            'key_id' => 'merchant.myshopify.com',
+            'secret' => json_encode(['access_token' => 'test', 'refresh_token' => 'test']),
+            'status' => 'active',
+            'settings' => ['attribution_status' => 'active'],
+        ]);
+
+        $this->actingAs(User::first())->get('/onboarding')
+            ->assertOk()
+            ->assertSee('Enable chat in Shopify')
+            ->assertSee('activateAppId=shopify-client%2Flegatus-chat-extension', false)
+            ->assertSee('data-capability="inventory" data-ready="true"', false)
+            ->assertSee('data-capability="orders" data-ready="true"', false);
     }
 
     public function test_owner_can_detect_platform_and_verify_the_universal_widget(): void

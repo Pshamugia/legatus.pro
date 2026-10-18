@@ -4,10 +4,10 @@ namespace App\Services;
 
 final class WordPressWidgetPlugin
 {
-    public function archive(string $scriptUrl): string
+    public function archive(string $scriptUrl, string $commerceConnectUrl): string
     {
         $path = 'legatus-ai-sales-assistant/legatus-ai-sales-assistant.php';
-        $contents = $this->plugin($scriptUrl);
+        $contents = $this->plugin($scriptUrl, $commerceConnectUrl);
         $crc = (int) sprintf('%u', crc32($contents));
         $size = strlen($contents);
         $nameLength = strlen($path);
@@ -65,9 +65,10 @@ final class WordPressWidgetPlugin
         return $local.$central.$end;
     }
 
-    public function plugin(string $scriptUrl): string
+    public function plugin(string $scriptUrl, string $commerceConnectUrl): string
     {
         $url = var_export($scriptUrl, true);
+        $connectUrl = var_export($commerceConnectUrl, true);
 
         return <<<PHP
 <?php
@@ -85,6 +86,27 @@ add_action('wp_enqueue_scripts', static function (): void {
     if (function_exists('wp_script_add_data')) {
         wp_script_add_data('legatus-ai-sales-assistant', 'strategy', 'async');
     }
+});
+
+add_action('admin_notices', static function (): void {
+    if (! class_exists('WooCommerce') || ! current_user_can('manage_woocommerce')) {
+        return;
+    }
+
+    \$url = wp_nonce_url(admin_url('admin-post.php?action=legatus_connect_woocommerce'), 'legatus_connect_woocommerce');
+    echo '<div class="notice notice-info"><p><strong>Legatus chat is active.</strong> '
+        .'<a class="button button-primary" href="'.esc_url(\$url).'">Connect or reconnect WooCommerce</a></p></div>';
+});
+
+add_action('admin_post_legatus_connect_woocommerce', static function (): void {
+    check_admin_referer('legatus_connect_woocommerce');
+    if (! class_exists('WooCommerce') || ! current_user_can('manage_woocommerce')) {
+        wp_die('You are not allowed to connect this WooCommerce store.');
+    }
+
+    \$url = add_query_arg('store_url', home_url('/'), {$connectUrl});
+    wp_redirect(\$url);
+    exit;
 });
 PHP;
     }

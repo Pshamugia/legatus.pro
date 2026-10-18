@@ -114,6 +114,9 @@ Route::withoutMiddleware([
     Route::get('/widget/install/{agent}.js', [WidgetController::class, 'script'])
         ->middleware('signed')
         ->name('widget.install.script');
+    Route::get('/integrations/shopify/widget.js', [WidgetController::class, 'shopify'])
+        ->middleware('throttle:240,1')
+        ->name('widget.shopify');
     Route::get('/widget/{agent:slug}.js', [WidgetController::class, 'script'])->name('widget.script');
     Route::get('/widget/{agent:slug}', [WidgetController::class, 'frame'])->name('widget.frame');
     Route::post('/widget/{agent:slug}/context', [WidgetController::class, 'context'])
@@ -186,6 +189,9 @@ Route::middleware('auth')->group(function () {
         Route::post('/app/channels/commerce/woocommerce/connect', [WooCommerceConnectionController::class, 'connect'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.woocommerce.connect');
+        Route::get('/app/channels/commerce/woocommerce/wordpress', [WooCommerceConnectionController::class, 'connectWordPress'])
+            ->middleware('throttle:10,1')
+            ->name('channels.commerce.woocommerce.wordpress');
         Route::get('/app/channels/commerce/woocommerce/complete', [WooCommerceConnectionController::class, 'complete'])
             ->middleware('throttle:10,1')
             ->name('channels.commerce.woocommerce.complete');
