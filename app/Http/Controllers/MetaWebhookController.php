@@ -56,6 +56,28 @@ class MetaWebhookController extends Controller
                 ->all(),
             'event_count' => count($events),
             'event_kinds' => collect($events)->pluck('kind')->filter()->unique()->values()->all(),
+            // Keep rejected live payloads diagnosable without retaining comment
+            // text, account identifiers, or any other customer content.
+            'unmatched_change_shapes' => $events === []
+                ? collect((array) ($payload['entry'] ?? []))
+                    ->flatMap(fn ($entry): array => (array) data_get($entry, 'changes', []))
+                    ->map(function ($change): array {
+                        $value = (array) data_get($change, 'value', []);
+
+                        return [
+                            'field' => (string) data_get($change, 'field', ''),
+                            'item' => is_scalar($value['item'] ?? null) ? (string) $value['item'] : null,
+                            'verb' => is_scalar($value['verb'] ?? null) ? (string) $value['verb'] : null,
+                            'value_keys' => array_values(array_map('strval', array_keys($value))),
+                            'has_comment_id' => filled($value['comment_id'] ?? $value['id'] ?? null),
+                            'has_text' => filled($value['message'] ?? $value['text'] ?? null),
+                            'has_sender_id' => filled(data_get($value, 'from.id')),
+                        ];
+                    })
+                    ->take(10)
+                    ->values()
+                    ->all()
+                : [],
         ]);
 
         foreach ($events as $event) {

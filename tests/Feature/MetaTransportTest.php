@@ -294,6 +294,41 @@ class MetaTransportTest extends TestCase
         $this->assertSame($connection->id, $conversation->channel_connection_id);
     }
 
+    public function test_rejected_comment_webhook_logs_only_a_content_free_shape(): void
+    {
+        Log::spy();
+        $payload = ['object' => 'page', 'entry' => [[
+            'id' => 'private-page-id',
+            'changes' => [[
+                'field' => 'feed',
+                'value' => [
+                    'item' => 'comment',
+                    'verb' => 'add',
+                    'comment_id' => 'private-comment-id',
+                    'post_id' => 'private-post-id',
+                    'message' => 'Private customer comment text',
+                ],
+            ]],
+        ]]];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+
+        $this->metaWebhook($body, 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret'))->assertOk();
+
+        Log::shouldHaveReceived('info')->once()->withArgs(function (string $message, array $context): bool {
+            $encoded = json_encode($context, JSON_UNESCAPED_SLASHES);
+
+            return $message === 'Meta webhook received.'
+                && data_get($context, 'event_count') === 0
+                && data_get($context, 'unmatched_change_shapes.0.field') === 'feed'
+                && data_get($context, 'unmatched_change_shapes.0.has_comment_id') === true
+                && data_get($context, 'unmatched_change_shapes.0.has_text') === true
+                && data_get($context, 'unmatched_change_shapes.0.has_sender_id') === false
+                && ! str_contains($encoded, 'Private customer comment text')
+                && ! str_contains($encoded, 'private-comment-id')
+                && ! str_contains($encoded, 'private-post-id');
+        });
+    }
+
     public function test_comment_webhook_is_queued_for_automatic_public_processing_by_default(): void
     {
         Queue::fake();
