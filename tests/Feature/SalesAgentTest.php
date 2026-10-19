@@ -65,9 +65,9 @@ class SalesAgentTest extends TestCase
             ->assertSee('period=monthly&amp;package=chat', false)
             ->assertSee('period=monthly&amp;package=chat_social', false)
             ->assertSee('Three steps to hand off the daily work.')
-            ->assertSee('Need a hand with the integration?')
-            ->assertSee('Write to us and we’ll help you get set up.')
-            ->assertSee('class="steps-help"', false)
+            ->assertSee('Need help getting set up?')
+            ->assertSee('Write to us and we’ll help with the integration.')
+            ->assertSee('class="hero-help"', false)
             ->assertSee('href="#contact"', false)
             ->assertSee('Your time should not be spent on every answer and every post.')
             ->assertSee('period=yearly&amp;package=chat_social', false)
@@ -86,6 +86,7 @@ class SalesAgentTest extends TestCase
             ->assertDontSee('პროდუქტი');
 
         $html = $response->getContent();
+        $this->assertLessThan(strpos($html, 'class="landing-hero-visual"'), strpos($html, 'class="hero-help"'));
         $sections = ['id="product"', '<aside class="annual-banner"', 'id="communication"', 'id="business-knowledge"', 'id="social-media"', 'id="product-images"', 'id="annual-offer"', 'id="pricing"', 'id="how-it-works"', 'id="start"'];
         $positions = array_map(fn (string $marker): int|false => strpos($html, $marker), $sections);
 

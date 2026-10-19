@@ -36,7 +36,7 @@ class LegalPagesTest extends TestCase
 
         $this->get(route('landing'))
             ->assertOk()
-            ->assertSee('The annual plan includes a free online store.')
+            ->assertSee('A small online store comes free with the annual plan.')
             ->assertSee('$30')
             ->assertSee('$60')
             ->assertSee('$162')
