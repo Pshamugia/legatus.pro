@@ -1211,37 +1211,19 @@ class OpenAiSalesOrchestrator
                 data_get($call, 'result.unavailable_products', []),
             ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
         if ($exactLookupMiss) {
-            $relatedProducts = $usedCollection->where('name', 'search_products')
-                ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false))
-                ->flatMap(fn (array $call) => data_get($call, 'result.related_products', []))
-                ->filter(fn ($product): bool => is_array($product) && trim((string) ($product['name'] ?? '')) !== '')
-                ->unique('id')
-                ->take(3)
-                ->values();
             $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $message);
-            if ($relatedProducts->isNotEmpty()) {
-                $names = $relatedProducts->pluck('name')->map(fn (string $name): string => '„'.$name.'“')->implode(', ');
-                $listing = $relatedProducts->count() === 1 ? 'ეს ჩანაწერი' : 'ეს ჩანაწერები';
-                $data['text'] = $georgian
-                    ? "კატალოგში ვიპოვე {$names}, მაგრამ {$listing} ზუსტად მოთხოვნილ ვარიანტს არ ადასტურებს. მითითებული მონაცემებით ვერ ვადასტურებ, რომ ეს თქვენ მიერ ნახსენები გამოცემა ან სრული კომპლექტია."
-                    : "I found {$relatedProducts->pluck('name')->implode(', ')} in the catalog, but the listing does not confirm the exact version or complete set you requested.";
-            } else {
-                $data['text'] = $georgian
-                    ? 'სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.'
-                    : "Sorry, I couldn't find that specific product in the catalog.";
-            }
+            // A related listing is not evidence for the requested identity.
+            // Mentioning it here turns an exact miss into an unsolicited (and
+            // potentially misleading) recommendation.
+            $data['text'] = $georgian
+                ? 'სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.'
+                : "Sorry, I couldn't find that specific product in the catalog.";
             $data['intent'] = 'discovery';
             $data['confidence'] = 1;
             $data['handoff'] = false;
             $data['escalation_reason'] = null;
             $data['product_ids'] = [];
-            $data['factual_claims'] = $relatedProducts->map(fn (array $product): array => [
-                'type' => 'product',
-                'product_id' => (int) $product['id'],
-                'amount' => null,
-                'quantity' => null,
-                'reference' => null,
-            ])->all();
+            $data['factual_claims'] = [];
         }
         $verifiedSuggestion = $usedCollection
             ->filter(fn (array $call): bool => in_array($call['name'] ?? null, ['search_products', 'recommend_products'], true))
@@ -1508,6 +1490,24 @@ class OpenAiSalesOrchestrator
             }
         }
 
+        if ($exactLookupMiss && $conversation->fresh()->status !== 'human') {
+            // Later stock checks, model repair, or fallback naturalization must
+            // not undo a verified exact miss by naming a different product.
+            $data['text'] = preg_match('/[\x{10A0}-\x{10FF}]/u', $message)
+                ? 'სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.'
+                : "Sorry, I couldn't find that specific product in the catalog.";
+            $data['intent'] = 'discovery';
+            $data['confidence'] = 1;
+            $data['handoff'] = false;
+            $data['escalation_reason'] = null;
+            $data['clarification_next_tool'] = null;
+            $data['clarification_missing_input'] = null;
+            $data['product_ids'] = [];
+            $data['sources'] = [];
+            $data['factual_claims'] = [];
+            $escalationReason = null;
+        }
+
         if ($escalationReason) {
             $handoffEnabled = $agent->humanHandoffEnabled();
             if ($handoffEnabled) {
@@ -1597,7 +1597,10 @@ class OpenAiSalesOrchestrator
                 && data_get($call, 'result.products', []) === []
                 && data_get($call, 'result.unavailable_products', []) === [],
         );
-        if ($evidence === [] && ! $verifiedEmptySearch) {
+        // An empty exact search has no product facts for a language model to
+        // rephrase. Keep the deterministic not-found fallback intact instead
+        // of giving a second model pass room to invent a catalog title.
+        if ($evidence === []) {
             return null;
         }
 

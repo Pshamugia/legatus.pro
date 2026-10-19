@@ -2276,6 +2276,38 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('could not find', $result['text']);
     }
 
+    public function test_empty_catalog_evidence_is_never_sent_to_a_model_for_naturalization(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'empty-catalog-evidence', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        Http::fake();
+        $inputTokens = 0;
+        $outputTokens = 0;
+        $modelUsage = [];
+        $naturalize = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'naturalizeVerifiedCatalogReply');
+
+        $result = $naturalize->invokeArgs(app(OpenAiSalesOrchestrator::class), [
+            $agent,
+            $conversation,
+            'A specific item',
+            'test-model',
+            ['product_ids' => []],
+            collect([['name' => 'search_products', 'result' => [
+                'ok' => true, 'products' => [], 'unavailable_products' => [],
+            ]]]),
+            microtime(true) + 30,
+            &$inputTokens,
+            &$outputTokens,
+            &$modelUsage,
+        ]);
+
+        $this->assertNull($result);
+        Http::assertNothingSent();
+    }
+
     public function test_unresolved_stock_request_asks_for_product_identity_instead_of_handoff(): void
     {
         $clarification = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'missingProductIdentityClarification');
@@ -3140,7 +3172,41 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
     }
 
-    public function test_an_exact_set_miss_mentions_only_the_verified_related_volume(): void
+    public function test_a_later_stock_check_cannot_replace_an_empty_exact_lookup_with_another_product(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $unrelated = $agent->products()->where('stock', '>', 0)->firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'missing-exact-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'missing-exact-call',
+                'arguments' => json_encode(['query' => 'Specific Missing Product', 'category' => null, 'max_price' => null]),
+            ]]])
+            ->push(['id' => 'unrelated-stock-check', 'output' => [[
+                'type' => 'function_call', 'name' => 'check_stock', 'call_id' => 'unrelated-stock-call',
+                'arguments' => json_encode(['product_id' => $unrelated->id, 'quantity' => 1]),
+            ]]])
+            ->push(['id' => 'wrong-stock-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "Yes, {$unrelated->name} is available.",
+                    'intent' => 'stock', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [$unrelated->id],
+                    'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have Specific Missing Product?',
+        ])->assertOk()->assertJsonPath('products', []);
+
+        $this->assertSame("Sorry, I couldn't find that specific product in the catalog.", $response->json('text'));
+        $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
+    }
+
+    public function test_an_exact_set_miss_does_not_offer_even_a_related_volume(): void
     {
         $this->seed();
         $agent = Agent::firstOrFail();
@@ -3180,8 +3246,8 @@ class OpenAiOrchestrationTest extends TestCase
             'message' => 'ჯავახიშვილის ქართველი ერის ისტორია ხომ არ გაქვთ? ახალ გამოცემულ 5 ტომეულს ვგულისხმობ',
         ])->assertOk();
 
-        $this->assertStringContainsString($volume->name, $response->json('text'));
-        $this->assertStringContainsString('ვერ ვადასტურებ', $response->json('text'));
+        $this->assertSame('სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.', $response->json('text'));
+        $this->assertStringNotContainsString($volume->name, $response->json('text'));
         $this->assertSame([], $response->json('products'));
     }
 

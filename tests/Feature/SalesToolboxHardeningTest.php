@@ -938,6 +938,43 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([], $result['unavailable_products']);
     }
 
+    public function test_an_exact_author_title_and_volume_request_cannot_match_an_unrelated_product_description(): void
+    {
+        [$agent, $unrelated, $conversation] = $this->context(stock: 0);
+        $query = 'გოზალიშვილის 1832 წლის აჯანყების პირველი ტომი';
+        $unrelated->update([
+            'name' => 'ავი ქარები. დემოკრატიის გადარჩენა',
+            'description' => "საიტის ტექსტში შემთხვევით მოხვდა: {$query}",
+            'search_text' => $query,
+            'metadata' => ['author' => 'ლერი დაიმონდი'],
+        ]);
+
+        $search = fn () => app(SalesToolbox::class)->execute('search_products', [
+            'query' => $query,
+            'category' => null,
+            'max_price' => null,
+            '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $missing = $search();
+        $this->assertSame([], $missing['products']);
+        $this->assertSame([], $missing['unavailable_products']);
+
+        $correct = $agent->products()->create([
+            'name' => '1832 წლის აჯანყება',
+            'description' => 'პირველი ტომი',
+            'search_text' => 'გოზალიშვილი 1832 წლის აჯანყება პირველი ტომი',
+            'price' => 25,
+            'stock' => 2,
+            'is_active' => true,
+            'metadata' => ['author' => 'გოზალიშვილი'],
+        ]);
+
+        $found = $search();
+        $this->assertSame([$correct->id], collect($found['products'])->pluck('id')->all());
+        $this->assertSame([], $found['unavailable_products']);
+    }
+
     public function test_exact_lookup_matches_a_catalog_compound_when_the_customer_writes_it_as_separate_words(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);

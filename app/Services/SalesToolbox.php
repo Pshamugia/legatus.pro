@@ -465,7 +465,7 @@ class SalesToolbox
                     '_matched_groups' => $this->productMatchedGroupCount($product, $termGroups),
                     '_matched_name_groups' => $this->textMatchedGroupCount((string) $product->name, $requiredNameTermGroups),
                     '_matched_entity_groups' => $entityFamilyMatch ? $this->entityIdentityMatchCount($product, $termGroups) : 0,
-                    '_matched_identity_groups' => $identityMatch && count($termGroups) <= 2
+                    '_matched_identity_groups' => $identityMatch
                         ? $this->productIdentityMatchCount($product, $termGroups) : 0,
                 ];
 
@@ -504,11 +504,16 @@ class SalesToolbox
                 fn (array $product): bool => $product['_matched_entity_groups'] === count($termGroups),
             );
         }
-        if ($identityMatch && count($termGroups) <= 2) {
-            // A short named lookup cannot be established by borrowing one
-            // word from a title and the other from descriptive prose.
+        if ($identityMatch && $termGroups !== []) {
+            // Descriptive prose or a storefront search_text can mention a
+            // customer's entire request while belonging to a different item.
+            // Require the named identity itself to carry a substantial share
+            // of the request before treating the row as an exact match.
+            $requiredIdentityMatches = count($termGroups) <= 2
+                ? count($termGroups)
+                : (int) ceil(count($termGroups) / 2);
             $presented = $presented->filter(
-                fn (array $product): bool => $product['_matched_identity_groups'] === count($termGroups),
+                fn (array $product): bool => $product['_matched_identity_groups'] >= $requiredIdentityMatches,
             );
         }
 
