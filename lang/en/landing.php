@@ -10,7 +10,7 @@ return [
         'description' => 'Legatus is your business AI assistant — it learns your products, answers customers in Facebook Messenger, Instagram, WhatsApp, and website chat, and manages social media publishing.',
         'closing' => 'Less time on daily routine. More time for your business and yourself.',
     ],
-    'banner' => ['title' => 'The annual plan includes a free online store.', 'body' => 'Buy a one-year Legatus plan and we will create an online store with every Legatus feature enabled at no extra cost.', 'link' => 'See the annual offer'],
+    'banner' => ['title' => 'A small online store comes free with the annual plan.', 'body' => 'Buy a one-year Legatus plan and we will create an online store with every Legatus feature enabled at no extra cost.', 'link' => 'See the annual offer'],
     'communication' => [
         'title' => 'Every message is a potential order. Be there on time.', 'questions_label' => 'Common customer questions', 'question_price' => '“How much is it?”', 'question_stock' => '“Is it in stock?”', 'question_recommend' => '“Which one do you recommend?”',
         'problem' => 'Customers need an answer at the moment they are ready to buy. You cannot always be in the chat.',
@@ -57,6 +57,7 @@ return [
         'one_title' => 'Introduce your business', 'one_body' => 'Share your products, prices, stock, terms, and brand style.',
         'two_title' => 'Connect channels and set a schedule', 'two_body' => 'Enable Legatus on Facebook, Instagram, WhatsApp, and your website. Choose when posts should be published.',
         'three_title' => 'Review and manage', 'three_body' => 'Legatus answers customers and publishes content. You monitor its work and adjust instructions whenever needed.',
+        'help_text' => 'Need a hand with the integration?', 'help_link' => 'Write to us and we’ll help you get set up.',
     ],
     'assistant' => [
         'label' => 'Talk to the product',
