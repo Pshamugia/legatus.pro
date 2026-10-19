@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\CommerceCatalogSyncService;
-use App\Services\CommerceWebhookProvisioner;
+use App\Services\ShopifyClient;
 use App\Services\TenantContext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -33,7 +33,7 @@ class ShopifyConnectionController extends Controller
         ]);
         $query = http_build_query([
             'client_id' => config('services.shopify.client_id'),
-            'scope' => config('services.shopify.scopes'),
+            'scope' => implode(',', array_diff(explode(',', (string) config('services.shopify.scopes')), ['read_orders'])),
             'redirect_uri' => route('channels.commerce.shopify.callback'),
             'state' => $state,
         ], '', '&', PHP_QUERY_RFC3986);
@@ -45,7 +45,7 @@ class ShopifyConnectionController extends Controller
         Request $request,
         TenantContext $tenant,
         CommerceCatalogSyncService $sync,
-        CommerceWebhookProvisioner $webhooks,
+        ShopifyClient $shopify,
     ): RedirectResponse {
         $tenant->authorize(['owner', 'admin']);
         $oauth = $request->session()->pull('shopify_oauth');
@@ -75,7 +75,6 @@ class ShopifyConnectionController extends Controller
                 'token_expires_at' => now()->addSeconds(max(60, (int) ($token['expires_in'] ?? 3600)))->toIso8601String(),
                 'refresh_token_expires_at' => now()->addSeconds(max(60, (int) ($token['refresh_token_expires_in'] ?? 7_776_000)))->toIso8601String(),
                 'granted_scopes' => array_values(array_filter(explode(',', (string) ($token['scope'] ?? '')))),
-                'attribution_status' => 'setting_up',
             ];
             $existingConnection = $tenant->agent()->commerceConnection()->first();
             $result = $sync->connect($tenant->agent(), [
@@ -95,10 +94,10 @@ class ShopifyConnectionController extends Controller
             ]);
             $connection = $tenant->agent()->commerceConnection()->firstOrFail();
             try {
-                $webhooks->provision($connection);
+                $shopify->registerLifecycleWebhook($connection);
+                $connection->update(['settings' => array_merge($connection->settings ?? [], ['lifecycle_webhook_registered' => true])]);
             } catch (Throwable $exception) {
                 report($exception);
-                $webhooks->markPending($connection);
             }
         } catch (Throwable $exception) {
             report($exception);
@@ -106,12 +105,7 @@ class ShopifyConnectionController extends Controller
             return to_route('channels.index')->with('commerce_error', 'Shopify could not finish the verified connection. Try Connect again; no manual keys are required.');
         }
 
-        return to_route('channels.index')->with(
-            'commerce_success',
-            data_get($connection->fresh()->settings, 'attribution_status') === 'active'
-                ? "Shopify connected. {$result['received']} products verified; order attribution is active."
-                : "Shopify connected. {$result['received']} products verified; Legatus will finish order attribution automatically.",
-        );
+        return to_route('channels.index')->with('commerce_success', "Shopify connected. {$result['received']} products verified.");
     }
 
     private function shopDomain(string $value): ?string

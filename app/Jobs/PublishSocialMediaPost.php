@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\SocialMediaPost;
-use App\Services\CommerceAttributionService;
 use App\Services\LinkedInClient;
 use App\Services\MetaGraphClient;
 use App\Services\PublicProductAvailabilityVerifier;
@@ -38,14 +37,12 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
         ?SocialMediaAiCopywriter $copywriter = null,
         ?SocialMediaPublicationHistory $publicationHistory = null,
         ?PublicProductAvailabilityVerifier $availability = null,
-        ?CommerceAttributionService $attributions = null,
     ): void {
         $linkedin = app(LinkedInClient::class);
         $threads = app(ThreadsClient::class);
         $copywriter ??= app(SocialMediaAiCopywriter::class);
         $publicationHistory ??= app(SocialMediaPublicationHistory::class);
         $availability ??= app(PublicProductAvailabilityVerifier::class);
-        $attributions ??= app(CommerceAttributionService::class);
         $post = SocialMediaPost::query()->with(['schedule', 'agent.organization', 'product'])->find($this->postId);
         if (! $post || $post->status !== 'queued' || $post->schedule?->status !== 'active') {
             return;
@@ -244,9 +241,9 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        $trackedProductUrl = $attributions->socialPostUrl($post, $currentUrl);
+        $publicProductUrl = $currentUrl;
         $replaceableUrls = array_values(array_unique(array_filter([$currentUrl, (string) $post->product_url])));
-        $deliveryCaption = str_replace($replaceableUrls, $trackedProductUrl, (string) $post->caption);
+        $deliveryCaption = str_replace($replaceableUrls, $publicProductUrl, (string) $post->caption);
         if ($deliveryCaption !== $post->caption) {
             $post->update(['caption' => $deliveryCaption]);
         }
@@ -257,7 +254,7 @@ class PublishSocialMediaPost implements ShouldBeUnique, ShouldQueue
                 'instagram' => $meta->publishInstagramPost($connection, $deliveryCaption, (string) $post->image_url),
                 'threads' => $threads->publish($connection, $deliveryCaption, (string) $post->image_url),
                 'linkedin' => $linkedin->publish($connection, $deliveryCaption, (string) $post->image_url),
-                'facebook' => $meta->publishFacebookPost($connection, $deliveryCaption, $trackedProductUrl, (string) $post->image_url),
+                'facebook' => $meta->publishFacebookPost($connection, $deliveryCaption, $publicProductUrl, (string) $post->image_url),
                 default => throw new \RuntimeException("Unsupported social publishing provider: {$post->provider}."),
             };
             $post->update([

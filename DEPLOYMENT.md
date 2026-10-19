@@ -126,13 +126,13 @@ In the Meta App Dashboard, enable the Instagram webhook object and subscribe it 
 
 Use the host’s secret manager. Never commit the production `.env`, API keys, database credentials, `APP_KEY`, session data, or customer exports.
 
-### Hosted commerce connections and attribution
+### Hosted commerce connections
 
-WooCommerce merchants connect from Legatus by entering only their store URL and approving the standard WooCommerce authorization screen. They do not create or paste API keys. The store must expose HTTPS WooCommerce REST API and webhook endpoints.
+WooCommerce merchants connect from Legatus by entering only their store URL and approving read access on the standard WooCommerce authorization screen. They do not create or paste API keys. The store must expose the HTTPS WooCommerce REST API.
 
 Shopify requires one platform-owner app configuration, not per-business developer work. Register the production callback URL as `https://your-domain.example/app/channels/commerce/shopify/callback`, configure `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` in the production secret manager, and complete Shopify's required distribution/review steps before external merchants connect. Keep the configured scopes synchronized with `SHOPIFY_SCOPES`. Deploy the theme app extension in `extensions/legatus-chat`, then set `SHOPIFY_THEME_EXTENSION_ID` to its Shopify extension identifier. The business approves the app once and uses the displayed Shopify theme-editor action to enable the Legatus app embed; no theme source editing or widget URL entry is required. Merchants enter only their permanent `myshopify.com` domain and approve the app.
 
-Both hosted flows create signed order webhooks automatically. Legatus adds an anonymous attribution UUID to links shown in chat, social posts, and Reels; Analytics counts revenue only when the connected store returns that same UUID on a verified order. Customer names, emails, addresses, and order numbers are not stored for attribution. The hourly `legatus:sync-commerce` run retries webhook provisioning when a store was temporarily unavailable.
+Hosted commerce connections synchronize products and check live inventory; they do not collect orders or report attributed revenue. Shopify keeps only its signed app-uninstall webhook so disconnected stores stop supplying products. Previously published `/l/{token}` links continue redirecting to the original product URL without adding tracking parameters or incrementing clicks. Previously registered order webhooks are acknowledged but no longer store order data; they may be removed from the store dashboard separately. Historical attribution rows are retained for compatibility and are not shown in Analytics.
 
 Create and monitor the mailbox configured by `LEGATUS_PRIVACY_EMAIL`. Before publishing a Meta app, verify that `/privacy`, `/terms`, and `/data-deletion` are publicly reachable over HTTPS and use this monitored address.
 

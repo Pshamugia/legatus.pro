@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\AiReelDelivery;
-use App\Services\CommerceAttributionService;
 use App\Services\MetaGraphClient;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -28,9 +27,8 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
         return (string) $this->deliveryId;
     }
 
-    public function handle(MetaGraphClient $meta, ?CommerceAttributionService $attributions = null): void
+    public function handle(MetaGraphClient $meta): void
     {
-        $attributions ??= app(CommerceAttributionService::class);
         $delivery = AiReelDelivery::query()->with(['reel.agent', 'reel.product'])->find($this->deliveryId);
         if (! $delivery || in_array($delivery->status, ['published', 'delivery_unknown'], true)) {
             return;
@@ -47,7 +45,7 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
             return;
         }
         $reel->update(['status' => 'publishing']);
-        $caption = $this->attributedCaption($delivery, $attributions);
+        $caption = $this->captionWithProductUrl($delivery);
 
         if ($delivery->provider === 'instagram') {
             $this->publishInstagram($delivery, $connection, $meta, $videoUrl, $caption);
@@ -139,7 +137,7 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
         }
     }
 
-    private function attributedCaption(AiReelDelivery $delivery, CommerceAttributionService $attributions): string
+    private function captionWithProductUrl(AiReelDelivery $delivery): string
     {
         $caption = (string) $delivery->reel->caption;
         $destination = trim((string) $delivery->reel->reference_url);
@@ -150,10 +148,8 @@ class PublishAiReelDelivery implements ShouldBeUnique, ShouldQueue
             return $caption;
         }
 
-        $tracked = $attributions->reelUrl($delivery->reel, $destination, $delivery->provider);
-
         return str_contains($caption, $destination)
-            ? str_replace($destination, $tracked, $caption)
-            : rtrim($caption)."\n\n".$tracked;
+            ? $caption
+            : rtrim($caption)."\n\n".$destination;
     }
 }

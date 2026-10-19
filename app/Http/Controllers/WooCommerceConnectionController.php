@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\CommerceInstallation;
 use App\Services\CommerceCatalogSyncService;
 use App\Services\CommerceOriginValidator;
-use App\Services\CommerceWebhookProvisioner;
 use App\Services\TenantContext;
 use App\Services\WooCommerceClient;
 use Illuminate\Http\JsonResponse;
@@ -69,7 +68,7 @@ class WooCommerceConnectionController extends Controller
 
         $query = http_build_query([
             'app_name' => 'Legatus',
-            'scope' => 'read_write',
+            'scope' => 'read',
             'user_id' => $token,
             'return_url' => route('channels.commerce.woocommerce.complete'),
             'callback_url' => route('webhooks.commerce.woocommerce.authorize'),
@@ -88,7 +87,7 @@ class WooCommerceConnectionController extends Controller
             'user_id' => ['required', 'string', 'size:64'],
             'consumer_key' => ['required', 'string', 'starts_with:ck_', 'max:200'],
             'consumer_secret' => ['required', 'string', 'starts_with:cs_', 'max:200'],
-            'key_permissions' => ['required', 'in:read_write'],
+            'key_permissions' => ['required', 'in:read,read_write'],
         ]);
         if ($validator->fails()) {
             return response()->json(['ok' => false], 422);
@@ -116,7 +115,6 @@ class WooCommerceConnectionController extends Controller
         TenantContext $tenant,
         CommerceCatalogSyncService $sync,
         WooCommerceClient $wooCommerce,
-        CommerceWebhookProvisioner $webhooks,
     ): RedirectResponse {
         $tenant->authorize(['owner', 'admin']);
         $data = $request->validate([
@@ -154,15 +152,8 @@ class WooCommerceConnectionController extends Controller
                 'webhook_secret' => $reuseWebhook && $existingConnection->webhook_secret
                     ? $existingConnection->webhook_secret
                     : Str::random(64),
-                'settings' => ['currency' => $currency, 'attribution_status' => 'setting_up'],
+                'settings' => ['currency' => $currency],
             ]);
-            $connection = $tenant->agent()->commerceConnection()->firstOrFail();
-            try {
-                $webhooks->provision($connection);
-            } catch (Throwable $exception) {
-                report($exception);
-                $webhooks->markPending($connection);
-            }
             $installation->update(['status' => 'completed', 'credentials' => null]);
         } catch (Throwable $exception) {
             report($exception);
@@ -170,11 +161,6 @@ class WooCommerceConnectionController extends Controller
             return to_route('channels.index')->with('commerce_error', 'WooCommerce could not finish the verified connection. Your previous catalog was preserved.');
         }
 
-        return to_route('channels.index')->with(
-            'commerce_success',
-            data_get($connection->fresh()->settings, 'attribution_status') === 'active'
-                ? "WooCommerce connected. {$result['received']} products verified; order attribution is active."
-                : "WooCommerce connected. {$result['received']} products verified; Legatus will finish order attribution automatically.",
-        );
+        return to_route('channels.index')->with('commerce_success', "WooCommerce connected. {$result['received']} products verified.");
     }
 }

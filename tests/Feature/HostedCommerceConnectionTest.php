@@ -55,14 +55,14 @@ class HostedCommerceConnectionTest extends TestCase
         $location = $start->headers->get('Location');
         $this->assertStringStartsWith('https://8.8.8.8/wc-auth/v1/authorize?', $location);
         parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
-        $this->assertSame('read_write', $query['scope']);
+        $this->assertSame('read', $query['scope']);
         $this->assertSame(route('webhooks.commerce.woocommerce.authorize'), $query['callback_url']);
 
         $this->postJson(route('webhooks.commerce.woocommerce.authorize'), [
             'user_id' => $query['user_id'],
             'consumer_key' => 'ck_'.str_repeat('k', 40),
             'consumer_secret' => 'cs_'.str_repeat('s', 40),
-            'key_permissions' => 'read_write',
+            'key_permissions' => 'read',
         ])->assertOk()->assertJson(['ok' => true]);
         $this->assertSame('authorized', CommerceInstallation::query()->firstOrFail()->status);
 
@@ -102,14 +102,14 @@ class HostedCommerceConnectionTest extends TestCase
 
         $connection = $agent->commerceConnection()->firstOrFail();
         $this->assertSame('woocommerce', $connection->provider);
-        $this->assertSame('active', data_get($connection->settings, 'attribution_status'));
+        $this->assertNull(data_get($connection->settings, 'attribution_status'));
         $this->assertDatabaseHas('products', [
             'agent_id' => $agent->id,
             'external_product_id' => '101',
             'stock' => 4,
         ]);
         $this->assertNull(CommerceInstallation::query()->firstOrFail()->credentials);
-        Http::assertSentCount(6);
+        Http::assertSentCount(2);
     }
 
     public function test_shopify_oauth_connects_catalog_and_webhooks_without_merchant_secrets(): void
@@ -124,6 +124,7 @@ class HostedCommerceConnectionTest extends TestCase
             'shop' => 'merchant.myshopify.com',
         ])->assertRedirect();
         parse_str((string) parse_url($start->headers->get('Location'), PHP_URL_QUERY), $authorization);
+        $this->assertSame('read_products,read_inventory', $authorization['scope']);
 
         Http::fake(function (Request $request) {
             if (str_ends_with($request->url(), '/admin/oauth/access_token')) {
@@ -132,7 +133,7 @@ class HostedCommerceConnectionTest extends TestCase
                     'refresh_token' => 'shprt_refresh',
                     'expires_in' => 3600,
                     'refresh_token_expires_in' => 7776000,
-                    'scope' => 'read_products,read_inventory,read_orders',
+                    'scope' => 'read_products,read_inventory',
                 ]);
             }
             $query = (string) data_get($request->data(), 'query', '');
@@ -183,7 +184,8 @@ class HostedCommerceConnectionTest extends TestCase
 
         $connection = $agent->commerceConnection()->firstOrFail();
         $this->assertSame('shopify', $connection->provider);
-        $this->assertSame('active', data_get($connection->settings, 'attribution_status'));
+        $this->assertNull(data_get($connection->settings, 'attribution_status'));
+        $this->assertTrue(data_get($connection->settings, 'lifecycle_webhook_registered'));
         $this->assertSame('GEL', data_get($connection->settings, 'currency'));
         $this->assertStringNotContainsString('shpat_access', (string) \DB::table('commerce_connections')->whereKey($connection->id)->value('secret'));
         $this->assertDatabaseHas('products', [
@@ -191,7 +193,7 @@ class HostedCommerceConnectionTest extends TestCase
             'external_product_id' => 'gid://shopify/Product/101',
             'stock' => 3,
         ]);
-        Http::assertSentCount(6);
+        Http::assertSentCount(3);
     }
 
     private function tenant(string $slug): array

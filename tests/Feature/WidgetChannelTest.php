@@ -192,7 +192,7 @@ class WidgetChannelTest extends TestCase
             ->assertSee('Check installation')
             ->assertSee('data-capability="chat" data-ready="false"', false)
             ->assertSee('data-capability="catalog" data-ready="true"', false)
-            ->assertSee('data-capability="orders" data-ready="false"', false)
+            ->assertDontSee('data-capability="orders"', false)
             ->assertSee('data-capability="publishing" data-ready="false"', false)
             ->assertSee('data-channel="facebook"', false)
             ->assertSee('data-channel="instagram"', false)
@@ -267,7 +267,7 @@ class WidgetChannelTest extends TestCase
             ->assertSee('Enable chat in Shopify')
             ->assertSee('activateAppId=shopify-client%2Flegatus-chat-extension', false)
             ->assertSee('data-capability="inventory" data-ready="true"', false)
-            ->assertSee('data-capability="orders" data-ready="true"', false);
+            ->assertDontSee('data-capability="orders"', false);
     }
 
     public function test_owner_can_detect_platform_and_verify_the_universal_widget(): void

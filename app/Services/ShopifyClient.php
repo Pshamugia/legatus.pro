@@ -113,10 +113,10 @@ GRAPHQL, ['id' => (string) $productId]);
         ]];
     }
 
-    public function registerAttributionWebhooks(CommerceConnection $connection): void
+    public function registerLifecycleWebhook(CommerceConnection $connection): void
     {
         $uri = route('webhooks.commerce.shopify', ['connection' => $connection->webhook_token]);
-        foreach (['ORDERS_CREATE', 'ORDERS_UPDATED', 'REFUNDS_CREATE', 'APP_UNINSTALLED'] as $topic) {
+        foreach (['APP_UNINSTALLED'] as $topic) {
             $data = $this->graphql($connection, <<<'GRAPHQL'
 mutation LegatusWebhook($topic: WebhookSubscriptionTopic!, $uri: URL!) {
   webhookSubscriptionCreate(topic: $topic, webhookSubscription: {uri: $uri, format: JSON}) {
@@ -133,58 +133,6 @@ GRAPHQL, ['topic' => $topic, 'uri' => $uri]);
                 }
             }
         }
-    }
-
-    public function orderAttribution(CommerceConnection $connection, string|int $orderId): ?string
-    {
-        return $this->orderAttributionFacts($connection, $orderId)['attribution_token'];
-    }
-
-    /** @return array{attribution_token:?string,gross_amount:float,refunded_amount:float,currency:string,cancelled_at:?string} */
-    public function orderAttributionFacts(CommerceConnection $connection, string|int $orderId): array
-    {
-        $id = str_starts_with((string) $orderId, 'gid://')
-            ? (string) $orderId
-            : 'gid://shopify/Order/'.preg_replace('/\D/', '', (string) $orderId);
-        $data = $this->graphql($connection, <<<'GRAPHQL'
-query LegatusOrderAttribution($id: ID!) {
-  order(id: $id) {
-    totalPriceSet { shopMoney { amount currencyCode } }
-    totalRefundedSet { shopMoney { amount currencyCode } }
-    cancelledAt
-    customerJourneySummary {
-      ready
-      lastVisit { utmParameters { source medium campaign } landingPage }
-      firstVisit { utmParameters { source medium campaign } landingPage }
-    }
-  }
-}
-GRAPHQL, ['id' => $id]);
-        $order = data_get($data, 'order');
-        if (! is_array($order)) {
-            throw new \RuntimeException('Shopify order was not found.');
-        }
-        $journey = data_get($order, 'customerJourneySummary');
-        if (! is_array($journey) || ($journey['ready'] ?? false) !== true) {
-            throw new \RuntimeException('Shopify order attribution is not ready yet.');
-        }
-        $token = null;
-        foreach (['lastVisit', 'firstVisit'] as $visit) {
-            $source = data_get($journey, $visit.'.utmParameters.source');
-            $campaign = trim((string) data_get($journey, $visit.'.utmParameters.campaign', ''));
-            if ($source === 'legatus' && preg_match('/^[0-9a-f-]{36}$/iD', $campaign)) {
-                $token = $campaign;
-                break;
-            }
-        }
-
-        return [
-            'attribution_token' => $token,
-            'gross_amount' => max(0, (float) data_get($order, 'totalPriceSet.shopMoney.amount', 0)),
-            'refunded_amount' => max(0, (float) data_get($order, 'totalRefundedSet.shopMoney.amount', 0)),
-            'currency' => strtoupper((string) data_get($order, 'totalPriceSet.shopMoney.currencyCode', '')),
-            'cancelled_at' => filled($order['cancelledAt'] ?? null) ? (string) $order['cancelledAt'] : null,
-        ];
     }
 
     public function graphql(CommerceConnection $connection, string $query, array $variables = []): array

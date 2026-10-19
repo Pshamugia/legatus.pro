@@ -4,7 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\CommerceConnection;
 use App\Services\CommerceCatalogSyncService;
-use App\Services\CommerceWebhookProvisioner;
+use App\Services\ShopifyClient;
 use Illuminate\Console\Command;
 
 class SyncCommerceCatalogs extends Command
@@ -13,7 +13,7 @@ class SyncCommerceCatalogs extends Command
 
     protected $description = 'Synchronize connected commerce catalogs into Legatus';
 
-    public function handle(CommerceCatalogSyncService $sync, CommerceWebhookProvisioner $webhooks): int
+    public function handle(CommerceCatalogSyncService $sync, ShopifyClient $shopify): int
     {
         $failed = false;
         $connections = CommerceConnection::query()
@@ -24,13 +24,16 @@ class SyncCommerceCatalogs extends Command
         foreach ($connections as $connection) {
             try {
                 $result = $sync->sync($connection);
-                if (in_array($connection->provider, ['woocommerce', 'shopify'], true)
-                    && data_get($connection->fresh()->settings, 'attribution_status') !== 'active') {
+                if ($connection->provider === 'shopify'
+                    && ! data_get($connection->fresh()->settings, 'lifecycle_webhook_registered')) {
                     try {
-                        $webhooks->provision($connection->fresh());
+                        $fresh = $connection->fresh();
+                        if (data_get($fresh->settings, 'attribution_status') !== 'active') {
+                            $shopify->registerLifecycleWebhook($fresh);
+                        }
+                        $fresh->update(['settings' => array_merge($fresh->settings ?? [], ['lifecycle_webhook_registered' => true])]);
                     } catch (\Throwable $webhookException) {
                         report($webhookException);
-                        $webhooks->markPending($connection->fresh());
                     }
                 }
                 $this->info("{$connection->name}: {$result['received']} received, {$result['created']} created, {$result['updated']} updated");

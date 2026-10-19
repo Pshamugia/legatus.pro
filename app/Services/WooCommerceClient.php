@@ -22,33 +22,6 @@ class WooCommerceClient
         return preg_match('/^[A-Z]{3}$/', $currency) ? $currency : 'USD';
     }
 
-    public function registerAttributionWebhooks(CommerceConnection $connection): void
-    {
-        $deliveryUrl = route('webhooks.commerce.woocommerce', ['connection' => $connection->webhook_token]);
-        $existing = $this->request($connection)
-            ->get($this->endpoint($connection, '/wp-json/wc/v3/webhooks'), ['per_page' => 100])
-            ->throw()
-            ->json();
-        $existing = is_array($existing) ? $existing : [];
-
-        foreach (['order.created', 'order.updated', 'refund.created'] as $topic) {
-            $found = collect($existing)->contains(fn ($webhook): bool => is_array($webhook)
-                && ($webhook['topic'] ?? null) === $topic
-                && rtrim((string) ($webhook['delivery_url'] ?? ''), '/') === rtrim($deliveryUrl, '/'));
-            if ($found) {
-                continue;
-            }
-
-            $this->request($connection)->post($this->endpoint($connection, '/wp-json/wc/v3/webhooks'), [
-                'name' => 'Legatus sales attribution · '.$topic,
-                'topic' => $topic,
-                'delivery_url' => $deliveryUrl,
-                'secret' => $connection->webhook_secret,
-                'status' => 'active',
-            ])->throw();
-        }
-    }
-
     public function catalog(CommerceConnection $connection, int $page, int $perPage): array
     {
         $response = $this->request($connection)->get($this->endpoint($connection, '/wp-json/wc/v3/products'), [
@@ -106,19 +79,6 @@ class WooCommerceClient
             'currency' => $normalized['currency'],
             'checked_at' => now()->toIso8601String(),
         ]];
-    }
-
-    public function order(CommerceConnection $connection, string|int $orderId): array
-    {
-        $order = $this->request($connection)
-            ->get($this->endpoint($connection, '/wp-json/wc/v3/orders/'.rawurlencode((string) $orderId)))
-            ->throw()
-            ->json();
-        if (! is_array($order)) {
-            throw new \RuntimeException('WooCommerce returned an invalid order response.');
-        }
-
-        return $order;
     }
 
     private function request(CommerceConnection $connection): PendingRequest
