@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Agent;
 use App\Models\AgentRun;
+use App\Models\AiReelDelivery;
 use App\Models\ChannelConnection;
 use App\Models\ChannelMessage;
 use App\Models\Conversation;
@@ -297,9 +298,26 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             ->whereNotNull('product_id')
             ->latest('id')
             ->first();
-        if ($post?->product_id) {
-            $context['last_catalog_product_ids'] = [(int) $post->product_id];
-            $context['comment_product_id'] = (int) $post->product_id;
+        $reelDelivery = $post ? null : AiReelDelivery::query()
+            ->where('provider', $connection->provider)
+            ->where('provider_post_id', $postId)
+            ->where('status', 'published')
+            ->whereHas('reel', fn ($query) => $query->where('agent_id', $connection->agent_id))
+            ->with('reel')
+            ->latest('id')
+            ->first();
+        $linkedProductId = $post?->product_id ?? $reelDelivery?->reel?->product_id;
+        if ($linkedProductId && $connection->agent->customerProducts()->whereKey($linkedProductId)->exists()) {
+            $context['last_catalog_product_ids'] = [(int) $linkedProductId];
+            $context['comment_product_id'] = (int) $linkedProductId;
+        } else {
+            unset($context['last_catalog_product_ids'], $context['comment_product_id']);
+        }
+        $caption = $reelDelivery?->reel?->caption;
+        if (is_string($caption) && trim($caption) !== '') {
+            $context['comment_post_caption'] = Str::limit(PrivacyRedactor::text($caption), 1200, '');
+        } else {
+            unset($context['comment_post_caption']);
         }
 
         $conversation->update([
@@ -805,8 +823,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         string $reason,
         bool $transportFailure = true,
         bool $automaticProcessingFailure = true,
-    ): bool
-    {
+    ): bool {
         try {
             return DB::transaction(function () use ($record, $reason, $transportFailure, $automaticProcessingFailure): bool {
                 $locked = ChannelMessage::query()->lockForUpdate()->find($record->id);

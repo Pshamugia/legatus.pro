@@ -476,6 +476,73 @@ class MetaTransportTest extends TestCase
             && data_get($request->data(), 'fields') === 'id,message,from{id,name},created_time,parent{id}');
     }
 
+    public function test_reel_comment_uses_only_its_tenants_published_product_context(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-reel-comments');
+        $product = $connection->agent->products()->create([
+            'name' => 'Verified Reel Product', 'price' => 25, 'stock' => 3,
+            'is_active' => true, 'metadata' => ['product_url' => 'https://shop.example/product'],
+        ]);
+        $reel = $connection->agent->aiReels()->create([
+            'product_id' => $product->id, 'mode' => 'scheduled',
+            'providers' => ['facebook'], 'status' => 'published',
+            'caption' => 'Verified Reel Product: https://shop.example/product',
+        ]);
+        $reel->deliveries()->create([
+            'provider' => 'facebook', 'status' => 'published',
+            'provider_post_id' => 'reel-post-1',
+        ]);
+        $otherOrganization = Organization::query()->create(['name' => 'Other business', 'slug' => 'other-business']);
+        $otherAgent = $otherOrganization->agents()->create([
+            'name' => 'Other assistant', 'slug' => 'other-assistant',
+            'business_name' => 'Other business', 'channels' => ['facebook'],
+            'settings' => [], 'is_active' => true,
+        ]);
+        $otherProduct = $otherAgent->products()->create([
+            'name' => 'Unrelated Product', 'price' => 99, 'stock' => 1, 'is_active' => true,
+        ]);
+        $otherReel = $otherAgent->aiReels()->create([
+            'product_id' => $otherProduct->id, 'mode' => 'scheduled',
+            'providers' => ['facebook'], 'status' => 'published',
+            'caption' => 'Unrelated Product',
+        ]);
+        $otherReel->deliveries()->create([
+            'provider' => 'facebook', 'status' => 'published',
+            'provider_post_id' => 'reel-post-1',
+        ]);
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound', 'provider_message_id' => 'reel-comment-1',
+            'provider_sender_id' => 'reel-commenter',
+            'provider_recipient_id' => 'page-reel-comments',
+            'message_type' => 'comment', 'status' => 'received',
+            'payload' => ['text' => 'ფასი მომწერეთ', 'post_id' => 'reel-post-1'],
+            'received_at' => now(),
+        ]);
+        $engine = \Mockery::mock(ConversationEngine::class);
+        $engine->shouldReceive('handle')->once()->withArgs(function ($agent, $text, $channel, $customerId) use ($product): bool {
+            $conversation = $agent->conversations()->where('visitor_id', $customerId)->sole();
+            $this->assertSame([$product->id], data_get($conversation->context, 'last_catalog_product_ids'));
+            $this->assertSame($product->id, data_get($conversation->context, 'comment_product_id'));
+            $this->assertStringContainsString('Verified Reel Product', (string) data_get($conversation->context, 'comment_post_caption'));
+
+            return $text === 'ფასი მომწერეთ' && $channel === 'facebook_comment';
+        })->andReturnUsing(function ($agent, $text, $channel, $customerId, $requestId): array {
+            $conversation = $agent->conversations()->where('visitor_id', $customerId)->sole();
+            $customer = $conversation->messages()->create(['role' => 'customer', 'content' => $text, 'request_id' => $requestId]);
+
+            return ['conversation_id' => $conversation->id, 'customer_message_id' => $customer->public_id];
+        });
+        $gate = \Mockery::mock(PublicCommentGate::class);
+        $gate->shouldReceive('decide')->once()->andReturn(['action' => 'reply', 'reason' => 'Safe public question.']);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            $engine, app(ChannelMessageDispatcher::class), null, $gate,
+        );
+
+        $this->assertSame('processed', $inbound->fresh()->status);
+    }
+
     #[DataProvider('publicCommentNonReplyDecisions')]
     public function test_public_comment_gate_can_silence_noise_or_require_human_review(
         string $action,
@@ -608,8 +675,7 @@ class MetaTransportTest extends TestCase
 
         app(MetaGraphClient::class)->subscribe($connection);
 
-        Http::assertSent(fn ($request): bool =>
-            data_get($request->data(), 'subscribed_fields') === 'messages,messaging_postbacks,message_deliveries,message_reads,feed'
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'subscribed_fields') === 'messages,messaging_postbacks,message_deliveries,message_reads,feed'
         );
     }
 
