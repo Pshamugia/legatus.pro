@@ -3328,6 +3328,82 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
     }
 
+    public function test_post_relative_price_comment_cannot_quote_other_products_with_the_same_generic_title(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $linked = $agent->products()->create([
+            'name' => 'მოთხრობები — პოსტის გამოცემა', 'price' => 19, 'stock' => 1,
+            'is_active' => true, 'metadata' => ['product_url' => 'https://shop.example/linked'],
+        ]);
+        $other = $agent->products()->create([
+            'name' => 'მოთხრობები — სხვა გამოცემა', 'price' => 10, 'stock' => 1,
+            'is_active' => true, 'metadata' => ['product_url' => 'https://shop.example/other'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'post-relative-price-customer',
+            'channel' => 'instagram_comment', 'status' => 'ai',
+            'context' => [
+                'reply_mode' => 'public_comment',
+                'comment_product_id' => $linked->id,
+                'last_catalog_product_ids' => [$linked->id],
+                'comment_post_caption' => 'მოთხრობები — პოსტის გამოცემა',
+            ],
+        ]);
+        config(['services.openai.key' => 'test-key', 'services.openai.hybrid_enabled' => false]);
+
+        $actualTools = app(SalesToolbox::class);
+        $tools = \Mockery::mock($actualTools)->makePartial();
+        $tools->shouldReceive('execute')->andReturnUsing(function ($name, $arguments, $tenant, $thread) use ($actualTools, $other): array {
+            if ($name === 'search_products') {
+                return ['ok' => true, 'products' => [[
+                    'id' => $other->id, 'name' => $other->name,
+                    'price' => 10, 'available' => true,
+                ]], 'unavailable_products' => [], 'did_you_mean' => null];
+            }
+
+            return $actualTools->execute($name, $arguments, $tenant, $thread);
+        });
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'post-price-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                    'is_human_request' => false, 'human_request_evidence' => null,
+                    'requested_discount_percent' => null, 'discount_request_evidence' => null,
+                    'is_business_knowledge_request' => false, 'knowledge_query' => null, 'knowledge_scope' => null,
+                    'is_catalog_follow_up' => true, 'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none', 'recommendation_query' => null,
+                    'recommendation_category' => null, 'recommendation_occasion' => null,
+                    'resolved_query' => 'მოთხრობები', 'resolved_queries' => ['მოთხრობები'],
+                    'referenced_product_id' => null, 'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity', 'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['id' => 'post-price-wrong-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'We have several books titled '.$other->name.' for 10 GEL.',
+                    'intent' => 'price', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'clarification_next_tool' => null,
+                    'clarification_missing_input' => null, 'product_ids' => [$other->id],
+                    'sources' => [], 'factual_claims' => [[
+                        'type' => 'price', 'product_id' => $other->id,
+                        'amount' => 10, 'quantity' => null, 'reference' => null,
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = (new OpenAiSalesOrchestrator($tools))->respond($agent, $conversation, 'What is the price of this book?');
+
+        $this->assertStringContainsString('19.00 GEL', $reply['text']);
+        $this->assertStringNotContainsString('10 GEL', $reply['text']);
+        $this->assertSame([$linked->id], $reply['products']->pluck('id')->all());
+        $this->assertContains($linked->id, collect(AgentRun::latest('id')->firstOrFail()->tools_used)
+            ->where('name', 'check_stock')->pluck('arguments.product_id')->all());
+    }
+
     public function test_a_later_stock_check_cannot_replace_an_empty_exact_lookup_with_another_product(): void
     {
         $this->seed();

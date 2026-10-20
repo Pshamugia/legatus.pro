@@ -1208,7 +1208,45 @@ class OpenAiSalesOrchestrator
         $linkedCommentProduct = $linkedCommentProductId > 0
             ? $agent->customerProducts()->where('is_active', true)->find($linkedCommentProductId)
             : null;
+        $resolvedCommentQuery = trim((string) ($catalogContext['resolved_query'] ?? ''));
+        $pricedOtherProducts = collect($data['factual_claims'] ?? [])
+            ->filter(fn ($claim): bool => is_array($claim) && ($claim['type'] ?? null) === 'price')
+            ->pluck('product_id')->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0 && $id !== $linkedCommentProductId);
+        $draftOtherProductIds = collect($data['product_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0 && $id !== $linkedCommentProductId);
+        $linkedCommentPriceRecovery = $linkedCommentProduct !== null
+            && ($pricedOtherProducts->isNotEmpty()
+                || (($data['intent'] ?? null) === 'price' && $draftOtherProductIds->isNotEmpty()))
+            && $explicitNameIdentity === null
+            && is_array($catalogContext)
+            && ($catalogContext['is_catalog_follow_up'] ?? false) === true
+            && ($catalogContext['recommendation_scope'] ?? 'none') === 'none'
+            && ! ($catalogContext['expects_complete_set'] ?? false)
+            && ! in_array($catalogContext['catalog_scope_action'] ?? 'none', ['continue', 'refine'], true)
+            && collect($catalogContext['exclude_product_ids'] ?? [])->isEmpty()
+            && collect($catalogContext['resolved_queries'] ?? [])->count() <= 1
+            && (! is_numeric($catalogContext['referenced_product_id'] ?? null)
+                || (int) $catalogContext['referenced_product_id'] === $linkedCommentProductId)
+            && $resolvedCommentQuery !== ''
+            && ! $this->catalogQueryIsGroundedInCurrentTurn($resolvedCommentQuery, $message);
+        if ($linkedCommentPriceRecovery) {
+            // The comment asks about the post's item, but a title inferred
+            // from its caption found similarly named products instead. Those
+            // other prices must not replace the post's tenant-scoped product.
+            $arguments = ['product_id' => $linkedCommentProductId, 'quantity' => 1];
+            $checked = $this->tools->execute('check_stock', $arguments, $agent, $conversation);
+            $used[] = ['name' => 'check_stock', 'arguments' => $arguments, 'result' => $checked];
+            $used[] = ['name' => 'verify_linked_comment_product', 'arguments' => $arguments, 'result' => [
+                'ok' => ($checked['ok'] ?? false) === true,
+                'product_id' => $linkedCommentProductId,
+            ]];
+            $usedCollection = collect($used);
+            $data = $this->verifiedLinkedCommentProductReply($agent, $message, $checked);
+        }
         $searchedOnlyLinkedCommentProduct = $linkedCommentProduct !== null
+            && ! $linkedCommentPriceRecovery
             && $successfulCatalogSearches->isNotEmpty()
             && $successfulCatalogSearches->every(function (array $call) use ($linkedCommentProduct): bool {
                 $query = Str::lower(Str::squish((string) data_get($call, 'arguments.query', '')));
@@ -1233,6 +1271,7 @@ class OpenAiSalesOrchestrator
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
             && $budgetConstraint === null
             && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
+            && ! $linkedCommentPriceRecovery
             && ! $searchedOnlyLinkedCommentProduct
             && $successfulCatalogSearches->isNotEmpty()
             && $successfulCatalogSearches->every(fn (array $call): bool => collect(array_merge(
@@ -1325,7 +1364,7 @@ class OpenAiSalesOrchestrator
             // by the server. Mentioning it as a question is not a product claim.
             $escalationReason = null;
         }
-        $verifiedAvailability = $searchedOnlyLinkedCommentProduct
+        $verifiedAvailability = ($searchedOnlyLinkedCommentProduct || $linkedCommentPriceRecovery)
             ? null
             : $this->verifiedAvailabilityReply($message, $usedCollection, $data);
         if ($verifiedAvailability !== null) {
@@ -3005,6 +3044,9 @@ class OpenAiSalesOrchestrator
                 data_get($call, 'result.unavailable_products', []),
             ))
             ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique();
+        $verifiedLinkedCommentIds = $successful
+            ->where('name', 'verify_linked_comment_product')
+            ->pluck('result.product_id')->map(fn ($id): int => (int) $id)->filter()->unique();
         $verifiedContextualAlternativeIds = $successful
             ->where('name', 'recommend_products')
             ->filter(fn (array $call): bool => filled(data_get($call, 'arguments._verified_alternative_context')))
@@ -3012,7 +3054,7 @@ class OpenAiSalesOrchestrator
             ->pluck('id')->map(fn ($id): int => (int) $id)->filter()->unique();
         if ($hasExactIdentityResolution
             && $exactIdentityIds->isNotEmpty()
-            && $claimedProductIds->diff($exactIdentityIds->merge($verifiedContextualAlternativeIds))->isNotEmpty()) {
+            && $claimedProductIds->diff($exactIdentityIds->merge($verifiedContextualAlternativeIds)->merge($verifiedLinkedCommentIds))->isNotEmpty()) {
             return 'An exact product request included products outside the verified exact-identity search result.';
         }
         $verifiedSearchMatches = $successful
