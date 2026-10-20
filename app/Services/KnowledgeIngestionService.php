@@ -495,6 +495,26 @@ class KnowledgeIngestionService
                 ? $source->agent->products()->where('sku', $sku)->first()
                 : $source->agent->products()->where('name', $values['name'])->first();
             if ($existing) {
+                // A primary catalog or category refresh owns current product
+                // facts, but must not erase independently verified language
+                // variants attached by a language source.
+                if ($source->source_scope !== 'language') {
+                    $previousLocalized = (array) data_get($existing->metadata, 'localized', []);
+                    if ($previousLocalized !== []) {
+                        $values['metadata']['localized'] = array_replace_recursive(
+                            $previousLocalized,
+                            (array) data_get($values, 'metadata.localized', []),
+                        );
+                    }
+                    $previousLanguages = (array) data_get($existing->metadata, 'languages', []);
+                    if ($previousLanguages !== []) {
+                        $values['metadata']['languages'] = collect($previousLanguages)
+                            ->merge((array) data_get($values, 'metadata.languages', []))
+                            ->filter(fn ($language): bool => is_string($language) && trim($language) !== '')
+                            ->unique(fn (string $language): string => Str::lower(trim($language)))
+                            ->values()->all();
+                    }
+                }
                 // Taxonomy URLs classify an existing catalog product; they do
                 // not take ownership of it away from the source that created it.
                 if ($this->sourceTaxonomy($source) !== []) {

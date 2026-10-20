@@ -325,6 +325,18 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertStringNotContainsString('Navigation', data_get($product->metadata, 'localized.Russian.description'));
         $this->assertSame('ready', $language->fresh()->status);
         $this->assertSame(1, $language->fresh()->items_found);
+
+        // The primary catalog is refreshed independently and must not erase
+        // verified language variants owned by the language index.
+        app(KnowledgeIngestionService::class)->importDiscoveredUrlProducts($catalog, [[
+            'name' => 'ქართული წიგნი', 'sku' => 'LANG-1', 'description' => 'განახლებული ქართული აღწერა',
+            'price' => 20, 'stock' => 3, 'image' => 'https://bukinistebi.ge/book.jpg',
+            'product_url' => 'https://bukinistebi.ge/ka/book',
+        ]]);
+
+        $this->assertSame('Русская книга', data_get($product->fresh()->metadata, 'localized.Russian.name'));
+        $this->assertSame('Подробное русское описание книги.', data_get($product->metadata, 'localized.Russian.description'));
+        $this->assertSame(['Russian'], data_get($product->metadata, 'languages'));
     }
 
     public function test_taxonomy_sync_removes_legacy_passages_and_counts_shared_products(): void
