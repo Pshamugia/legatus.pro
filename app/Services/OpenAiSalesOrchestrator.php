@@ -1332,6 +1332,19 @@ class OpenAiSalesOrchestrator
             $data = $verifiedAvailability;
             $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
         }
+        if ($linkedCommentProductId > 0
+            && $this->publicCommentLanguageMismatch($message, (string) ($data['text'] ?? ''), $usedCollection)
+            && (($data['intent'] ?? null) === 'price'
+                || collect($data['factual_claims'] ?? [])->contains(fn ($claim): bool => ($claim['type'] ?? null) === 'price'))) {
+            $linkedStockCheck = $usedCollection->where('name', 'check_stock')
+                ->filter(fn (array $call): bool => data_get($call, 'result.ok') === true
+                    && (int) data_get($call, 'result.product_id') === $linkedCommentProductId)
+                ->last();
+            if ($linkedStockCheck !== null) {
+                $data = $this->verifiedLinkedCommentProductReply($agent, $message, $linkedStockCheck['result']);
+                $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
+            }
+        }
 
         $hasSuccessfulEvidence = $usedCollection->contains(
             fn (array $call) => (bool) data_get($call, 'result.ok', false),
@@ -1537,6 +1550,18 @@ class OpenAiSalesOrchestrator
             $data['sources'] = [];
             $data['factual_claims'] = [];
             $escalationReason = null;
+        }
+
+        if (data_get($conversation->context, 'reply_mode') === 'public_comment'
+            && $conversation->fresh()->status !== 'human'
+            && $this->publicCommentLanguageMismatch($message, (string) ($data['text'] ?? ''), collect($used))) {
+            // A failed model repair must never publish a reply in the wrong
+            // language. Keep the comment for an operator instead.
+            $reason = 'The public comment reply used a different language from the customer comment.';
+            $this->forceHandoff($conversation, $reason, 'Review the verified comment and reply in the customer\'s language.');
+            $data = $this->handoffReply('', $reason, ['public_comment_language_boundary']);
+            $escalationReason = null;
+            $used[] = ['name' => 'public_comment_language_boundary', 'arguments' => [], 'result' => ['ok' => true]];
         }
 
         if ($escalationReason) {
@@ -2893,6 +2918,10 @@ class OpenAiSalesOrchestrator
         $successful = $used->filter(fn ($call) => ($call['result']['ok'] ?? false) === true);
         $successfulNames = $successful->pluck('name')->unique()->values();
         $text = (string) ($data['text'] ?? '');
+        if (data_get($conversation->context, 'reply_mode') === 'public_comment'
+            && $this->publicCommentLanguageMismatch((string) $recentCustomerTexts->first(), $text, $successful)) {
+            return 'The public comment reply used a different language from the customer comment.';
+        }
         if (($data['intent'] ?? null) === 'delivery'
             && $successfulNames->contains('calculate_delivery')
             && ($reason = $this->mixedLanguageResponseReason((string) $recentCustomerTexts->first(), $text))) {
@@ -3065,6 +3094,33 @@ class OpenAiSalesOrchestrator
         }
 
         return null;
+    }
+
+    private function publicCommentLanguageMismatch(string $customerText, string $responseText, Collection $used): bool
+    {
+        $customerGeorgian = preg_match_all('/[\x{10A0}-\x{10FF}]/u', $customerText);
+        $customerLatin = preg_match_all('/\p{Latin}/u', $customerText);
+        // A verified product title may legitimately remain in its original
+        // script inside an otherwise correctly localized reply.
+        $productNames = $used->whereIn('name', ['search_products', 'check_stock'])
+            ->flatMap(fn (array $call): array => ($call['name'] ?? null) === 'check_stock'
+                ? [(string) data_get($call, 'result.name', '')]
+                : collect(array_merge(
+                    data_get($call, 'result.products', []),
+                    data_get($call, 'result.unavailable_products', []),
+                ))->pluck('name')->all())
+            ->filter(fn ($name): bool => is_string($name) && $name !== '');
+        foreach ($productNames as $name) {
+            $responseText = str_replace($name, ' ', $responseText);
+        }
+        $responseText = preg_replace('~https?://\S+~u', ' ', $responseText) ?? $responseText;
+        $responseGeorgian = preg_match_all('/[\x{10A0}-\x{10FF}]/u', $responseText);
+        $responseLatin = preg_match_all('/\p{Latin}/u', $responseText);
+
+        return ($customerLatin >= 5 && $customerGeorgian === 0
+                && $responseGeorgian >= 12 && $responseGeorgian > $responseLatin)
+            || ($customerGeorgian >= 5 && $customerLatin === 0
+                && $responseLatin >= 12 && $responseLatin > $responseGeorgian);
     }
 
     private function mixedLanguageResponseReason(string $customerText, string $responseText): ?string

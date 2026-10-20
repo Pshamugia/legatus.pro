@@ -3246,6 +3246,88 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertContains('check_stock', collect(AgentRun::latest('id')->firstOrFail()->tools_used)->pluck('name')->all());
     }
 
+    public function test_english_instagram_price_comment_stays_english_when_post_and_product_are_georgian(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->create([
+            'name' => 'ჩემი საუბრის შემოდგომა',
+            'price' => 25,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://shop.example/products/georgian-title'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'english-ig-comment-customer',
+            'channel' => 'instagram_comment',
+            'status' => 'ai',
+            'context' => [
+                'reply_mode' => 'public_comment',
+                'comment_product_id' => $product->id,
+                'last_catalog_product_ids' => [$product->id],
+                'comment_post_caption' => 'ქართული აღწერა: '.$product->name,
+            ],
+        ]);
+        config(['services.openai.key' => 'test-key', 'services.openai.hybrid_enabled' => false]);
+
+        $actualTools = app(SalesToolbox::class);
+        $tools = \Mockery::mock($actualTools)->makePartial();
+        $tools->shouldReceive('execute')->andReturnUsing(function ($name, $arguments, $tenant, $thread) use ($actualTools, $product): array {
+            if ($name === 'search_products') {
+                return ['ok' => true, 'products' => [[
+                    'id' => $product->id, 'name' => $product->name,
+                    'price' => 25, 'available' => true,
+                ]], 'unavailable_products' => [], 'did_you_mean' => null];
+            }
+
+            return $actualTools->execute($name, $arguments, $tenant, $thread);
+        });
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'ig-language-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                    'is_human_request' => false, 'human_request_evidence' => null,
+                    'requested_discount_percent' => null, 'discount_request_evidence' => null,
+                    'is_business_knowledge_request' => false, 'knowledge_query' => null, 'knowledge_scope' => null,
+                    'is_catalog_follow_up' => false, 'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none', 'recommendation_query' => null,
+                    'recommendation_category' => null, 'recommendation_occasion' => null,
+                    'resolved_query' => null, 'resolved_queries' => [], 'referenced_product_id' => null,
+                    'resolved_category' => null, 'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [], 'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'ig-language-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'ig-language-search-call',
+                'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null, 'exclude_product_ids' => []]),
+            ]], 'usage' => []])
+            ->push(['id' => 'ig-language-stock', 'output' => [[
+                'type' => 'function_call', 'name' => 'check_stock', 'call_id' => 'ig-language-stock-call',
+                'arguments' => json_encode(['product_id' => $product->id, 'quantity' => 1]),
+            ]], 'usage' => []])
+            ->push(['id' => 'ig-language-wrong-draft', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => '„'.$product->name.'“ ღირს 25 ₾. შეგიძლიათ შეიძინოთ ჩვენს საიტზე.',
+                    'intent' => 'price', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'clarification_next_tool' => null,
+                    'clarification_missing_input' => null, 'product_ids' => [$product->id],
+                    'sources' => [], 'factual_claims' => [[
+                        'type' => 'price', 'product_id' => $product->id,
+                        'amount' => 25, 'quantity' => null, 'reference' => null,
+                    ]],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = (new OpenAiSalesOrchestrator($tools))->respond($agent, $conversation, 'How much does this book cost?');
+
+        $this->assertStringContainsString('The current price', $reply['text']);
+        $this->assertStringContainsString('25.00 GEL', $reply['text']);
+        $this->assertStringNotContainsString('შეგიძლიათ', $reply['text']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+    }
+
     public function test_a_later_stock_check_cannot_replace_an_empty_exact_lookup_with_another_product(): void
     {
         $this->seed();
