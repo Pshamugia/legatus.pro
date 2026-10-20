@@ -1202,9 +1202,38 @@ class OpenAiSalesOrchestrator
         }
         $successfulCatalogSearches = $usedCollection->where('name', 'search_products')
             ->filter(fn (array $call): bool => (bool) data_get($call, 'result.ok', false));
+        $linkedCommentProductId = data_get($conversation->context, 'reply_mode') === 'public_comment'
+            ? (int) data_get($conversation->context, 'comment_product_id', 0)
+            : 0;
+        $linkedCommentProduct = $linkedCommentProductId > 0
+            ? $agent->customerProducts()->where('is_active', true)->find($linkedCommentProductId)
+            : null;
+        $searchedOnlyLinkedCommentProduct = $linkedCommentProduct !== null
+            && $successfulCatalogSearches->isNotEmpty()
+            && $successfulCatalogSearches->every(function (array $call) use ($linkedCommentProduct): bool {
+                $query = Str::lower(Str::squish((string) data_get($call, 'arguments.query', '')));
+
+                return $query !== ''
+                    && $query === Str::lower(Str::squish((string) $linkedCommentProduct->name))
+                    && collect(data_get($call, 'arguments.exclude_product_ids', []))->isEmpty()
+                    && data_get($call, 'result.products', []) === []
+                    && data_get($call, 'result.unavailable_products', []) === []
+                    && blank(data_get($call, 'result.did_you_mean'));
+            });
+        if ($searchedOnlyLinkedCommentProduct) {
+            // An exact title search can miss a product already identified by
+            // the tenant-scoped published post. Verify that known ID directly
+            // before allowing a generic catalog-miss answer to reach a comment.
+            $arguments = ['product_id' => $linkedCommentProductId, 'quantity' => 1];
+            $checked = $this->tools->execute('check_stock', $arguments, $agent, $conversation);
+            $used[] = ['name' => 'check_stock', 'arguments' => $arguments, 'result' => $checked];
+            $usedCollection = collect($used);
+            $data = $this->verifiedLinkedCommentProductReply($agent, $message, $checked);
+        }
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
             && $budgetConstraint === null
             && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
+            && ! $searchedOnlyLinkedCommentProduct
             && $successfulCatalogSearches->isNotEmpty()
             && $successfulCatalogSearches->every(fn (array $call): bool => collect(array_merge(
                 data_get($call, 'result.products', []),
@@ -1296,7 +1325,9 @@ class OpenAiSalesOrchestrator
             // by the server. Mentioning it as a question is not a product claim.
             $escalationReason = null;
         }
-        $verifiedAvailability = $this->verifiedAvailabilityReply($message, $usedCollection, $data);
+        $verifiedAvailability = $searchedOnlyLinkedCommentProduct
+            ? null
+            : $this->verifiedAvailabilityReply($message, $usedCollection, $data);
         if ($verifiedAvailability !== null) {
             $data = $verifiedAvailability;
             $escalationReason = $this->guardrailReason($agent, $conversation, $data, $usedCollection);
@@ -1733,6 +1764,52 @@ class OpenAiSalesOrchestrator
         }
 
         return $data;
+    }
+
+    private function verifiedLinkedCommentProductReply(Agent $agent, string $message, array $check): array
+    {
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+        $productId = (int) ($check['product_id'] ?? 0);
+        $name = trim((string) ($check['name'] ?? ''));
+        if (($check['ok'] ?? false) !== true || $productId <= 0 || $name === '') {
+            return [
+                'text' => $georgian
+                    ? 'ამ პოსტში ნაჩვენები პროდუქტის მიმდინარე ფასს ახლა ვერ ვამოწმებ.'
+                    : 'I cannot verify the current price of the product in this post right now.',
+                'intent' => 'price', 'confidence' => 1, 'handoff' => false,
+                'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+            ];
+        }
+
+        $available = ($check['available'] ?? false) === true;
+        $price = is_numeric($check['price'] ?? null) ? (float) $check['price'] : null;
+        $currency = (string) ($check['currency'] ?? $agent->organization?->settings['currency'] ?? 'GEL');
+        $text = ! $available
+            ? ($georgian
+                ? "„{$name}“ კატალოგშია, მაგრამ ამჟამად მარაგში არ არის."
+                : "{$name} is listed in the catalog but is currently out of stock.")
+            : ($price !== null
+                ? ($georgian
+                    ? "„{$name}“-ის მიმდინარე ფასი არის ".number_format($price, 2, '.', '')." {$currency}."
+                    : "The current price of {$name} is ".number_format($price, 2, '.', '')." {$currency}.")
+                : ($georgian
+                    ? 'ამ პოსტში ნაჩვენები პროდუქტის მიმდინარე ფასს ახლა ვერ ვამოწმებ.'
+                    : 'I cannot verify the current price of the product in this post right now.'));
+        $claims = [['type' => 'product', 'product_id' => $productId, 'amount' => null, 'quantity' => null, 'reference' => null]];
+        if ($available && $price !== null) {
+            $claims[] = ['type' => 'price', 'product_id' => $productId, 'amount' => $price, 'quantity' => null, 'reference' => null];
+        }
+
+        return [
+            'text' => $text,
+            'intent' => $available ? 'price' : 'stock',
+            'confidence' => 1,
+            'handoff' => false,
+            'escalation_reason' => null,
+            'product_ids' => [$productId],
+            'sources' => [],
+            'factual_claims' => $claims,
+        ];
     }
 
     private function verifiedAvailabilityReply(string $customerMessage, Collection $used, array $draft): ?array

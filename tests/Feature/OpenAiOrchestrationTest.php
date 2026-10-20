@@ -3172,6 +3172,80 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
     }
 
+    public function test_instagram_post_product_is_verified_by_id_when_its_title_search_is_empty(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->create([
+            'name' => 'Linked Post Product',
+            'price' => 15,
+            'stock' => 1,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://shop.example/products/linked'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'ig-post-price-customer',
+            'channel' => 'instagram_comment',
+            'status' => 'ai',
+            'context' => [
+                'reply_mode' => 'public_comment',
+                'comment_product_id' => $product->id,
+                'last_catalog_product_ids' => [$product->id],
+            ],
+        ]);
+        config(['services.openai.key' => 'test-key', 'services.openai.hybrid_enabled' => false]);
+
+        $actualTools = app(SalesToolbox::class);
+        $tools = \Mockery::mock($actualTools)->makePartial();
+        $tools->shouldReceive('execute')->andReturnUsing(function ($name, $arguments, $tenant, $thread) use ($actualTools): array {
+            if ($name === 'search_products') {
+                return ['ok' => true, 'products' => [], 'unavailable_products' => [], 'did_you_mean' => null];
+            }
+            if ($name === 'search_knowledge') {
+                return ['ok' => true, 'results' => []];
+            }
+
+            return $actualTools->execute($name, $arguments, $tenant, $thread);
+        });
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'ig-comment-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                    'is_human_request' => false, 'human_request_evidence' => null,
+                    'requested_discount_percent' => null, 'discount_request_evidence' => null,
+                    'is_business_knowledge_request' => false, 'knowledge_query' => null, 'knowledge_scope' => null,
+                    'is_catalog_follow_up' => false, 'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none', 'recommendation_query' => null,
+                    'recommendation_category' => null, 'recommendation_occasion' => null,
+                    'resolved_query' => null, 'resolved_queries' => [], 'referenced_product_id' => null,
+                    'resolved_category' => null, 'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [], 'expects_complete_set' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'ig-comment-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'ig-search-call',
+                'arguments' => json_encode(['query' => $product->name, 'category' => null, 'max_price' => null, 'exclude_product_ids' => []]),
+            ]], 'usage' => []])
+            ->push(['id' => 'ig-comment-wrong-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => "Sorry, I couldn't find that specific product in the catalog.",
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'clarification_next_tool' => null,
+                    'clarification_missing_input' => null, 'product_ids' => [],
+                    'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = (new OpenAiSalesOrchestrator($tools))->respond($agent, $conversation, 'How much does it cost?');
+
+        $this->assertStringContainsString('15.00', $reply['text']);
+        $this->assertStringNotContainsString("couldn't find", $reply['text']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+        $this->assertContains('check_stock', collect(AgentRun::latest('id')->firstOrFail()->tools_used)->pluck('name')->all());
+    }
+
     public function test_a_later_stock_check_cannot_replace_an_empty_exact_lookup_with_another_product(): void
     {
         $this->seed();

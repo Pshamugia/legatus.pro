@@ -313,7 +313,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
         } else {
             unset($context['last_catalog_product_ids'], $context['comment_product_id']);
         }
-        $caption = $reelDelivery?->reel?->caption;
+        $caption = $post?->caption ?? $reelDelivery?->reel?->caption;
         if (is_string($caption) && trim($caption) !== '') {
             $context['comment_post_caption'] = Str::limit(PrivacyRedactor::text($caption), 1200, '');
         } else {

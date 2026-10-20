@@ -476,6 +476,68 @@ class MetaTransportTest extends TestCase
             && data_get($request->data(), 'fields') === 'id,message,from{id,name},created_time,parent{id}');
     }
 
+    public function test_instagram_comment_includes_its_published_product_and_caption_context(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('instagram', 'ig-product-comments');
+        $product = $connection->agent->products()->create([
+            'name' => 'Verified Product',
+            'description' => 'Verified description.',
+            'price' => 25,
+            'stock' => 3,
+            'is_active' => true,
+            'metadata' => ['product_url' => 'https://shop.example/products/verified'],
+        ]);
+        $schedule = $connection->agent->socialMediaSchedules()->create([
+            'starts_on' => now()->toDateString(),
+            'ends_on' => now()->toDateString(),
+            'posts_per_day' => 1,
+            'categories' => [],
+            'providers' => ['instagram'],
+            'timezone' => 'UTC',
+            'status' => 'active',
+        ]);
+        $schedule->posts()->create([
+            'agent_id' => $connection->agent_id,
+            'product_id' => $product->id,
+            'provider' => 'instagram',
+            'status' => 'published',
+            'scheduled_for' => now(),
+            'published_at' => now(),
+            'provider_post_id' => 'ig-product-post',
+            'title' => $product->name,
+            'product_url' => 'https://shop.example/products/verified',
+            'caption' => 'Verified Product. https://shop.example/products/verified',
+        ]);
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound',
+            'provider_message_id' => 'ig-product-comment',
+            'provider_sender_id' => 'ig-commenter',
+            'provider_recipient_id' => 'ig-product-comments',
+            'message_type' => 'comment',
+            'status' => 'received',
+            'payload' => ['text' => 'How much does it cost?', 'post_id' => 'ig-product-post'],
+            'received_at' => now(),
+        ]);
+
+        $engine = \Mockery::mock(ConversationEngine::class);
+        $engine->shouldNotReceive('handle');
+        $gate = \Mockery::mock(PublicCommentGate::class);
+        $gate->shouldReceive('decide')->once()->andReturn(['action' => 'review', 'reason' => 'Review test.']);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            $engine,
+            app(ChannelMessageDispatcher::class),
+            null,
+            $gate,
+        );
+
+        $context = $connection->agent->conversations()->sole()->context;
+        $this->assertSame($product->id, data_get($context, 'comment_product_id'));
+        $this->assertSame([$product->id], data_get($context, 'last_catalog_product_ids'));
+        $this->assertSame('Verified Product. https://shop.example/products/verified', data_get($context, 'comment_post_caption'));
+    }
+
     public function test_reel_comment_uses_only_its_tenants_published_product_context(): void
     {
         Queue::fake();
