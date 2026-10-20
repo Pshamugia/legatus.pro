@@ -13,6 +13,8 @@ use Illuminate\Support\Str;
 
 class SocialMediaScheduler
 {
+    public const WAITING_FOR_PRODUCT = 'Waiting for an unused publishable product. This slot will be retried automatically.';
+
     private const AI_DAILY_PRODUCT_LIMIT = 7;
 
     public function __construct(
@@ -334,8 +336,8 @@ class SocialMediaScheduler
             }
 
             $pending->each->update([
-                'status' => 'skipped',
-                'failure_reason' => 'No unused publishable product was available to replace this slot.',
+                'status' => 'scheduled',
+                'failure_reason' => self::WAITING_FOR_PRODUCT,
             ]);
 
             return [];

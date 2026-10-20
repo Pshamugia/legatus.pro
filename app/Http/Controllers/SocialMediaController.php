@@ -188,7 +188,7 @@ class SocialMediaController extends Controller
 
         $scheduler->create($agent, $data);
 
-        return redirect()->route('social-media.index')->with('social_success', 'Schedule created successfully. Every slot will automatically skip unavailable or already-used products and select the next eligible product.');
+        return redirect()->route('social-media.index')->with('social_success', 'Schedule created successfully. If no eligible product is available at posting time, the slot will wait and retry automatically.');
     }
 
     public function update(Request $request, SocialMediaSchedule $schedule, TenantContext $tenant, SocialMediaScheduler $scheduler)

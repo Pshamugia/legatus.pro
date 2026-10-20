@@ -58,7 +58,7 @@ class SocialMediaSchedulerTest extends TestCase
             'providers' => ['facebook', 'instagram'],
             'timezone' => 'Asia/Tbilisi',
         ])->assertRedirect(route('social-media.index'))
-            ->assertSessionHas('social_success', 'Schedule created successfully. Every slot will automatically skip unavailable or already-used products and select the next eligible product.');
+            ->assertSessionHas('social_success', 'Schedule created successfully. If no eligible product is available at posting time, the slot will wait and retry automatically.');
 
         $schedule = $agent->socialMediaSchedules()->firstOrFail();
         $this->assertSame(['Novel'], $schedule->categories);
@@ -3324,7 +3324,7 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PublishSocialMediaPost::class, 2);
     }
 
-    public function test_due_slot_is_skipped_only_when_no_unused_publishable_replacement_exists(): void
+    public function test_due_slot_waits_and_retries_when_no_unused_publishable_replacement_exists(): void
     {
         Queue::fake();
         [, $agent] = $this->tenant('exhausted-due-slot');
@@ -3341,9 +3341,21 @@ class SocialMediaSchedulerTest extends TestCase
         Queue::assertPushed(PrepareSocialMediaSlot::class, 1);
         Queue::pushed(PrepareSocialMediaSlot::class)->first()->handle(app(SocialMediaScheduler::class));
 
-        $this->assertSame('skipped', $post->fresh()->status);
-        $this->assertSame('No unused publishable product was available to replace this slot.', $post->fresh()->failure_reason);
+        $this->assertSame('scheduled', $post->fresh()->status);
+        $this->assertSame(SocialMediaScheduler::WAITING_FOR_PRODUCT, $post->fresh()->failure_reason);
         Queue::assertNotPushed(PublishSocialMediaPost::class);
+
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('0 social slots queued for preparation.')->assertSuccessful();
+
+        $replacement = $agent->products()->create($this->product('Newly Available Product', 'General', 3));
+        $this->travel(16)->minutes();
+        $this->artisan('legatus:dispatch-social-posts')->expectsOutput('1 social slot queued for preparation.')->assertSuccessful();
+        Queue::pushed(PrepareSocialMediaSlot::class)->last()->handle(app(SocialMediaScheduler::class));
+
+        $this->assertSame('queued', $post->fresh()->status);
+        $this->assertSame($replacement->id, $post->fresh()->product_id);
+        $this->assertNull($post->fresh()->failure_reason);
+        Queue::assertPushed(PublishSocialMediaPost::class, 1);
     }
 
     public function test_publishing_never_erases_a_prepared_description_when_localized_data_becomes_blank(): void

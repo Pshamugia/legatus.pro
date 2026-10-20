@@ -6,6 +6,7 @@ use App\Jobs\PrepareSocialMediaSlot;
 use App\Jobs\PublishSocialMediaPost;
 use App\Jobs\PublishSocialMediaStory;
 use App\Models\SocialMediaPost;
+use App\Services\SocialMediaScheduler;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -89,6 +90,11 @@ class DispatchSocialMediaPosts extends Command
             ->with('schedule.agent')
             ->where('status', 'scheduled')
             ->where('scheduled_for', '<=', now('UTC'))
+            ->where(function ($query): void {
+                $query->where('failure_reason', '!=', SocialMediaScheduler::WAITING_FOR_PRODUCT)
+                    ->orWhereNull('failure_reason')
+                    ->orWhere('updated_at', '<=', now()->subMinutes(15));
+            })
             ->whereHas('schedule', fn ($query) => $query->where('status', 'active'))
             ->orderBy('scheduled_for')
             ->limit(100)
