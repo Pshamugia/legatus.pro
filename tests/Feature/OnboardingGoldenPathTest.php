@@ -17,6 +17,7 @@ class OnboardingGoldenPathTest extends TestCase
     {
         parent::setUp();
         config(['services.openai.key' => null]);
+        $this->withSession(['registration_form_issued_at' => now()->subSeconds(5)->timestamp]);
     }
 
     public function test_onboarding_updates_the_workspace_and_learns_url_and_catalog(): void

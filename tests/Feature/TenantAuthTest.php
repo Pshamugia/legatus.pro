@@ -31,7 +31,7 @@ class TenantAuthTest extends TestCase
 
     public function test_registration_creates_isolated_workspace_and_owner(): void
     {
-        $this->post('/register', ['name' => 'Lia', 'email' => 'lia@example.com', 'business_name' => 'Lia Store', 'password' => 'password123', 'password_confirmation' => 'password123'])->assertRedirect('/onboarding');
+        $this->withSession(['registration_form_issued_at' => now()->subSeconds(5)->timestamp])->post('/register', ['name' => 'Lia', 'email' => 'lia@example.com', 'business_name' => 'Lia Store', 'password' => 'password123', 'password_confirmation' => 'password123'])->assertRedirect('/onboarding');
         $user = User::where('email', 'lia@example.com')->firstOrFail();
         $this->assertAuthenticatedAs($user);
         $org = $user->organizations()->firstOrFail();

@@ -4,6 +4,8 @@ return [
     'super_admin_email' => env('LEGATUS_SUPER_ADMIN_EMAIL', 'pshamugia@gmail.com'),
     'privacy_email' => env('LEGATUS_PRIVACY_EMAIL', 'privacy@legatus.pro'),
     'registration_enabled' => (bool) env('LEGATUS_REGISTRATION_ENABLED', env('APP_ENV', 'production') !== 'production'),
+    'registration_turnstile_site_key' => env('LEGATUS_REGISTRATION_TURNSTILE_SITE_KEY'),
+    'registration_turnstile_secret_key' => env('LEGATUS_REGISTRATION_TURNSTILE_SECRET_KEY'),
     'demo_login_enabled' => (bool) env('LEGATUS_DEMO_LOGIN_ENABLED', env('APP_ENV', 'production') !== 'production'),
     'demo_password' => env('LEGATUS_DEMO_PASSWORD'),
     'offline_fallback_enabled' => (bool) env('LEGATUS_OFFLINE_FALLBACK', env('APP_ENV', 'production') !== 'production'),

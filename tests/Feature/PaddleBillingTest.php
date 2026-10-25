@@ -16,6 +16,7 @@ class PaddleBillingTest extends TestCase
     {
         parent::setUp();
         $this->withoutVite();
+        $this->withSession(['registration_form_issued_at' => now()->subSeconds(5)->timestamp]);
         config()->set('paddle.billing_enforced', true);
         config()->set('paddle.environment', 'sandbox');
         config()->set('paddle.client_token', 'test_client_token');
@@ -58,7 +59,7 @@ class PaddleBillingTest extends TestCase
             ->assertSee('name="billing_period" value="six_months"', false)
             ->assertSee('name="billing_package" value="chat_social"', false);
 
-        $this->post('/register', [
+        $this->withSession(['registration_form_issued_at' => now()->subSeconds(5)->timestamp])->post('/register', [
             'name' => 'Social Owner',
             'email' => 'social@example.com',
             'business_name' => 'Social Store',

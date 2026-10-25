@@ -95,6 +95,8 @@ WHATSAPP_REDIRECT_URI=
 WHATSAPP_GRAPH_VERSION=v25.0
 
 LEGATUS_REGISTRATION_ENABLED=false
+LEGATUS_REGISTRATION_TURNSTILE_SITE_KEY=
+LEGATUS_REGISTRATION_TURNSTILE_SECRET_KEY=
 LEGATUS_PRIVACY_EMAIL=privacy@your-domain.example
 LEGATUS_DEMO_LOGIN_ENABLED=false
 LEGATUS_OFFLINE_FALLBACK=false
@@ -125,6 +127,8 @@ DB_QUEUE_RETRY_AFTER=600
 In the Meta App Dashboard, enable the Instagram webhook object and subscribe it to `messages`, `messaging_postbacks`, `messaging_seen`, and `comments` before onboarding businesses. This is a one-time platform-owner configuration: Instagram topics cannot be configured through the Facebook Page `/subscribed_apps` endpoint. Legatus uses that endpoint only to install the app on the selected Page with Page-supported fields. Before public comment automation is offered to external businesses, request Advanced Access/App Review for `pages_read_user_content`, `pages_manage_engagement`, and `instagram_manage_comments`, and include all three permissions in the Meta Login configuration when `META_LOGIN_CONFIG_ID` is used. Meta requires `pages_read_user_content` alongside `pages_manage_engagement` so the app can receive and answer comments written by Page visitors. Existing businesses reconnect Meta once from Legatus to grant the new permissions; they do not install code or configure their own server.
 
 Use the host’s secret manager. Never commit the production `.env`, API keys, database credentials, `APP_KEY`, session data, or customer exports.
+
+For public self-registration, create a Cloudflare Turnstile widget restricted to the production hostname, then set both `LEGATUS_REGISTRATION_TURNSTILE_SITE_KEY` and `LEGATUS_REGISTRATION_TURNSTILE_SECRET_KEY` in the host's secret configuration and refresh Laravel's config cache. Test a normal signup before advertising registration. With neither key configured, only the form-timing and honeypot checks apply; a partial configuration blocks signups. If self-registration is not needed, set `LEGATUS_REGISTRATION_ENABLED=false`. Existing suspicious accounts are not automatically deleted by this protection.
 
 ### Hosted commerce connections
 
