@@ -121,6 +121,19 @@ class SalesAgentTest extends TestCase
         $this->assertStringNotContainsString('display=swap', $html);
     }
 
+    public function test_mobile_hero_stays_single_column_after_the_later_tablet_styles(): void
+    {
+        $html = $this->get('/')->assertOk()->getContent();
+        $tabletColumns = strpos($html, '@media(max-width:1100px){.landing-hero{grid-template-columns:minmax(0,1fr) minmax(330px,.8fr)}');
+        $mobileColumns = strrpos($html, '.landing-hero{grid-template-columns:minmax(0,1fr)}');
+
+        $this->assertIsInt($tabletColumns);
+        $this->assertIsInt($mobileColumns);
+        $this->assertGreaterThan($tabletColumns, $mobileColumns);
+        $this->assertStringContainsString('html,body{max-width:100%;overflow-x:clip}', $html);
+        $this->assertStringContainsString('.landing-hero-visual{width:min(100%,520px)}', $html);
+    }
+
     public function test_demo_agent_answers_and_persists_a_conversation(): void
     {
         $this->seed();

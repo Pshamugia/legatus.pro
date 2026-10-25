@@ -266,5 +266,14 @@ html[lang="ka"] .landing-wrap h1,html[lang="ka"] .landing-wrap h2{letter-spacing
 <style>
 .assistant-section{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,.9fr);align-items:center;gap:clamp(36px,7vw,96px);margin:0 0 var(--landing-space);padding:clamp(34px,6vw,70px);border-radius:30px;background:var(--green);color:white;overflow:hidden}.assistant-section-copy h2{margin:12px 0 18px;font-size:clamp(34px,4vw,54px);line-height:1.12;letter-spacing:-1.4px}.assistant-section-copy p{max-width:680px;margin:0 0 24px;color:#d3e2dc;font-size:17px;line-height:1.7}.assistant-section .eyebrow{color:var(--lime)}.assistant-section .btn{border:0;cursor:pointer}.assistant-conversation{position:relative;display:grid;gap:12px;padding:28px;border:1px solid rgba(255,255,255,.18);border-radius:24px;background:rgba(255,255,255,.08)}.assistant-conversation span{display:block;width:max-content;max-width:92%;padding:13px 16px;border-radius:15px 15px 15px 4px;background:white;color:var(--ink);font-size:13px;font-weight:800;line-height:1.45}.assistant-conversation span:nth-child(2){margin-left:8%}.assistant-conversation span:nth-child(3){margin-left:16%}.assistant-conversation b{display:flex;align-items:center;gap:8px;margin-top:8px;color:var(--lime);font:800 18px Manrope}.assistant-conversation i{color:#70d285;font-size:10px;font-style:normal}@media(max-width:900px){.assistant-section{grid-template-columns:1fr}.assistant-conversation{max-width:620px}}@media(max-width:520px){.assistant-section{padding:28px 22px}.assistant-section-copy h2{font-size:clamp(28px,7.5vw,34px)}.assistant-conversation{padding:18px}.assistant-conversation span:nth-child(2),.assistant-conversation span:nth-child(3){margin-left:0}}
 </style>
+<style>
+/* The later 1100px hero rule must not restore two columns on narrow screens. */
+@media(max-width:980px){
+    html,body{max-width:100%;overflow-x:clip}
+    .landing-wrap,.landing-hero,.landing-hero-copy,.landing-hero-visual{min-width:0}
+    .landing-hero{grid-template-columns:minmax(0,1fr)}
+    .landing-hero-visual{width:min(100%,520px)}
+}
+</style>
 @endpush
 @endsection
