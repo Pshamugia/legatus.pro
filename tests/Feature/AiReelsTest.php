@@ -1120,6 +1120,24 @@ class AiReelsTest extends TestCase
         $this->assertSame('Reel music preparation failed: FFmpeg unavailable', $reel->fresh()->last_error);
     }
 
+    public function test_music_preflight_uses_a_fileless_render_instead_of_the_hanging_version_command(): void
+    {
+        Storage::fake('local');
+        Http::fake(['raw.githubusercontent.com/*' => Http::response('music-bytes', 200)]);
+        Process::fake();
+        config()->set('reel_music.ffmpeg_binary', '/home/legatusp/bin/ffmpeg');
+
+        app(ReelMusicService::class)->ensureAvailable('bright');
+
+        Process::assertRan(fn ($process) => $process->command === [
+            '/home/legatusp/bin/ffmpeg',
+            '-nostdin', '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=1',
+            '-frames:v', '1', '-f', 'null', '-',
+        ]);
+        Http::assertSentCount(1);
+    }
+
     public function test_no_music_skips_ffmpeg_preflight_and_preserves_runway_video(): void
     {
         Queue::fake();

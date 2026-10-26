@@ -24,7 +24,14 @@ class ReelMusicService
         }
 
         $track = $this->track($trackId);
-        $process = Process::timeout(10)->run([(string) config('reel_music.ffmpeg_binary', 'ffmpeg'), '-version']);
+        // Some shared-host FFmpeg builds print -version but never exit. Probe the
+        // same small, fileless video operation that the host can actually finish.
+        $process = Process::timeout(30)->run([
+            (string) config('reel_music.ffmpeg_binary', 'ffmpeg'),
+            '-nostdin', '-hide_banner', '-loglevel', 'error',
+            '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=1',
+            '-frames:v', '1', '-f', 'null', '-',
+        ]);
         throw_unless($process->successful(), new \RuntimeException('FFmpeg is not available for Reel music processing.'));
 
         $this->cachedTrack($trackId, (string) $track['url']);
