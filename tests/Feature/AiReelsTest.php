@@ -65,6 +65,8 @@ class AiReelsTest extends TestCase
             ->assertSee('World &amp; acoustic — Shenzhen Nightlife', false)
             ->assertSee('Minimum 5 seconds · Maximum 15 seconds')
             ->assertSee('15 seconds — 3 credits')
+            ->assertSee('Each business has its own Reel credit balance')
+            ->assertSee('This business')
             ->assertSee('Minimum 10')
             ->assertSee('Schedule Facebook')
             ->assertSee('Instagram Reels')

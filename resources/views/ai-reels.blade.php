@@ -12,7 +12,8 @@
 <div class="dash-shell">
     @include('partials.workspace-navigation', ['active' => 'ai-reels'])
     <main class="main reels-page">
-        <div class="topline"><div><span class="eyebrow">Paid bonus feature</span><h1>Create AI Reels</h1><p>Turn a product image or your own creative brief into a vertical Facebook and Instagram Reel.</p></div><div class="credit-balance"><small>Available balance</small><strong>{{ $balance }}</strong><span>Reel credits</span></div></div>
+        <div class="topline"><div><span class="eyebrow">Paid bonus feature</span><h1>Create AI Reels</h1><p>Turn a product image or your own creative brief into a vertical Facebook and Instagram Reel.</p></div><div class="credit-balance"><small>This business's balance</small><strong>{{ $balance }}</strong><span>Reel credits</span></div></div>
+        <p class="section-copy">Each business has its own Reel credit balance. The 1, 2 or 3 credits shown below are charged only to <strong>this business</strong> for a generated Reel. Video creation also depends on our generation service: if it is unavailable, a new request is paused without charging this business's credits. Buying more credits will not fix a service outage.</p>
 
         @if(session('reel_success'))<div class="reel-alert success">{{ session('reel_success') }}</div>@endif
         @if($errors->any())<div class="reel-alert error"><strong>Please review the form:</strong><ul>@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
