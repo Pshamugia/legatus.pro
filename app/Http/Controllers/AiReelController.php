@@ -8,6 +8,7 @@ use App\Models\AiReelSchedule;
 use App\Services\AiReelScheduler;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\ReelCreditService;
+use App\Services\ReelGenerationCapacity;
 use App\Services\ReelMusicService;
 use App\Services\ReelVideoEditor;
 use App\Services\RunwayClient;
@@ -63,6 +64,15 @@ class AiReelController extends Controller
         return redirect()->route('ai-reels.index', ['checkout' => 'complete'])->with('reel_success', 'Payment received. Credits will appear after Paddle confirms the transaction.');
     }
 
+    public function capacity(TenantContext $tenant, ReelGenerationCapacity $capacity): JsonResponse
+    {
+        $tenant->authorize(['owner', 'admin', 'viewer']);
+
+        return response()->json(['max_reels' => collect([5, 10, 15])->mapWithKeys(
+            fn ($duration) => [$duration => $capacity->maxReels($duration)]
+        )]);
+    }
+
     public function music(string $trackId, TenantContext $tenant, ReelMusicService $music)
     {
         $tenant->authorize(['owner', 'admin', 'viewer']);
@@ -74,7 +84,7 @@ class AiReelController extends Controller
         ]);
     }
 
-    public function storeSchedule(Request $request, TenantContext $tenant, AiReelScheduler $scheduler)
+    public function storeSchedule(Request $request, TenantContext $tenant, AiReelScheduler $scheduler, ReelGenerationCapacity $capacity)
     {
         $tenant->authorize(['owner', 'admin']);
         $request->merge([
@@ -103,12 +113,13 @@ class AiReelController extends Controller
         if (collect($data['providers'])->diff($active)->isNotEmpty()) {
             return back()->withErrors(['providers' => 'Connect every selected Meta account first.'])->withInput();
         }
+        $capacity->ensureAvailable((int) $data['duration_seconds'], (int) $data['reel_count']);
         $scheduler->create($tenant->agent(), $data);
 
         return redirect()->route('ai-reels.index')->with('reel_success', 'Paid Reel schedule created. Video generation has started.');
     }
 
-    public function storeCustom(Request $request, TenantContext $tenant, ReelCreditService $credits, AiReelSourceImageStorage $images)
+    public function storeCustom(Request $request, TenantContext $tenant, ReelCreditService $credits, AiReelSourceImageStorage $images, ReelGenerationCapacity $capacity)
     {
         $tenant->authorize(['owner', 'admin']);
         $request->merge([
@@ -131,6 +142,7 @@ class AiReelController extends Controller
         if (collect($data['providers'])->diff($active)->isNotEmpty()) {
             return back()->withErrors(['providers' => 'Connect every selected Meta account first.'])->withInput();
         }
+        $capacity->ensureAvailable((int) $data['duration_seconds']);
         $product = filled($data['reference_url'] ?? null)
             ? $agent->customerProducts()->where('is_active', true)->get()->first(fn ($candidate) => $candidate->matchesPublicProductUrl($data['reference_url']))
             : null;

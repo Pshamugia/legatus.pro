@@ -54,6 +54,11 @@ class AiReel extends Model
             return 'The generation stopped without a detailed error. Please contact support with this Reel ID.';
         }
 
+        if (str_contains(Str::lower($reason), 'you do not have enough credits to run this task')) {
+            return 'Video generation was unavailable on our side. Buying more Reel credits will not resolve this.'
+                . ($this->credit_refunded_at ? ' Your Reel credits were returned.' : ' If credits were charged, please contact support with this Reel ID.');
+        }
+
         // Provider and HTTP exception messages can contain signed URLs or credentials.
         $reason = preg_replace('/https?:\/\/[^\s)]+/iu', '[URL hidden]', $reason);
         $reason = preg_replace('/\bBearer\s+[^\s,;]+/iu', 'Bearer [hidden]', $reason);

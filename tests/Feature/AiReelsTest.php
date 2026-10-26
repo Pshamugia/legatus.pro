@@ -12,6 +12,7 @@ use App\Services\AiReelPromptWriter;
 use App\Services\AiReelSourceImageStorage;
 use App\Services\MetaGraphClient;
 use App\Services\ReelCreditService;
+use App\Services\ReelGenerationCapacity;
 use App\Services\ReelMusicService;
 use App\Services\ReelVideoEditor;
 use App\Services\RunwayClient;
@@ -37,6 +38,10 @@ class AiReelsTest extends TestCase
         config()->set('paddle.reel_credit_price', 'pri_reel_credit');
         config()->set('paddle.webhook_secret', 'pdl_ntfset_secret');
         config()->set('paddle.environment', 'sandbox');
+        $capacity = \Mockery::mock(ReelGenerationCapacity::class);
+        $capacity->shouldReceive('maxReels')->andReturn(365);
+        $capacity->shouldReceive('ensureAvailable')->andReturnNull();
+        $this->app->instance(ReelGenerationCapacity::class, $capacity);
     }
 
     public function test_reels_page_explains_separate_pricing_and_minimum_credit_purchase(): void
@@ -75,6 +80,64 @@ class AiReelsTest extends TestCase
         $this->assertStringContainsString('https://cdn.paddle.com', (string) $response->headers->get('Content-Security-Policy'));
         $this->assertStringContainsString('.form-submit>span{', $response->getContent());
         $this->assertStringNotContainsString('.form-submit span{', $response->getContent());
+    }
+
+    public function test_provider_shortage_blocks_reel_before_customer_credits_are_debited(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('provider-shortage');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 9, 'txn-provider-shortage');
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('organization')->andReturn(['creditBalance' => 42]);
+        $this->app->instance(ReelGenerationCapacity::class, new ReelGenerationCapacity($runway));
+
+        $this->actingAs($user)->getJson(route('ai-reels.capacity'))
+            ->assertOk()->assertJsonPath('max_reels.15', 0);
+        $this->actingAs($user)->from(route('ai-reels.index'))->post(route('ai-reels.custom.store'), [
+            'prompt' => 'A cinematic product video with a gentle camera movement.',
+            'duration_seconds' => 15,
+            'providers' => ['facebook'],
+        ])->assertRedirect(route('ai-reels.index'))->assertSessionHasErrors('generation');
+
+        $this->assertSame(9, app(ReelCreditService::class)->balance($organization));
+        $this->assertDatabaseCount('ai_reels', 0);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_old_provider_credit_error_is_not_presented_as_customer_shortage(): void
+    {
+        $reel = new AiReel(['last_error' => 'Runway generation request failed: {"error":"You do not have enough credits to run this task."}']);
+
+        $this->assertStringContainsString('on our side', $reel->visibleFailureReason());
+        $this->assertStringNotContainsString('You do not have enough credits', $reel->visibleFailureReason());
+    }
+
+    public function test_provider_shortage_blocks_schedule_before_reserving_customer_credits(): void
+    {
+        Queue::fake();
+        [$user, $agent, $organization] = $this->tenant('provider-shortage-schedule');
+        $this->connections($agent);
+        $agent->products()->create($this->product('Product'));
+        app(ReelCreditService::class)->grantPurchase($organization, 9, 'txn-provider-shortage-schedule');
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('organization')->andReturn(['creditBalance' => 42]);
+        $this->app->instance(ReelGenerationCapacity::class, new ReelGenerationCapacity($runway));
+
+        $this->actingAs($user)->from(route('ai-reels.index'))->post(route('ai-reels.schedules.store'), [
+            'reel_count' => 1,
+            'duration_seconds' => 15,
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'providers' => ['facebook'],
+            'timezone' => 'Asia/Tbilisi',
+            'timing_mode' => 'auto',
+            'ai_tone' => 'creative',
+        ])->assertRedirect(route('ai-reels.index'))->assertSessionHasErrors('generation');
+
+        $this->assertSame(9, app(ReelCreditService::class)->balance($organization));
+        $this->assertDatabaseCount('ai_reel_schedules', 0);
+        Queue::assertNothingPushed();
     }
 
     public function test_reel_music_library_has_many_pinned_cc0_choices_across_categories(): void

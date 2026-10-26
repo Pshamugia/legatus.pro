@@ -249,6 +249,8 @@ Route::middleware('auth')->group(function () {
         Route::delete('/app/social-media/facebook-posts/{post}', [SocialMediaController::class, 'deleteFacebookPost'])
             ->middleware('throttle:10,1')->name('social-media.facebook-posts.destroy');
         Route::get('/app/ai-reels', [AiReelController::class, 'index'])->name('ai-reels.index');
+        Route::get('/app/ai-reels/capacity', [AiReelController::class, 'capacity'])
+            ->middleware('throttle:30,1')->name('ai-reels.capacity');
         Route::post('/app/ai-reels/schedules', [AiReelController::class, 'storeSchedule'])
             ->middleware('throttle:10,1')->name('ai-reels.schedules.store');
         Route::patch('/app/ai-reels/schedules/{schedule}/pause', [AiReelController::class, 'pause'])
