@@ -207,6 +207,17 @@ class OpenAiSalesOrchestrator
 
             return $this->handoffReply($this->safeHandoffText($message), $reason, ['resolve_discount_request']);
         }
+        $orderEvidence = $catalogContext['existing_order_request_evidence'] ?? null;
+        $existingOrderRequest = ($catalogContext['is_existing_order_request'] ?? false) === true
+            && is_string($orderEvidence)
+            && trim($orderEvidence) !== ''
+            && str_contains(Str::lower(Str::squish($message)), Str::lower(Str::squish($orderEvidence)));
+        if ($existingOrderRequest) {
+            return $this->respondToExistingOrderRequest(
+                $agent, $conversation, $message, $primaryModel, $started,
+                $inputTokens, $outputTokens, $modelUsage, 'semantic_existing_order_handoff',
+            );
+        }
         $broadRecommendation = is_array($catalogContext)
             && ($catalogContext['recommendation_scope'] ?? 'none') === 'broad';
         if (is_array($catalogContext) && ($catalogContext['recommendation_scope'] ?? 'none') !== 'none') {
@@ -957,6 +968,16 @@ class OpenAiSalesOrchestrator
                 $servedModel = $this->fallbackModel();
                 $used[] = ['name' => 'model_fallback', 'arguments' => [], 'result' => ['ok' => true, 'reason' => $fallbackReason, 'model' => $servedModel]];
             }
+        }
+        $finalOrderEvidence = $data['existing_order_request_evidence'] ?? null;
+        if (($data['is_existing_order_request'] ?? false) === true
+            && is_string($finalOrderEvidence)
+            && trim($finalOrderEvidence) !== ''
+            && str_contains(Str::lower(Str::squish($message)), Str::lower(Str::squish($finalOrderEvidence)))) {
+            return $this->respondToExistingOrderRequest(
+                $agent, $conversation, $message, $servedModel, $started,
+                $inputTokens, $outputTokens, $modelUsage, 'final_existing_order_boundary', $used,
+            );
         }
         if ($catalogContext === null
             && in_array($data['intent'] ?? null, ['recommendation', 'discovery'], true)
@@ -2439,6 +2460,14 @@ class OpenAiSalesOrchestrator
         return ['type' => 'json_schema', 'name' => 'catalog_follow_up', 'strict' => true, 'schema' => [
             'type' => 'object',
             'properties' => [
+                'is_existing_order_request' => [
+                    'type' => 'boolean',
+                    'description' => 'True when the current customer goal is to verify, track, change, or resolve an order they may already have placed, including whether checkout succeeded. A product title mentioned only to identify that order does not make this an inventory request. False for a new purchase, general buying instructions, or a question about product availability.',
+                ],
+                'existing_order_request_evidence' => [
+                    'type' => ['string', 'null'],
+                    'description' => 'When is_existing_order_request is true, copy an exact verbatim span from the current customer message expressing the existing-order request. Otherwise null.',
+                ],
                 'is_delivery_request' => ['type' => 'boolean'],
                 'delivery_request_type' => ['type' => 'string', 'enum' => ['none', 'general_policy', 'existing_order_status']],
                 'is_human_request' => ['type' => 'boolean'],
@@ -2465,7 +2494,7 @@ class OpenAiSalesOrchestrator
                 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'expects_complete_set' => ['type' => 'boolean'],
             ],
-            'required' => ['is_delivery_request', 'delivery_request_type', 'is_human_request', 'human_request_evidence', 'requested_discount_percent', 'discount_request_evidence', 'is_business_knowledge_request', 'knowledge_query', 'knowledge_scope', 'is_catalog_follow_up', 'catalog_scope_action', 'recommendation_scope', 'recommendation_query', 'recommendation_category', 'recommendation_occasion', 'resolved_query', 'resolved_queries', 'referenced_product_id', 'resolved_category', 'catalog_match_scope', 'exclude_product_ids', 'expects_complete_set'],
+            'required' => ['is_existing_order_request', 'existing_order_request_evidence', 'is_delivery_request', 'delivery_request_type', 'is_human_request', 'human_request_evidence', 'requested_discount_percent', 'discount_request_evidence', 'is_business_knowledge_request', 'knowledge_query', 'knowledge_scope', 'is_catalog_follow_up', 'catalog_scope_action', 'recommendation_scope', 'recommendation_query', 'recommendation_category', 'recommendation_occasion', 'resolved_query', 'resolved_queries', 'referenced_product_id', 'resolved_category', 'catalog_match_scope', 'exclude_product_ids', 'expects_complete_set'],
             'additionalProperties' => false,
         ]];
     }
@@ -2742,6 +2771,7 @@ class OpenAiSalesOrchestrator
         $assistantIdentity .= '. Customer photo or image recognition is not available in the current conversation tools. Never ask the customer to send or upload a cover, label, product photo, screenshot, barcode image, or ISBN photo so that you can identify or search for a product. If the current text is insufficient, ask for one text attribute that this tenant catalog actually contains';
         $assistantIdentity .= $this->catalogIdentifierCapabilityInstructions($agent);
         $assistantIdentity .= '. Never offer, promise, or solicit customer data for an action that is not represented by an available tool. Legatus cannot place or finalize a connected-store order, accept payment, or collect recipient, shipping-address, card, or payment details for checkout. When a customer wants to buy, direct them to the verified product link and explain that they must complete the business website checkout there. If a customer nevertheless sends order or shipping details, do not repeat or treat them as an order or lead; briefly explain that checkout must be completed on the business website';
+        $assistantIdentity .= '. A request to confirm whether the customer already placed an order, or to check, change, or resolve that order, concerns private order records—not product availability. Even when a product name is mentioned, catalog search and stock cannot answer it. Mark is_existing_order_request true and copy the current customer wording into existing_order_request_evidence so the server can route it safely. Never present a product listing, stock status, or link as confirmation of a customer order';
         $assistantIdentity .= '. Sold-out replacement rules override any more permissive recommendation wording below: never recommend an unavailable product or present it as purchasable. Do not offer, promise, or ask whether the customer wants alternatives unless a successful tenant catalog tool in the current turn has already returned genuinely relevant available alternatives. Use the complete dialogue and the sold-out item’s verified attributes to choose the strongest meaningful relationship for an alternative—such as the same author, creator, brand, series, genre, taxonomy, category, theme, or product type—without assuming that author or category is always the right relationship. Call recommend_products with that one verified relationship as a mandatory constraint before mentioning alternatives. Offer only verified available alternatives from that contextual relationship; never drift to an unrelated attribute merely to return a result. If no matching available alternative exists, state only the sold-out fact instead of offering a search or guessing';
         $assistantIdentity .= '. Understand catalogue targets semantically before searching. When one request contains multiple independently searchable targets, call search_products separately for each target and combine only the verified results. Never build one query by joining independent targets with conjunctions, punctuation, or a broader umbrella term. A multiword proper name, title, brand, or phrase such as Leonardo da Vinci is one target unless the conversation clearly requests its parts separately';
 
@@ -2901,6 +2931,14 @@ class OpenAiSalesOrchestrator
             'type' => 'object',
             'properties' => [
                 'text' => ['type' => 'string'],
+                'is_existing_order_request' => [
+                    'type' => 'boolean',
+                    'description' => 'True if the current customer asks to verify, track, change, or resolve an order they may already have placed. A product title mentioned only to identify that order is not an inventory question. False for a new purchase or product availability question.',
+                ],
+                'existing_order_request_evidence' => [
+                    'type' => ['string', 'null'],
+                    'description' => 'For an existing order request, an exact verbatim span from the current customer message that expresses it; otherwise null.',
+                ],
                 'intent' => ['type' => 'string', 'enum' => ['conversation', 'clarification', 'discovery', 'price', 'stock', 'delivery', 'recommendation', 'wholesale', 'lead', 'reservation', 'offer', 'handoff']],
                 'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
                 'handoff' => ['type' => 'boolean'],
@@ -2922,7 +2960,7 @@ class OpenAiSalesOrchestrator
                     'additionalProperties' => false,
                 ]],
             ],
-            'required' => ['text', 'intent', 'confidence', 'handoff', 'escalation_reason', 'clarification_next_tool', 'clarification_missing_input', 'product_ids', 'sources', 'factual_claims'],
+            'required' => ['text', 'is_existing_order_request', 'existing_order_request_evidence', 'intent', 'confidence', 'handoff', 'escalation_reason', 'clarification_next_tool', 'clarification_missing_input', 'product_ids', 'sources', 'factual_claims'],
             'additionalProperties' => false,
         ]];
     }
@@ -3331,6 +3369,47 @@ class OpenAiSalesOrchestrator
         ]);
     }
 
+    private function respondToExistingOrderRequest(
+        Agent $agent,
+        Conversation $conversation,
+        string $message,
+        string $model,
+        float $started,
+        int $inputTokens,
+        int $outputTokens,
+        array $modelUsage,
+        string $route,
+        array $priorTools = [],
+    ): array {
+        $reason = 'The customer asks about their existing order, but no authenticated order-history or order-management tool is available.';
+        $handoffEnabled = $agent->humanHandoffEnabled();
+        if ($handoffEnabled) {
+            $this->forceHandoff(
+                $conversation,
+                $reason,
+                'Verify the customer and the existing order through the business order system before confirming any order details.',
+            );
+        }
+        $conversation->increment('input_tokens', $inputTokens);
+        $conversation->increment('output_tokens', $outputTokens);
+        AgentRun::create([
+            'agent_id' => $agent->id,
+            'conversation_id' => $conversation->id,
+            'model' => $model,
+            'route' => $route,
+            'status' => 'completed',
+            'tools_used' => PrivacyRedactor::toolTrace(array_merge($priorTools, [['name' => 'resolve_existing_order_request']])),
+            'input_tokens' => $inputTokens,
+            'output_tokens' => $outputTokens,
+            'model_usage' => array_values($modelUsage),
+            'latency_ms' => (int) ((microtime(true) - $started) * 1000),
+        ]);
+
+        return $handoffEnabled
+            ? $this->handoffReply($this->existingOrderReplyText($message, true), $reason, ['resolve_existing_order_request'])
+            : $this->unavailableReply($this->existingOrderReplyText($message, false), ['resolve_existing_order_request']);
+    }
+
     private function safeHandoffText(string $customerMessage): string
     {
         if (preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage)) {
@@ -3338,6 +3417,19 @@ class OpenAiSalesOrchestrator
         }
 
         return 'I could not verify this answer reliably, so I have handed the conversation to a human instead of guessing.';
+    }
+
+    private function existingOrderReplyText(string $customerMessage, bool $handoff): string
+    {
+        if (preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage)) {
+            return $handoff
+                ? 'თქვენი შეკვეთის ჩანაწერებზე წვდომა არ მაქვს, ამიტომ ვერ დაგიდასტურებთ, გაფორმდა თუ არა ან რა მდგომარეობაშია. საუბარს ოპერატორს გადავცემ გადასამოწმებლად.'
+                : 'თქვენი შეკვეთის ჩანაწერებზე წვდომა არ მაქვს, ამიტომ ვერ დაგიდასტურებთ, გაფორმდა თუ არა ან რა მდგომარეობაშია. გთხოვთ, შეკვეთის გადასამოწმებლად მაღაზიის წარმომადგენელს დაუკავშირდეთ.';
+        }
+
+        return $handoff
+            ? 'I cannot access your order records, so I cannot confirm whether it was placed or its current status. I will pass this conversation to an operator to check.'
+            : 'I cannot access your order records, so I cannot confirm whether it was placed or its current status. Please contact the business team to check your order.';
     }
 
     private function safeUnavailableText(string $customerMessage): string

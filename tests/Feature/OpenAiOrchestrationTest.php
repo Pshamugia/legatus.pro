@@ -636,6 +636,155 @@ class OpenAiOrchestrationTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_existing_order_confirmation_is_handed_off_before_a_named_product_can_trigger_catalog_search(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], ['catalog_search_url' => 'https://example.com/search'])]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'order-confirmation-customer', 'status' => 'ai', 'channel' => 'instagram',
+        ]);
+        $question = 'თქვენგან საიტიდან მგონი გამოვწერე „ფარაონი“. შეგიძლიათ დამიდასტუროთ, რომ ნამდვილად გამოწერილი მაქვს?';
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'existing-order-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_existing_order_request' => true,
+                    'existing_order_request_evidence' => 'შეგიძლიათ დამიდასტუროთ, რომ ნამდვილად გამოწერილი მაქვს?',
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_catalog_follow_up' => true,
+                    'resolved_query' => 'ფარაონი',
+                    'resolved_queries' => ['ფარაონი'],
+                    'catalog_match_scope' => 'exact_identity',
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $question);
+
+        $this->assertTrue($reply['handoff']);
+        $this->assertSame('handoff', $reply['intent']);
+        $this->assertStringContainsString('შეკვეთის ჩანაწერებზე წვდომა არ მაქვს', $reply['text']);
+        $this->assertStringContainsString('ოპერატორს გადავცემ', $reply['text']);
+        $this->assertStringNotContainsString('მარაგ', $reply['text']);
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame('semantic_existing_order_handoff', AgentRun::latest('id')->firstOrFail()->route);
+        $this->assertSame(['resolve_existing_order_request'], $reply['tools_used']);
+        Http::assertSentCount(2);
+        $resolverRequest = Http::recorded()->map(fn ($pair) => $pair[0])->first(
+            fn ($request): bool => data_get($request->data(), 'text.format.name') === 'catalog_follow_up'
+        );
+        $this->assertTrue((bool) data_get($resolverRequest?->data(), 'text.format.schema.properties.is_existing_order_request'));
+    }
+
+    public function test_order_confirmation_does_not_promise_a_handoff_when_operator_mode_is_disabled(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], [
+            'human_handoff_enabled' => false,
+            'catalog_search_url' => 'https://example.com/search',
+        ])]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'order-confirmation-ai-only', 'status' => 'ai', 'channel' => 'instagram',
+        ]);
+        $question = 'Did my order for this item actually go through?';
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'existing-order-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_existing_order_request' => true,
+                    'existing_order_request_evidence' => 'Did my order for this item actually go through?',
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_catalog_follow_up' => false,
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $question);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertStringContainsString('cannot access your order records', $reply['text']);
+        $this->assertStringNotContainsString('I will pass', $reply['text']);
+        Http::assertSentCount(2);
+    }
+
+    public function test_final_answer_boundary_catches_existing_order_request_when_early_context_resolution_is_skipped(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'order-confirmation-without-search-source', 'status' => 'ai', 'channel' => 'instagram',
+        ]);
+        $question = 'მგონი „ფარაონი“ გამოვწერე. დამიდასტურებთ, შეკვეთა გაფორმდა?';
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'final-order-boundary', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => '„ფარაონი“ საიტზე იძებნება, მაგრამ მარაგში არ არის.',
+                    'is_existing_order_request' => true,
+                    'existing_order_request_evidence' => 'დამიდასტურებთ, შეკვეთა გაფორმდა?',
+                    'intent' => 'stock', 'confidence' => .9, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [], 'sources' => [], 'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $question);
+
+        $this->assertTrue($reply['handoff']);
+        $this->assertStringContainsString('შეკვეთის ჩანაწერებზე წვდომა არ მაქვს', $reply['text']);
+        $this->assertStringNotContainsString('მარაგში არ არის', $reply['text']);
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame('final_existing_order_boundary', AgentRun::latest('id')->firstOrFail()->route);
+        Http::assertSentCount(2);
+    }
+
+    public function test_stale_order_evidence_cannot_transfer_a_new_product_question(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->update(['settings' => array_merge($agent->settings ?? [], ['catalog_search_url' => 'https://example.com/search'])]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'order-then-product-customer', 'status' => 'ai', 'channel' => 'instagram',
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'Did my order go through?']);
+        $question = 'Do you sell this product?';
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'stale-order-intent', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_existing_order_request' => true,
+                    'existing_order_request_evidence' => 'Did my order go through?',
+                    'is_delivery_request' => false,
+                    'delivery_request_type' => 'none',
+                    'is_catalog_follow_up' => false,
+                ])]],
+            ]], 'usage' => []])
+            ->push(['id' => 'new-product-answer', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'Which product do you mean?', 'intent' => 'conversation', 'confidence' => .9,
+                    'handoff' => false, 'escalation_reason' => null, 'product_ids' => [],
+                    'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $question);
+
+        $this->assertFalse($reply['handoff']);
+        $this->assertSame('ai', $conversation->fresh()->status);
+        $this->assertStringNotContainsString('order records', $reply['text']);
+    }
+
     public function test_indirect_request_for_someone_else_creates_a_sticky_human_handoff(): void
     {
         $this->seed();
