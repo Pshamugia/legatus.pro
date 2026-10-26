@@ -102,6 +102,69 @@ class CustomerImageCatalogMatcherTest extends TestCase
         $this->assertStringContainsString('verified the exact product in our catalog', $result['text']);
     }
 
+    public function test_visible_title_is_searched_even_when_vision_does_not_call_it_unique(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'ლექსები. ლაშარელა',
+            'sku' => 'BOOK-166',
+            'category' => 'წიგნები',
+            'search_text' => 'ლექსები ლაშარელა გრიგოლ აბაშიძე',
+            'price' => 15,
+            'stock' => 0,
+            'image' => 'https://catalog.example/book-cover.jpg',
+            'metadata' => ['author' => 'გრიგოლ აბაშიძე', 'product_url' => 'https://shop.example/books/166'],
+            'is_active' => true,
+        ]);
+        $identity = $this->identity('ლაშარელა', 'გრიგოლ აბაშიძე');
+        $identity['identifying_text_readable'] = false;
+        $this->fakeVision([
+            $identity,
+            ['same_product' => true, 'similar_product' => false, 'matched_product_id' => $product->id, 'reason' => 'Cover and title agree.'],
+        ]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'ეს წიგნი ხომარ გაქვთ',
+        );
+
+        $this->assertSame('unavailable', $result['status']);
+        $this->assertSame([$product->id], $result['product_ids']);
+        $this->assertStringContainsString('მარაგში აღარ არის', $result['text']);
+        $this->assertSame('ლაშარელა', data_get($result, 'tools_used.0.arguments.query'));
+        $this->assertSame('check_stock', collect($result['tools_used'])->last()['name']);
+    }
+
+    public function test_captionless_image_reply_keeps_language_of_recent_customer_question(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'ეს წიგნი ხომარ გაქვთ']);
+        $this->fakeVision([$this->identity('არარსებული პროდუქტი')]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', '[Customer sent an image.]',
+        );
+
+        $this->assertSame('not_found', $result['status']);
+        $this->assertStringContainsString('ფოტოზე', $result['text']);
+        $this->assertStringNotContainsString('I could read', $result['text']);
+    }
+
+    public function test_uncertain_visible_title_is_not_reported_as_a_definitive_catalog_denial(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $identity = $this->identity('სავარაუდო სათაური');
+        $identity['identifying_text_readable'] = false;
+        $this->fakeVision([$identity]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'ეს წიგნი გაქვთ?',
+        );
+
+        $this->assertSame('uncertain', $result['status']);
+        $this->assertStringContainsString('სავარაუდოდ „სავარაუდო სათაური“', $result['text']);
+        $this->assertStringNotContainsString('ვერ დაგიდასტურებთ, რომ ეს პროდუქტი გვაქვს', $result['text']);
+    }
+
     public function test_product_without_readable_text_can_find_a_visually_similar_tenant_catalog_item(): void
     {
         [$agent, $conversation] = $this->tenant();
@@ -175,7 +238,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
 
         $this->assertSame('uncertain', $result['status']);
         $this->assertSame([], $result['products']);
-        $this->assertStringContainsString('ზუსტი იდენტობა ვერ დავადასტურე', $result['text']);
+        $this->assertStringContainsString('ზუსტად ამ პროდუქტის ჩვენს კატალოგთან დამთხვევა ვერ დავადასტურე', $result['text']);
         $this->assertStringNotContainsString('ხელმისაწვდომია', $result['text']);
     }
 

@@ -1370,7 +1370,7 @@ class MetaTransportTest extends TestCase
         $this->assertCount(1, $assistantMessages);
         $this->assertTrue($assistantMessages->every(
             fn ($message): bool => data_get($message->metadata, 'image_recognition_status') === 'uncertain'
-                && str_contains($message->content, 'exact identity')
+                && str_contains($message->content, 'could not read the product name clearly')
                 && Str::isUuid($message->request_id)
                 && strlen($message->request_id) === 36,
         ));
