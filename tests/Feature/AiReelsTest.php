@@ -976,19 +976,74 @@ class AiReelsTest extends TestCase
         $this->actingAs($owner)->getJson(route('ai-reels.status', $reel))->assertNotFound();
     }
 
-    public function test_failed_generations_are_not_left_in_the_reel_gallery(): void
+    public function test_failed_generations_show_the_recorded_reason_without_becoming_previews(): void
     {
         [$user, $agent] = $this->tenant('failed-reel-gallery');
         $this->connections($agent);
-        $agent->aiReels()->create([
+        $failed = $agent->aiReels()->create([
             'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generation_failed',
             'user_prompt' => 'This failed prompt must not remain visible in the gallery.',
+            'last_error' => 'Runway generation request failed: HTTP 400 at https://provider.test/private?token=secret',
         ]);
 
         $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
             ->assertOk()
             ->assertDontSee('This failed prompt must not remain visible in the gallery.')
+            ->assertSee('Custom Reel #'.$failed->id)
+            ->assertSee('Runway generation request failed: HTTP 400 at [URL hidden]')
+            ->assertDontSee('token=secret')
             ->assertSee('Your custom Reel previews will appear here.');
+    }
+
+    public function test_failed_reel_reasons_are_tenant_scoped(): void
+    {
+        [$user, $agent] = $this->tenant('failed-reel-owner');
+        [, $otherAgent] = $this->tenant('failed-reel-other');
+        $agent->aiReels()->create([
+            'mode' => 'scheduled', 'providers' => ['facebook'], 'status' => 'generation_failed',
+            'last_error' => 'Owner-specific provider failure.',
+        ]);
+        $otherAgent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['instagram'], 'status' => 'generation_failed',
+            'last_error' => 'Other tenant private failure.',
+        ]);
+
+        $this->actingAs($user)->get(route('ai-reels.index'))
+            ->assertOk()
+            ->assertSee('Scheduled Reel')
+            ->assertSee('Owner-specific provider failure.')
+            ->assertDontSee('Other tenant private failure.');
+    }
+
+    public function test_stale_custom_generation_reports_that_the_cause_is_not_yet_known(): void
+    {
+        [$user, $agent] = $this->tenant('stale-custom-reel');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+        ]);
+        $reel->timestamps = false;
+        $reel->update(['updated_at' => now()->subMinutes(20)]);
+
+        $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))
+            ->assertOk()
+            ->assertSee('Reel #'.$reel->id.' is still queued.')
+            ->assertSee('No final failure reason has been recorded.');
+    }
+
+    public function test_failed_custom_status_returns_a_redacted_reason_only_to_its_tenant(): void
+    {
+        [$user, $agent] = $this->tenant('failed-status');
+        [, $otherAgent] = $this->tenant('failed-status-other');
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'generation_failed',
+            'last_error' => 'Runway rejected the request at https://provider.test/private?token=secret',
+        ]);
+
+        $this->actingAs($user)->getJson(route('ai-reels.status', $reel))
+            ->assertOk()
+            ->assertJsonPath('failure_reason', 'Runway rejected the request at [URL hidden]');
+        $this->actingAs($otherAgent->organization->users()->first())
+            ->getJson(route('ai-reels.status', $reel))->assertNotFound();
     }
 
     public function test_runway_success_is_downloaded_to_durable_storage_and_waits_for_custom_approval(): void

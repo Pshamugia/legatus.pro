@@ -39,10 +39,16 @@ class AiReelController extends Controller
             ->latest()
             ->limit(30)
             ->get();
+        $failedReels = $agent->aiReels()
+            ->where('status', 'generation_failed')
+            ->latest()
+            ->limit(10)
+            ->get();
 
         return view('ai-reels', [
             'agent' => $agent, 'organization' => $organization, 'categories' => $categories,
             'languages' => $languages, 'connections' => $connections, 'schedules' => $schedules, 'reels' => $reels,
+            'failedReels' => $failedReels,
             'balance' => $credits->balance($organization), 'minimumPurchase' => config('paddle.reel_minimum_purchase', 10),
             'durationCredits' => $credits->durationOptions(),
             'musicTracks' => config('reel_music.tracks', []),
@@ -179,6 +185,7 @@ class AiReelController extends Controller
         return response()->json([
             'status' => $reel->status,
             'updated_at' => $reel->updated_at?->toIso8601String(),
+            'failure_reason' => $reel->status === 'generation_failed' ? $reel->visibleFailureReason() : null,
         ]);
     }
 
