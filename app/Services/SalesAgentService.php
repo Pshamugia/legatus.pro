@@ -274,13 +274,13 @@ class SalesAgentService
         $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
         $text = $handoffEnabled
             ? ($georgian
-                ? 'გადამოწმებული პასუხის დაბრუნება ამჯამად ვერ მოხერხდა. საუბარს ოპერატორს გადავცემ, რათა ვარაუდით არ გიპასუხოთ.'
+                ? 'გადამოწმებული პასუხის დაბრუნება ამჟამად ვერ მოხერხდა. საუბარს ოპერატორს გადავცემ, რათა ვარაუდით არ გიპასუხოთ.'
                 : 'I could not return a verified answer right now, so I handed the conversation to a human instead of guessing.')
             : ($georgian
                 ? 'გადამოწმებული პასუხის დაბრუნება ამჟამად ვერ მოხერხდა. გთხოვთ, კითხვა დააზუსტოთ ან ცოტა ხანში ხელახლა სცადოთ.'
                 : 'I could not return a verified answer right now. Please clarify the request or try again shortly.');
 
-        return ['text' => $text, 'intent' => $handoffEnabled ? 'handoff' : 'discovery', 'confidence' => 1.0, 'handoff' => $handoffEnabled, 'escalation_reason' => $handoffEnabled ? $reason : null, 'products' => [], 'sources' => [], 'tools_used' => [$handoffEnabled ? 'fail_closed_handoff' : 'fail_closed']];
+        return ['text' => $text, 'intent' => $handoffEnabled ? 'handoff' : 'discovery', 'confidence' => 0.0, 'handoff' => $handoffEnabled, 'escalation_reason' => $handoffEnabled ? $reason : null, 'products' => [], 'sources' => [], 'tools_used' => [$handoffEnabled ? 'fail_closed_handoff' : 'fail_closed']];
     }
 
     private function fallback(Agent $agent, string $message, ?Conversation $conversation = null): array

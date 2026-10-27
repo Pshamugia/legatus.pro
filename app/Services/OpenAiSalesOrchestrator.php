@@ -584,6 +584,45 @@ class OpenAiSalesOrchestrator
             ], 'responses.initial', $deadline);
             $this->accumulateUsage($response, $inputTokens, $outputTokens, $modelUsage, $primaryModel, 'responses.initial');
         } catch (\Throwable $exception) {
+            // When semantic context identified a general delivery-policy
+            // question and the tenant's delivery tool already succeeded,
+            // a failed final model request must not discard that verified
+            // answer or turn the conversation over to an operator.
+            if ($deliveryRequestType === 'general_policy'
+                && is_array($catalogContext)
+                && ($catalogContext['is_catalog_follow_up'] ?? false) !== true
+                && ($catalogContext['recommendation_scope'] ?? 'none') === 'none'
+                && ($catalogContext['is_human_request'] ?? false) !== true
+                && ($verifiedDelivery['ok'] ?? false) === true
+                && filled($verifiedDelivery['customer_message'] ?? null)) {
+                $conversation->increment('input_tokens', $inputTokens);
+                $conversation->increment('output_tokens', $outputTokens);
+                AgentRun::create([
+                    'agent_id' => $agent->id,
+                    'conversation_id' => $conversation->id,
+                    'model' => $primaryModel,
+                    'route' => 'verified_delivery_provider_fallback',
+                    'status' => 'fallback',
+                    'tools_used' => PrivacyRedactor::toolTrace($used),
+                    'error' => PrivacyRedactor::text(Str::limit($exception->getMessage(), 1000)),
+                    'input_tokens' => $inputTokens,
+                    'output_tokens' => $outputTokens,
+                    'model_usage' => array_values($modelUsage),
+                    'latency_ms' => (int) ((microtime(true) - $started) * 1000),
+                ]);
+
+                return [
+                    'text' => (string) $verifiedDelivery['customer_message'],
+                    'intent' => 'delivery',
+                    'confidence' => .9,
+                    'handoff' => false,
+                    'escalation_reason' => null,
+                    'products' => [],
+                    'sources' => [$verifiedDelivery['source']],
+                    'tools_used' => ['calculate_delivery', 'verified_delivery_provider_fallback'],
+                ];
+            }
+
             if (! $this->shouldFallbackAfterPrimaryFailure($exception, $primaryModel)) {
                 throw $exception;
             }
@@ -1835,14 +1874,14 @@ class OpenAiSalesOrchestrator
         ];
     }
 
-    private function client(int $timeout): PendingRequest
+    private function client(int $timeout, ?int $attempts = null): PendingRequest
     {
         return Http::baseUrl('https://api.openai.com/v1')
             ->withToken(config('services.openai.key'))
             ->acceptJson()
             ->connectTimeout(min($timeout, max(1, (int) config('services.openai.connect_timeout'))))
             ->timeout($timeout)
-            ->retry(max(1, (int) config('services.openai.retries')), fn ($attempt) => $attempt * 250, throw: false);
+            ->retry($attempts ?? max(1, (int) config('services.openai.retries')), fn ($attempt) => $attempt * 250, throw: false);
     }
 
     private function structuredOutput(array $response): array
@@ -2268,7 +2307,11 @@ class OpenAiSalesOrchestrator
         ]);
 
         try {
-            $response = $this->client($timeout)->post($path, $payload);
+            // Optional preflight requests must not spend the entire response
+            // budget on a second network timeout. The actual answer still
+            // gets the remaining time and its normal retry policy.
+            $attempts = in_array($stage, ['moderation', 'responses.catalog_context'], true) ? 1 : null;
+            $response = $this->client($timeout, $attempts)->post($path, $payload);
             Log::info('OpenAI request finished.', [
                 'stage' => $stage,
                 'status' => $response->status(),

@@ -4050,10 +4050,113 @@ class OpenAiOrchestrationTest extends TestCase
         $response = $this->postJson("/demo/{$agent->slug}/message", ['message' => 'Will delivery arrive tomorrow?'])
             ->assertOk()
             ->assertJsonPath('handoff', true)
+            ->assertJsonPath('confidence', 0)
             ->assertJsonPath('tools_used.0', 'fail_closed_handoff');
 
         $this->assertStringNotContainsStringIgnoringCase('arrive tomorrow', $response->json('text'));
         $this->assertDatabaseHas('agent_runs', ['status' => 'failed']);
+    }
+
+    public function test_delivery_policy_survives_a_failed_final_model_request_when_the_tenant_tool_succeeded(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery policy',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery policy',
+            'content' => 'თბილისი: 5 ლარი / 2 სამუშაო დღე რეგიონი: 7 ლარი / 3-5 სამუშაო დღე 60 ₾-დან უფასოა.',
+            'content_hash' => hash('sha256', 'delivery-policy-final-model-outage'),
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'delivery-context', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
+                    'is_human_request' => false,
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'resolved_query' => null,
+                    'resolved_queries' => [],
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['error' => ['message' => 'final model unavailable']], 503)
+            ->push(['error' => ['message' => 'final model unavailable']], 503);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'რა ფასი აქვს მიწოდებას თქვენთან?',
+        ])->assertOk()
+            ->assertJsonPath('handoff', false)
+            ->assertJsonPath('intent', 'delivery')
+            ->assertJsonPath('sources.0.type', 'manual_policy');
+
+        $this->assertStringContainsString('5 ლარი', $response->json('text'));
+        $this->assertStringContainsString('7 ლარი', $response->json('text'));
+        $this->assertStringContainsString('60 ₾', $response->json('text'));
+        $this->assertDatabaseHas('agent_runs', [
+            'agent_id' => $agent->id,
+            'route' => 'verified_delivery_provider_fallback',
+            'status' => 'fallback',
+        ]);
+    }
+
+    public function test_failed_final_model_cannot_invent_a_delivery_fee_when_tenant_policy_is_missing(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $settings = $agent->settings ?? [];
+        unset($settings['delivery_policy']);
+        $agent->update(['settings' => $settings]);
+        $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Empty delivery source',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'delivery-context', 'output' => [[
+                'type' => 'message',
+                'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
+                    'is_human_request' => false,
+                    'is_catalog_follow_up' => false,
+                    'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none',
+                    'resolved_query' => null,
+                    'resolved_queries' => [],
+                    'resolved_category' => null,
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['error' => ['message' => 'final model unavailable']], 503)
+            ->push(['error' => ['message' => 'final model unavailable']], 503)
+            ->push(['error' => ['message' => 'fallback model unavailable']], 503)
+            ->push(['error' => ['message' => 'fallback model unavailable']], 503);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'რა ფასი აქვს მიწოდებას თქვენთან?',
+        ])->assertOk()->assertJsonPath('handoff', true)->assertJsonPath('confidence', 0);
+
+        $this->assertStringNotContainsString('5 ლარი', $response->json('text'));
+        $this->assertDatabaseMissing('agent_runs', [
+            'agent_id' => $agent->id,
+            'route' => 'verified_delivery_provider_fallback',
+        ]);
     }
 
     public function test_responses_api_failure_still_uses_verified_tenant_catalog_search(): void
