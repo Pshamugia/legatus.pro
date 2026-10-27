@@ -765,6 +765,7 @@ class OpenAiSalesOrchestrator
                     }
                     if ($toolName === 'search_products') {
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
+                        $args['match_scope'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity');
                         $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
                         $args['_entity_family_match'] = data_get($semanticResolution, 'result.catalog_match_scope') === 'entity_family';
                         $args['_return_all_matches'] = (bool) data_get($semanticResolution, 'result.expects_complete_set', false);
@@ -778,6 +779,7 @@ class OpenAiSalesOrchestrator
                     }
                     $args['_identity_match'] = true;
                     $args['_entity_family_match'] = false;
+                    $args['match_scope'] = 'exact_identity';
                     $args['_preserve_exact_identity'] = true;
                     $args['_required_name_identity'] = $explicitNameIdentity;
                 }
@@ -1292,9 +1294,20 @@ class OpenAiSalesOrchestrator
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
             && $budgetConstraint === null
             && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
+            && (! is_array($catalogContext) || ($catalogContext['catalog_match_scope'] ?? 'exact_identity') === 'exact_identity')
             && ! $linkedCommentPriceRecovery
             && ! $searchedOnlyLinkedCommentProduct
             && $successfulCatalogSearches->isNotEmpty()
+            && $successfulCatalogSearches->every(fn (array $call): bool => data_get($call, 'arguments._entity_family_match') !== true
+                && data_get($call, 'arguments.match_scope', 'exact_identity') === 'exact_identity')
+            && $successfulCatalogSearches->every(fn (array $call): bool => collect(array_merge(
+                data_get($call, 'result.products', []),
+                data_get($call, 'result.unavailable_products', []),
+            ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
+        $broadLookupMiss = ! $exactLookupMiss
+            && $successfulCatalogSearches->isNotEmpty()
+            && $successfulCatalogSearches->contains(fn (array $call): bool => data_get($call, 'arguments._entity_family_match') === true
+                || data_get($call, 'arguments.match_scope') === 'entity_family')
             && $successfulCatalogSearches->every(fn (array $call): bool => collect(array_merge(
                 data_get($call, 'result.products', []),
                 data_get($call, 'result.unavailable_products', []),
@@ -1600,6 +1613,25 @@ class OpenAiSalesOrchestrator
             $data['text'] = preg_match('/[\x{10A0}-\x{10FF}]/u', $message)
                 ? 'სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.'
                 : "Sorry, I couldn't find that specific product in the catalog.";
+            $data['intent'] = 'discovery';
+            $data['confidence'] = 1;
+            $data['handoff'] = false;
+            $data['escalation_reason'] = null;
+            $data['clarification_next_tool'] = null;
+            $data['clarification_missing_input'] = null;
+            $data['product_ids'] = [];
+            $data['sources'] = [];
+            $data['factual_claims'] = [];
+            $escalationReason = null;
+        }
+
+        if ($broadLookupMiss && $conversation->fresh()->status !== 'human') {
+            // An empty genre/category search does not prove that the business
+            // has no such products, especially when language and topic were
+            // combined into an unsearchable phrase.
+            $data['text'] = preg_match('/[\x{10A0}-\x{10FF}]/u', $message)
+                ? 'ამ კატეგორიის არჩევანი ახლა ვერ გადავამოწმე. არ მინდა არასწორად გითხრათ, რომ არ გვაქვს.'
+                : "I couldn't verify the selection in that category right now. I don't want to incorrectly tell you we don't have it.";
             $data['intent'] = 'discovery';
             $data['confidence'] = 1;
             $data['handoff'] = false;

@@ -3321,6 +3321,97 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString($unrelated->name, $response->json('text'));
     }
 
+    public function test_language_and_genre_request_searches_verified_language_products_without_an_exact_item_refusal(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $novel = $agent->products()->create([
+            'name' => 'The River Novel', 'category' => 'Fiction', 'search_text' => 'The River Novel Fiction',
+            'price' => 20, 'stock' => 2, 'is_active' => true,
+        ]);
+        $other = $agent->products()->create([
+            'name' => 'The Mountain Novel', 'category' => 'Fiction', 'search_text' => 'The Mountain Novel Fiction',
+            'price' => 18, 'stock' => 2, 'is_active' => true,
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Russian',
+            'name' => 'Russian catalog', 'url' => 'https://shop.example/?lang=ru',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 2, 'last_synced_at' => now(),
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'product', 'title' => $novel->name,
+            'content' => $novel->name, 'content_hash' => hash('sha256', 'orchestrated-russian-fiction-'.$novel->id),
+            'metadata' => ['product_id' => $novel->id],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'language-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'language-search-call',
+                'arguments' => json_encode([
+                    'query' => 'Fiction', 'category' => null, 'language' => 'Russian',
+                    'match_scope' => 'entity_family', 'max_price' => null, 'exclude_product_ids' => [],
+                ]),
+            ]]])
+            ->push(['id' => 'language-result', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'Yes, we have Russian-language fiction, including The River Novel.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [$novel->id], 'sources' => [],
+                    'factual_claims' => [['type' => 'product', 'product_id' => $novel->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null]],
+                ])]],
+            ]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have fiction in Russian?',
+        ])->assertOk();
+
+        $this->assertSame([$novel->id], collect($response->json('products'))->pluck('id')->all());
+        $this->assertStringContainsString('Russian-language fiction', $response->json('text'));
+        $this->assertStringNotContainsString($other->name, $response->json('text'));
+        $run = AgentRun::query()->latest('id')->firstOrFail();
+        $search = collect($run->tools_used)->firstWhere('name', 'search_products');
+        $this->assertSame('Russian', data_get($search, 'arguments.language'));
+        $this->assertSame('entity_family', data_get($search, 'arguments.match_scope'));
+    }
+
+    public function test_empty_broad_language_and_genre_search_does_not_become_an_exact_product_denial(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        config(['services.openai.key' => 'test-key']);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'broad-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'broad-search-call',
+                'arguments' => json_encode([
+                    'query' => 'Russian-language fiction', 'category' => null,
+                    'language' => null, 'match_scope' => 'entity_family',
+                    'max_price' => null, 'exclude_product_ids' => [],
+                ]),
+            ]]])
+            ->push(['id' => 'wrong-broad-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'Sorry, I could not find that specific product in the catalog.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [], 'sources' => [],
+                    'factual_claims' => [],
+                ])]],
+            ]]]);
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have Russian-language fiction?',
+        ])->assertOk();
+
+        $this->assertStringNotContainsString('specific product', $response->json('text'));
+        $this->assertStringContainsString("couldn't verify", $response->json('text'));
+        $this->assertSame([], $response->json('products'));
+    }
+
     public function test_instagram_post_product_is_verified_by_id_when_its_title_search_is_empty(): void
     {
         $this->seed();
