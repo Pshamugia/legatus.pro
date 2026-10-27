@@ -3428,6 +3428,19 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([], $response->json('products'));
     }
 
+    public function test_short_punctuation_follow_up_preserves_the_customer_language_for_catalog_miss(): void
+    {
+        $this->seed();
+        $conversation = Agent::firstOrFail()->conversations()->create([
+            'visitor_id' => 'language-after-question-mark', 'status' => 'ai',
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'რუსულ ენაზე წიგნები არ გაქვთ?']);
+        $method = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'usesGeorgianForShortTurn');
+
+        $this->assertTrue($method->invoke(app(OpenAiSalesOrchestrator::class), $conversation, '?'));
+        $this->assertFalse($method->invoke(app(OpenAiSalesOrchestrator::class), $conversation, 'English books?'));
+    }
+
     public function test_language_correction_drops_the_previous_title_query_and_uses_verified_edition_language(): void
     {
         $this->seed();

@@ -1635,7 +1635,7 @@ class OpenAiSalesOrchestrator
             // An empty genre/category search does not prove that the business
             // has no such products, especially when language and topic were
             // combined into an unsearchable phrase.
-            $data['text'] = preg_match('/[\x{10A0}-\x{10FF}]/u', $message)
+            $data['text'] = $this->usesGeorgianForShortTurn($conversation, $message)
                 ? 'ამ კატეგორიის არჩევანი ახლა ვერ გადავამოწმე. არ მინდა არასწორად გითხრათ, რომ არ გვაქვს.'
                 : "I couldn't verify the selection in that category right now. I don't want to incorrectly tell you we don't have it.";
             $data['intent'] = 'discovery';
@@ -2754,6 +2754,20 @@ class OpenAiSalesOrchestrator
         $result['verified_stock'] = $checks;
 
         return [$result, $calls];
+    }
+
+    private function usesGeorgianForShortTurn(Conversation $conversation, string $currentInput): bool
+    {
+        if (preg_match('/\p{L}/u', $currentInput)) {
+            return preg_match('/[\x{10A0}-\x{10FF}]/u', $currentInput) === 1;
+        }
+
+        $recentCustomerText = $conversation->messages()->where('role', 'customer')
+            ->latest('id')->limit(8)->pluck('content')
+            ->first(fn ($text): bool => is_string($text) && preg_match('/\p{L}/u', $text) === 1);
+
+        return is_string($recentCustomerText)
+            && preg_match('/[\x{10A0}-\x{10FF}]/u', $recentCustomerText) === 1;
     }
 
     private function history(Conversation $conversation, string $currentInput): array
