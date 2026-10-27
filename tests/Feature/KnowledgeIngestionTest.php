@@ -281,6 +281,40 @@ HTML;
         $this->assertSame(2, $source->chunks()->count());
     }
 
+    public function test_primary_catalog_import_preserves_product_language_as_distinct_from_website_locale(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        Http::fake(['https://example.com/catalog.json' => Http::response([
+            'products' => [[
+                'id' => 'edition-1', 'name' => 'A novel', 'price' => 20, 'stock' => 2,
+                'currency' => 'GEL', 'language' => 'ru',
+            ]],
+        ], 200, ['Content-Type' => 'application/json'])]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Primary catalog',
+            'url' => 'https://example.com/catalog.json',
+        ]);
+
+        app(KnowledgeIngestionService::class)->ingest($source);
+
+        $this->assertSame('ru', data_get($agent->products()->where('sku', 'edition-1')->firstOrFail()->metadata, 'product_language'));
+
+        Http::fake(['https://example.com/catalog?lang=ka' => Http::response([
+            'products' => [[
+                'id' => 'edition-1', 'name' => 'Translated catalog title', 'price' => 20,
+                'stock' => 2, 'currency' => 'GEL',
+            ]],
+        ], 200, ['Content-Type' => 'application/json'])]);
+        $localizedSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Georgian',
+            'name' => 'Georgian website locale', 'url' => 'https://example.com/catalog?lang=ka',
+        ]);
+        app(KnowledgeIngestionService::class)->ingest($localizedSource);
+
+        $this->assertSame('ru', data_get($agent->products()->where('sku', 'edition-1')->firstOrFail()->metadata, 'product_language'));
+    }
+
     public function test_website_ingestion_discovers_same_origin_delivery_policy_pages(): void
     {
         $this->seed();

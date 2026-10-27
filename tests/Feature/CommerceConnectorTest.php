@@ -41,6 +41,7 @@ class CommerceConnectorTest extends TestCase
                     'name' => 'საიუბილეო საარქივო გამოცემა',
                     'author' => 'პაოლო იაშვილი',
                     'category' => 'წიგნები',
+                    'language' => 'ru',
                     'genres' => ['პოეზია'],
                     'description' => 'რჩეული ლექსები და წერილები',
                     'details' => 'მეოცე საუკუნის ქართული ლიტერატურა',
@@ -56,6 +57,7 @@ class CommerceConnectorTest extends TestCase
                     'name' => 'სხვა წიგნი',
                     'author' => 'რეზო კლდიაშვილი',
                     'category' => 'წიგნები',
+                    'language' => 'ka',
                     'genres' => ['პროზა'],
                     'description' => 'სხვა აღწერა',
                     'price' => 20,
@@ -76,6 +78,13 @@ class CommerceConnectorTest extends TestCase
         app(CommerceCatalogSyncService::class)->sync($connection);
         $conversation = $agent->conversations()->create(['visitor_id' => 'searcher', 'status' => 'ai']);
         $toolbox = app(SalesToolbox::class);
+
+        $russian = $toolbox->execute('search_products', [
+            'query' => '', 'category' => null, 'language' => 'ru',
+            'match_scope' => 'entity_family', 'max_price' => null,
+            'exclude_product_ids' => [],
+        ], $agent, $conversation);
+        $this->assertSame(['საიუბილეო საარქივო გამოცემა'], collect($russian['products'])->pluck('name')->all());
 
         foreach (['იაშვილის რა გაქვთ?', 'პოეზია მაჩვენეთ', 'მეოცე საუკუნის ქართული ლიტერატურა', '978-9941-8-0001-2'] as $query) {
             $result = $toolbox->execute('search_products', [

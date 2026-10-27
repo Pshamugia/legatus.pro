@@ -389,6 +389,8 @@ class CommerceCatalogSyncService
                     'author' => $this->clean($item['author'] ?? null, 255) ?: null,
                     'genres' => array_values(array_filter(array_map(fn ($value) => is_scalar($value) ? $this->clean($value, 120) : '', (array) ($item['genres'] ?? [])))),
                     'language' => $this->clean($item['language'] ?? null, 20) ?: null,
+                    'product_language' => filled($item['language'] ?? null)
+                        ? Str::lower($this->clean($item['language'], 20)) : null,
                     'condition' => $this->clean($item['condition'] ?? null, 100) ?: null,
                     'currency' => $currency,
                     'in_stock' => $item['in_stock'],

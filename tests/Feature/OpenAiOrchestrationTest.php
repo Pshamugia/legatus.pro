@@ -3328,11 +3328,11 @@ class OpenAiOrchestrationTest extends TestCase
         $agent->products()->update(['is_active' => false]);
         $novel = $agent->products()->create([
             'name' => 'The River Novel', 'category' => 'Fiction', 'search_text' => 'The River Novel Fiction',
-            'price' => 20, 'stock' => 2, 'is_active' => true,
+            'price' => 20, 'stock' => 2, 'is_active' => true, 'metadata' => ['product_language' => 'ru'],
         ]);
         $other = $agent->products()->create([
             'name' => 'The Mountain Novel', 'category' => 'Fiction', 'search_text' => 'The Mountain Novel Fiction',
-            'price' => 18, 'stock' => 2, 'is_active' => true,
+            'price' => 18, 'stock' => 2, 'is_active' => true, 'metadata' => ['product_language' => 'en'],
         ]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Russian',
@@ -3348,10 +3348,26 @@ class OpenAiOrchestrationTest extends TestCase
 
         Http::fakeSequence()
             ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'language-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_existing_order_request' => false, 'existing_order_request_evidence' => null,
+                    'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                    'is_human_request' => false, 'human_request_evidence' => null,
+                    'requested_discount_percent' => null, 'discount_request_evidence' => null,
+                    'is_business_knowledge_request' => false, 'knowledge_query' => null, 'knowledge_scope' => null,
+                    'is_catalog_follow_up' => true, 'catalog_scope_action' => 'replace',
+                    'recommendation_scope' => 'none', 'recommendation_query' => null,
+                    'recommendation_category' => null, 'recommendation_occasion' => null,
+                    'resolved_query' => 'Fiction', 'resolved_queries' => ['Fiction'],
+                    'referenced_product_id' => null, 'resolved_category' => null,
+                    'product_language' => 'ru', 'catalog_match_scope' => 'entity_family',
+                    'exclude_product_ids' => [], 'expects_complete_set' => false,
+                ])]],
+            ]]])
             ->push(['id' => 'language-search', 'output' => [[
                 'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'language-search-call',
                 'arguments' => json_encode([
-                    'query' => 'Fiction', 'category' => null, 'language' => 'Russian',
+                    'query' => 'Fiction', 'category' => null, 'language' => 'ru',
                     'match_scope' => 'entity_family', 'max_price' => null, 'exclude_product_ids' => [],
                 ]),
             ]]])
@@ -3374,7 +3390,7 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString($other->name, $response->json('text'));
         $run = AgentRun::query()->latest('id')->firstOrFail();
         $search = collect($run->tools_used)->firstWhere('name', 'search_products');
-        $this->assertSame('Russian', data_get($search, 'arguments.language'));
+        $this->assertSame('ru', data_get($search, 'arguments.language'));
         $this->assertSame('entity_family', data_get($search, 'arguments.match_scope'));
     }
 
@@ -3410,6 +3426,63 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringNotContainsString('specific product', $response->json('text'));
         $this->assertStringContainsString("couldn't verify", $response->json('text'));
         $this->assertSame([], $response->json('products'));
+    }
+
+    public function test_language_correction_drops_the_previous_title_query_and_uses_verified_edition_language(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $russian = $agent->products()->create([
+            'name' => 'An original-language edition', 'price' => 20, 'stock' => 2,
+            'is_active' => true, 'metadata' => ['language' => 'ru'],
+        ]);
+        $agent->products()->create([
+            'name' => 'Russian Forest in translation', 'price' => 14, 'stock' => 2,
+            'is_active' => true, 'metadata' => ['language' => 'ka'],
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'language-correction', 'status' => 'ai', 'channel' => 'facebook',
+            'context' => ['active_catalog_scope' => [
+                'tool' => 'search_products', 'query' => 'Russian',
+                'catalog_match_scope' => 'entity_family', 'shown_product_ids' => [],
+            ]],
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'corrected-language-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_existing_order_request' => false, 'existing_order_request_evidence' => null,
+                    'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                    'is_human_request' => false, 'human_request_evidence' => null,
+                    'requested_discount_percent' => null, 'discount_request_evidence' => null,
+                    'is_business_knowledge_request' => false, 'knowledge_query' => null, 'knowledge_scope' => null,
+                    'is_catalog_follow_up' => true, 'catalog_scope_action' => 'continue',
+                    'recommendation_scope' => 'none', 'recommendation_query' => null,
+                    'recommendation_category' => null, 'recommendation_occasion' => null,
+                    'resolved_query' => null, 'resolved_queries' => [], 'referenced_product_id' => null,
+                    'resolved_category' => null, 'product_language' => 'ru',
+                    'catalog_match_scope' => 'entity_family', 'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]]])
+            ->push(['id' => 'corrected-language-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'დიახ, რუსულენოვანი გამოცემა გვაქვს.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [$russian->id], 'sources' => [],
+                    'factual_claims' => [['type' => 'product', 'product_id' => $russian->id,
+                        'amount' => null, 'quantity' => null, 'reference' => null]],
+                ])]],
+            ]]]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, 'არა, რუსულენოვანი, თარგმანი არა');
+
+        $this->assertSame([$russian->id], $reply['products']->pluck('id')->all());
+        $search = collect(AgentRun::query()->latest('id')->firstOrFail()->tools_used)->firstWhere('name', 'search_products');
+        $this->assertSame('', data_get($search, 'arguments.query'));
+        $this->assertSame('ru', data_get($search, 'arguments.language'));
     }
 
     public function test_instagram_post_product_is_verified_by_id_when_its_title_search_is_empty(): void

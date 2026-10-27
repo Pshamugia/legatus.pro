@@ -26,10 +26,13 @@ class SalesToolbox
 
     public function definitions(?Agent $agent = null): array
     {
-        $languages = $agent?->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
-            ->pluck('taxonomy_label')->filter()->values()->all() ?? [];
+        $languages = $agent?->customerProducts()->where('is_active', true)->get(['metadata'])
+            ->flatMap(fn ($product): array => array_filter([
+                data_get($product->metadata, 'product_language'),
+                data_get($product->metadata, 'language'),
+            ], 'is_string'))->unique()->values()->all() ?? [];
         $definitions = [
-            $this->tool('search_products', 'Search tenant-scoped catalog evidence for a product, creator, category, subject or theme. Query must be the smallest searchable product/topic term, not the whole customer sentence. Keep a requested product language out of query and pass it separately as language, using exactly one ready language label from this business: '.json_encode($languages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'. Use null if no catalog language was requested. Translate the topic into the catalog vocabulary when needed, but never translate an exact product title into a different identity. Set match_scope to exact_identity only for one exact named item; use entity_family for categories, genres, subjects and other broad inventory questions. Use search_knowledge for business policies, not inventory. Available matches are in products and sold-out matches in unavailable_products. If both are empty and did_you_mean is present, ask for spelling confirmation.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'language' => ['type' => ['string', 'null']], 'match_scope' => ['type' => 'string', 'enum' => ['exact_identity', 'entity_family']], 'max_price' => ['type' => ['number', 'null']], 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']]], ['query', 'category', 'language', 'match_scope', 'max_price', 'exclude_product_ids']),
+            $this->tool('search_products', 'Search tenant-scoped catalog evidence for a product, creator, category, subject or theme. Query must be the smallest searchable product/topic term, not the whole customer sentence; use an empty query for language-only inventory. Product edition/content language is separate from catalog website locale or words in a title. When requested, pass its exact catalog code as language. Verified product-language codes for this business: '.json_encode($languages, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).'. If no code is indexed yet, still pass the requested standard language code so the tool can report no verified matches; never substitute a title containing the language word. Use null if no product language was requested. Translate the topic into the catalog vocabulary when needed, but never translate an exact product title into a different identity. Set match_scope to exact_identity only for one exact named item; use entity_family for categories, genres, subjects and other broad inventory questions. Use search_knowledge for business policies, not inventory. Available matches are in products and sold-out matches in unavailable_products. If both are empty and did_you_mean is present, ask for spelling confirmation.', ['query' => ['type' => 'string'], 'category' => ['type' => ['string', 'null']], 'language' => ['type' => ['string', 'null']], 'match_scope' => ['type' => 'string', 'enum' => ['exact_identity', 'entity_family']], 'max_price' => ['type' => ['number', 'null']], 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']]], ['query', 'category', 'language', 'match_scope', 'max_price', 'exclude_product_ids']),
             $this->tool('search_knowledge', 'Search verified policies and website knowledge.', ['query' => ['type' => 'string']], ['query']),
             $this->tool('save_shopping_preferences', 'Remember customer preferences for this shopping conversation.', ['budget' => ['type' => ['number', 'null']], 'occasion' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'likes' => ['type' => 'array', 'items' => ['type' => 'string']], 'dislikes' => ['type' => 'array', 'items' => ['type' => 'string']], 'recipient' => ['type' => ['string', 'null']]], ['budget', 'occasion', 'mood', 'likes', 'dislikes', 'recipient']),
             $this->tool('recommend_products', 'Rank suitable products using customer constraints and verified catalog data. Resolve the complete dialogue semantically. Set exclude_product_ids to previously shown products that no longer satisfy the current request; otherwise use an empty array. When quantity is set, budget is the maximum total for the complete bundle, not a per-item limit.', ['query' => ['type' => 'string'], 'budget' => ['type' => ['number', 'null']], 'quantity' => ['type' => ['integer', 'null'], 'minimum' => 1, 'maximum' => 5], 'category' => ['type' => ['string', 'null']], 'mood' => ['type' => ['string', 'null']], 'occasion' => ['type' => ['string', 'null']], 'limit' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 5], 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']]], ['query', 'budget', 'quantity', 'category', 'mood', 'occasion', 'limit', 'exclude_product_ids']),
@@ -317,11 +320,13 @@ class SalesToolbox
             return null;
         }
 
-        $label = Str::lower(trim($requested));
-        $source = $agent->knowledgeSources()->where('source_scope', 'language')->where('status', 'ready')
-            ->get()->first(fn ($candidate): bool => Str::lower(trim((string) $candidate->taxonomy_label)) === $label);
+        $code = Str::lower(trim($requested));
 
-        return $source ? $this->mappedProductIds($source) : [];
+        return $agent->customerProducts()->where('is_active', true)
+            ->where(fn ($query) => $query->where('metadata->product_language', $code)
+                ->orWhere('metadata->language', $code))
+            ->pluck('products.id')
+            ->map(fn ($id): int => (int) $id)->values()->all();
     }
 
     /**

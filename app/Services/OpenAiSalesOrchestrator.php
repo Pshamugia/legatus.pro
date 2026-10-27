@@ -238,7 +238,7 @@ class OpenAiSalesOrchestrator
             $excludedIds = collect($catalogContext['exclude_product_ids'] ?? [])
                 ->map(fn ($id): int => (int) $id)->intersect($recentIds)->unique()->values();
             $resolvedQuery = trim((string) ($catalogContext['resolved_query'] ?? ''));
-            if ($resolvedQuery !== '') {
+            if ($resolvedQuery !== '' || filled($catalogContext['product_language'] ?? null)) {
                 $resolvedQueries = collect($catalogContext['resolved_queries'] ?? [])
                     ->filter(fn ($query): bool => is_string($query) && trim($query) !== '')
                     ->map(fn (string $query): string => trim($query))
@@ -254,6 +254,8 @@ class OpenAiSalesOrchestrator
                 $arguments = [
                     'query' => $resolvedQuery,
                     'category' => $resolvedCategory,
+                    'language' => $catalogContext['product_language'] ?? null,
+                    'match_scope' => $matchScope,
                     'max_price' => is_numeric(data_get($conversation->context, 'active_catalog_scope.max_price'))
                         ? (float) data_get($conversation->context, 'active_catalog_scope.max_price')
                         : null,
@@ -326,6 +328,8 @@ class OpenAiSalesOrchestrator
                         $arguments = [
                             'query' => $resolvedQuery,
                             'category' => $resolvedCategory,
+                            'language' => $alternateContext['product_language'] ?? null,
+                            'match_scope' => $matchScope,
                             'max_price' => null,
                             'exclude_product_ids' => $excludedIds->all(),
                             '_identity_match' => $matchScope === 'exact_identity',
@@ -355,6 +359,7 @@ class OpenAiSalesOrchestrator
                         ? (int) $catalogContext['referenced_product_id']
                         : null,
                     'resolved_category' => $resolvedCategory,
+                    'product_language' => $catalogContext['product_language'] ?? null,
                     'catalog_match_scope' => $matchScope,
                     'explicit_name_identity' => $explicitNameIdentity,
                     'exclude_product_ids' => $excludedIds->all(),
@@ -765,6 +770,7 @@ class OpenAiSalesOrchestrator
                     }
                     if ($toolName === 'search_products') {
                         $args['category'] = data_get($semanticResolution, 'result.resolved_category');
+                        $args['language'] = data_get($semanticResolution, 'result.product_language');
                         $args['match_scope'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity');
                         $args['_identity_match'] = data_get($semanticResolution, 'result.catalog_match_scope', 'exact_identity') === 'exact_identity';
                         $args['_entity_family_match'] = data_get($semanticResolution, 'result.catalog_match_scope') === 'entity_family';
@@ -2371,7 +2377,7 @@ class OpenAiSalesOrchestrator
         $hasBudgetRecommendationContext = $this->explicitBudgetConstraint($message) !== null
             || is_array(data_get($conversation->context, 'pending_budget_request'));
         $hasReadyKnowledge = $agent->knowledgeSources()
-            ->whereIn('source_scope', ['business', 'terms', 'delivery'])
+            ->whereIn('source_scope', ['business', 'terms', 'delivery', 'language'])
             ->where('status', 'ready')
             ->exists();
         if (! $force
@@ -2522,11 +2528,15 @@ class OpenAiSalesOrchestrator
                     'type' => ['string', 'null'],
                     'description' => 'For direct category browsing, the exact canonical value from the verified tenant category list; otherwise null.',
                 ],
+                'product_language' => [
+                    'type' => ['string', 'null'],
+                    'description' => 'The requested product edition/content language as a standard short language code (for example ru), or null. This is not the website interface language and not a word in a product title. Preserve it across follow-ups and corrections. If language alone is requested, use an empty resolved_query and resolved_queries; keep independent genre/category constraints separate. Never infer a product language from a translated website page.',
+                ],
                 'catalog_match_scope' => ['type' => 'string', 'enum' => ['exact_identity', 'entity_family']],
                 'exclude_product_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
                 'expects_complete_set' => ['type' => 'boolean'],
             ],
-            'required' => ['is_existing_order_request', 'existing_order_request_evidence', 'is_delivery_request', 'delivery_request_type', 'is_human_request', 'human_request_evidence', 'requested_discount_percent', 'discount_request_evidence', 'is_business_knowledge_request', 'knowledge_query', 'knowledge_scope', 'is_catalog_follow_up', 'catalog_scope_action', 'recommendation_scope', 'recommendation_query', 'recommendation_category', 'recommendation_occasion', 'resolved_query', 'resolved_queries', 'referenced_product_id', 'resolved_category', 'catalog_match_scope', 'exclude_product_ids', 'expects_complete_set'],
+            'required' => ['is_existing_order_request', 'existing_order_request_evidence', 'is_delivery_request', 'delivery_request_type', 'is_human_request', 'human_request_evidence', 'requested_discount_percent', 'discount_request_evidence', 'is_business_knowledge_request', 'knowledge_query', 'knowledge_scope', 'is_catalog_follow_up', 'catalog_scope_action', 'recommendation_scope', 'recommendation_query', 'recommendation_category', 'recommendation_occasion', 'resolved_query', 'resolved_queries', 'referenced_product_id', 'resolved_category', 'product_language', 'catalog_match_scope', 'exclude_product_ids', 'expects_complete_set'],
             'additionalProperties' => false,
         ]];
     }
@@ -2543,6 +2553,13 @@ class OpenAiSalesOrchestrator
         }
 
         $action = (string) ($resolved['catalog_scope_action'] ?? 'replace');
+        if ($action === 'continue'
+            && filled($resolved['product_language'] ?? null)
+            && ($scope['product_language'] ?? null) !== $resolved['product_language']) {
+            // A newly specified edition language refines the search even if
+            // the model calls a correction a continuation of the dialogue.
+            $action = 'refine';
+        }
         if ($action === 'continue') {
             if (($scope['tool'] ?? null) === 'recommend_products') {
                 $resolved['is_catalog_follow_up'] = false;
@@ -2559,7 +2576,7 @@ class OpenAiSalesOrchestrator
             }
 
             $query = trim((string) ($scope['query'] ?? $scope['category'] ?? ''));
-            if ($query === '') {
+            if ($query === '' && blank($scope['product_language'] ?? null)) {
                 return $resolved;
             }
 
@@ -2576,6 +2593,7 @@ class OpenAiSalesOrchestrator
                 ->values()
                 ->all();
             $resolved['resolved_category'] = $scope['category'] ?? null;
+            $resolved['product_language'] = $scope['product_language'] ?? null;
             $resolved['catalog_match_scope'] = (string) ($scope['catalog_match_scope'] ?? 'entity_family');
             $resolved['exclude_product_ids'] = $this->activeCatalogProductIds($conversation)->all();
 
@@ -2603,11 +2621,17 @@ class OpenAiSalesOrchestrator
         $resolved['recommendation_occasion'] = filled($resolved['recommendation_occasion'] ?? null)
             ? $resolved['recommendation_occasion']
             : ($scope['occasion'] ?? null);
-        if (($resolved['is_catalog_follow_up'] ?? false) === true && blank($resolved['resolved_query'] ?? null)) {
+        if (($resolved['is_catalog_follow_up'] ?? false) === true
+            && blank($resolved['resolved_query'] ?? null)
+            && (blank($resolved['product_language'] ?? null)
+                || ($scope['product_language'] ?? null) === $resolved['product_language'])) {
             $resolved['resolved_query'] = $scope['query'] ?? $scope['category'] ?? null;
         }
         if (($resolved['is_catalog_follow_up'] ?? false) === true && blank($resolved['resolved_category'] ?? null)) {
             $resolved['resolved_category'] = $scope['category'] ?? null;
+        }
+        if (blank($resolved['product_language'] ?? null)) {
+            $resolved['product_language'] = $scope['product_language'] ?? null;
         }
 
         return $resolved;
@@ -2682,7 +2706,7 @@ class OpenAiSalesOrchestrator
             $queries->push($query);
         }
         $category = filled($arguments['category'] ?? null) ? trim((string) $arguments['category']) : null;
-        if ($query === '' && $category === null) {
+        if ($query === '' && $category === null && blank($arguments['language'] ?? null)) {
             return;
         }
 
@@ -2693,6 +2717,7 @@ class OpenAiSalesOrchestrator
             'query' => $query,
             'queries' => $queries->all(),
             'category' => $category,
+            'product_language' => filled($arguments['language'] ?? null) ? (string) $arguments['language'] : null,
             'budget' => is_numeric($arguments['budget'] ?? null) ? (float) $arguments['budget'] : null,
             'quantity' => is_numeric($arguments['quantity'] ?? null) ? (int) $arguments['quantity'] : null,
             'max_price' => is_numeric($arguments['max_price'] ?? null) ? (float) $arguments['max_price'] : null,

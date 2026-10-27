@@ -944,6 +944,11 @@ class KnowledgeIngestionService
         $isbn = $this->catalogText($product['isbn'] ?? $product['isbn_13'] ?? $product['isbn_10'] ?? null, 32) ?: null;
         $category = $this->catalogText($product['category'] ?? null, 255) ?: null;
         $description = $this->catalogText($product['description'] ?? null, 4000) ?: null;
+        // A product's edition/content language is distinct from the locale of
+        // a translated catalog page. Only the primary product feed may assert it.
+        $productLanguage = $source->source_scope !== 'language'
+            ? $this->catalogText($product['product_language'] ?? $product['bookLanguage'] ?? $product['language'] ?? null, 32)
+            : '';
 
         return [
             'name' => $name,
@@ -973,6 +978,7 @@ class KnowledgeIngestionService
                 'isbn' => $isbn,
                 'attributes' => $attributes,
                 'currency' => $currency,
+                ...($productLanguage !== '' ? ['product_language' => Str::lower($productLanguage)] : []),
                 'original_price' => $originalPrice,
                 'discount_percent' => $originalPrice
                     ? round((1 - ($price / $originalPrice)) * 100, 1)

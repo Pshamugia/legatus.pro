@@ -21,31 +21,35 @@ class SalesToolboxHardeningTest extends TestCase
     public function test_catalog_language_is_a_tenant_scoped_filter_not_part_of_the_product_query(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
-        $product->update(['name' => 'A Russian novel', 'category' => 'Fiction', 'search_text' => 'A Russian novel Fiction']);
+        $product->update(['name' => 'A Russian novel', 'category' => 'Fiction', 'search_text' => 'A Russian novel Fiction',
+            'metadata' => ['product_language' => 'ru']]);
         $other = $agent->products()->create([
-            'name' => 'An English novel', 'category' => 'Fiction', 'search_text' => 'An English novel Fiction',
-            'price' => 20, 'stock' => 3, 'is_active' => true,
+            'name' => 'Russian Forest in translation', 'category' => 'Fiction',
+            'search_text' => 'Russian Forest in translation Fiction',
+            'price' => 20, 'stock' => 3, 'is_active' => true, 'metadata' => ['product_language' => 'ka'],
         ]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Russian',
             'name' => 'Russian catalog', 'url' => 'https://shop.example/?lang=ru',
             'status' => 'ready', 'progress' => 100, 'index_version' => 2, 'last_synced_at' => now(),
         ]);
-        $source->chunks()->create([
-            'agent_id' => $agent->id, 'kind' => 'product', 'title' => $product->name,
-            'content' => $product->name, 'content_hash' => hash('sha256', 'russian-language-product-'.$product->id),
-            'metadata' => ['product_id' => $product->id],
-        ]);
+        foreach ([$product, $other] as $sourceProduct) {
+            $source->chunks()->create([
+                'agent_id' => $agent->id, 'kind' => 'product', 'title' => $sourceProduct->name,
+                'content' => $sourceProduct->name, 'content_hash' => hash('sha256', 'russian-locale-product-'.$sourceProduct->id),
+                'metadata' => ['product_id' => $sourceProduct->id],
+            ]);
+        }
 
         $result = app(SalesToolbox::class)->execute('search_products', [
-            'query' => 'Fiction', 'category' => null, 'language' => 'Russian',
+            'query' => 'Fiction', 'category' => null, 'language' => 'ru',
             'match_scope' => 'entity_family', 'max_price' => null, 'exclude_product_ids' => [],
         ], $agent, $conversation);
         $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
         $this->assertNotContains($other->id, collect($result['products'])->pluck('id')->all());
 
         $browse = app(SalesToolbox::class)->execute('search_products', [
-            'query' => '', 'category' => null, 'language' => 'Russian',
+            'query' => '', 'category' => null, 'language' => 'ru',
             'match_scope' => 'entity_family', 'max_price' => null, 'exclude_product_ids' => [],
         ], $agent, $conversation);
         $this->assertSame([$product->id], collect($browse['products'])->pluck('id')->all());
