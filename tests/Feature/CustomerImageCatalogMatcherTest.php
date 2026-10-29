@@ -5,9 +5,11 @@ namespace Tests\Feature;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\CustomerImageCatalogMatcher;
+use App\Services\SalesToolbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
+use Mockery;
 use Tests\TestCase;
 
 class CustomerImageCatalogMatcherTest extends TestCase
@@ -313,8 +315,27 @@ class CustomerImageCatalogMatcherTest extends TestCase
 
         $this->assertSame('not_found', $result['status']);
         $this->assertSame([], $result['products']);
-        $this->assertStringContainsString('ზუსტი დამთხვევა ვერ ვიპოვე', $result['text']);
-        $this->assertStringContainsString('ვერ დაგიდასტურებთ', $result['text']);
+        $this->assertStringContainsString('ფოტოზე „არარსებული პროდუქტი“ წერია', $result['text']);
+        $this->assertStringContainsString('ამ სახელწოდების პროდუქტი ჩვენს კატალოგში არ გვაქვს', $result['text']);
+        $this->assertStringNotContainsString('ვერ დაგიდასტურებთ', $result['text']);
+        $this->assertNotContains('check_stock', collect($result['tools_used'])->pluck('name')->all());
+    }
+
+    public function test_failed_catalog_search_does_not_turn_a_readable_photo_into_a_false_absence_claim(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $this->fakeVision([$this->identity('Oak lounge chair')]);
+        $tools = Mockery::mock(SalesToolbox::class);
+        $tools->shouldReceive('execute')->with('search_products', Mockery::any(), $agent, $conversation)
+            ->andReturn(['ok' => false]);
+        $this->app->instance(SalesToolbox::class, $tools);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'Do you have this?',
+        );
+
+        $this->assertSame('uncertain', $result['status']);
+        $this->assertStringNotContainsString('do not have', $result['text']);
     }
 
     public function test_unique_exact_identifier_can_confirm_the_catalog_item_without_a_second_visual_guess(): void

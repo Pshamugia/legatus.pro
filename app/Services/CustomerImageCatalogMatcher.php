@@ -493,10 +493,16 @@ class CustomerImageCatalogMatcher
         if (($identity['identifying_text_readable'] ?? false) !== true || blank($identity['exact_name'] ?? null)) {
             return $this->uncertainResult($identity, $customerText, $conversation, $tools, $usage, $model);
         }
+
+        $searches = collect($tools)->where('name', 'search_products');
+        if ($searches->isEmpty() || $searches->contains(fn (array $tool): bool => data_get($tool, 'result.ok') !== true)) {
+            return $this->uncertainResult($identity, $customerText, $conversation, $tools, $usage, $model);
+        }
+
         $name = trim((string) $identity['exact_name']);
         $text = $this->isGeorgianConversation($customerText, $conversation)
-            ? "ფოტოზე „{$name}“ წავიკითხე, მაგრამ ჩვენს კატალოგსა და საიტის ძიებაში ზუსტი დამთხვევა ვერ ვიპოვე. ამიტომ ვერ დაგიდასტურებთ, რომ ეს პროდუქტი გვაქვს."
-            : "I could read “{$name}” in the photo, but I could not find an exact match in the catalog or the website search, so I cannot confirm that this product is available.";
+            ? "ფოტოზე „{$name}“ წერია. სამწუხაროდ, ამ სახელწოდების პროდუქტი ჩვენს კატალოგში არ გვაქვს."
+            : "The photo says “{$name}”. Unfortunately, we do not have a product under that name in our catalog.";
 
         return ['status' => 'not_found', 'text' => $text, 'product_ids' => [], 'products' => [], 'identity' => $identity, 'tools_used' => $tools, 'model' => $model, 'usage' => $usage];
     }
