@@ -61,6 +61,58 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertSame([], $unknown['products']);
     }
 
+    public function test_distinct_language_catalog_membership_fills_missing_product_language_without_treating_translations_as_editions(): void
+    {
+        [$agent, $english, $conversation] = $this->context(stock: 4);
+        $english->update(['metadata' => []]);
+        $georgian = $agent->products()->create([
+            'name' => 'A second edition', 'price' => 20, 'stock' => 2,
+            'is_active' => true, 'metadata' => [],
+        ]);
+        $shared = $agent->products()->create([
+            'name' => 'A translated listing', 'price' => 20, 'stock' => 2,
+            'is_active' => true, 'metadata' => [],
+        ]);
+        $explicitlyGeorgian = $agent->products()->create([
+            'name' => 'An edition with known language', 'price' => 20, 'stock' => 2,
+            'is_active' => true, 'metadata' => ['product_language' => 'ka'],
+        ]);
+        $englishSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
+            'name' => 'English catalog', 'url' => 'https://shop.example/?lang=en',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 0,
+        ]);
+        $georgianSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Georgian',
+            'name' => 'Georgian catalog', 'url' => 'https://shop.example/?lang=ka',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 2,
+        ]);
+        foreach ([[$englishSource, $english], [$englishSource, $shared], [$englishSource, $explicitlyGeorgian],
+            [$georgianSource, $georgian], [$georgianSource, $shared]] as [$source, $product]) {
+            $source->chunks()->create([
+                'agent_id' => $agent->id, 'kind' => 'product', 'title' => $product->name,
+                'content' => $product->name,
+                'content_hash' => hash('sha256', $source->id.'-'.$product->id),
+                'metadata' => ['product_id' => $product->id],
+            ]);
+        }
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => '', 'category' => null, 'language' => 'en',
+            'match_scope' => 'entity_family', 'max_price' => null, 'exclude_product_ids' => [],
+        ], $agent, $conversation);
+
+        $this->assertSame([$english->id], collect($result['products'])->pluck('id')->all());
+        $this->assertSame('en', $result['verified_language']);
+
+        $georgianResult = app(SalesToolbox::class)->execute('search_products', [
+            'query' => '', 'category' => null, 'language' => 'ka',
+            'match_scope' => 'entity_family', 'max_price' => null, 'exclude_product_ids' => [],
+        ], $agent, $conversation);
+        $this->assertContains($georgian->id, collect($georgianResult['products'])->pluck('id')->all());
+        $this->assertNotContains($shared->id, collect($georgianResult['products'])->pluck('id')->all());
+    }
+
     public function test_delivery_is_calculated_from_tenant_policy_and_server_time(): void
     {
         [$agent, , $conversation] = $this->context();

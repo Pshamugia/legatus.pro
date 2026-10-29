@@ -321,12 +321,52 @@ class SalesToolbox
         }
 
         $code = Str::lower(trim($requested));
+        $products = $agent->customerProducts()->where('is_active', true)->get(['id', 'metadata']);
+        $verified = $products->filter(fn ($product): bool => in_array($code, [
+            Str::lower(trim((string) data_get($product->metadata, 'product_language'))),
+            Str::lower(trim((string) data_get($product->metadata, 'language'))),
+        ], true))->pluck('id')->map(fn ($id): int => (int) $id);
 
-        return $agent->customerProducts()->where('is_active', true)
-            ->where(fn ($query) => $query->where('metadata->product_language', $code)
-                ->orWhere('metadata->language', $code))
-            ->pluck('products.id')
-            ->map(fn ($id): int => (int) $id)->values()->all();
+        // Some storefronts expose separate, language-filtered inventories but
+        // omit an edition language from individual product metadata. Use their
+        // indexed membership only when at least two configured language URLs
+        // have distinct locale codes and a product belongs to just one index.
+        // A translated full catalog appears in several indexes and must not
+        // become evidence that every edition exists in every language.
+        $sources = $agent->knowledgeSources()->where('source_scope', 'language')
+            ->where('status', 'ready')->get()
+            ->map(function ($source): array {
+                $query = [];
+                parse_str((string) parse_url((string) $source->url, PHP_URL_QUERY), $query);
+                $locale = $query['lang'] ?? $query['locale'] ?? null;
+
+                return [
+                    'code' => is_string($locale) ? Str::lower(trim($locale)) : null,
+                    'ids' => $this->mappedProductIds($source),
+                ];
+            })->filter(fn (array $source): bool => filled($source['code']));
+
+        if ($sources->pluck('code')->unique()->count() < 2) {
+            return $verified->unique()->values()->all();
+        }
+
+        $membership = [];
+        foreach ($sources as $source) {
+            foreach ($source['ids'] as $id) {
+                $membership[$id][$source['code']] = true;
+            }
+        }
+
+        $inferred = $products->filter(function ($product) use ($code, $membership): bool {
+            $explicit = collect([
+                data_get($product->metadata, 'product_language'),
+                data_get($product->metadata, 'language'),
+            ])->contains(fn ($value): bool => is_string($value) && trim($value) !== '');
+
+            return ! $explicit && array_keys($membership[$product->id] ?? []) === [$code];
+        })->pluck('id')->map(fn ($id): int => (int) $id);
+
+        return $verified->merge($inferred)->unique()->values()->all();
     }
 
     /**

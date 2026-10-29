@@ -3328,11 +3328,11 @@ class OpenAiOrchestrationTest extends TestCase
         $agent->products()->update(['is_active' => false]);
         $novel = $agent->products()->create([
             'name' => 'The River Novel', 'category' => 'Fiction', 'search_text' => 'The River Novel Fiction',
-            'price' => 20, 'stock' => 2, 'is_active' => true, 'metadata' => ['product_language' => 'ru'],
+            'price' => 20, 'stock' => 2, 'is_active' => true, 'metadata' => [],
         ]);
         $other = $agent->products()->create([
             'name' => 'The Mountain Novel', 'category' => 'Fiction', 'search_text' => 'The Mountain Novel Fiction',
-            'price' => 18, 'stock' => 2, 'is_active' => true, 'metadata' => ['product_language' => 'en'],
+            'price' => 18, 'stock' => 2, 'is_active' => true, 'metadata' => [],
         ]);
         $source = $agent->knowledgeSources()->create([
             'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Russian',
@@ -3343,6 +3343,16 @@ class OpenAiOrchestrationTest extends TestCase
             'agent_id' => $agent->id, 'kind' => 'product', 'title' => $novel->name,
             'content' => $novel->name, 'content_hash' => hash('sha256', 'orchestrated-russian-fiction-'.$novel->id),
             'metadata' => ['product_id' => $novel->id],
+        ]);
+        $englishSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
+            'name' => 'English catalog', 'url' => 'https://shop.example/?lang=en',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 2, 'last_synced_at' => now(),
+        ]);
+        $englishSource->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'product', 'title' => $other->name,
+            'content' => $other->name, 'content_hash' => hash('sha256', 'orchestrated-english-fiction-'.$other->id),
+            'metadata' => ['product_id' => $other->id],
         ]);
         config(['services.openai.key' => 'test-key']);
 
