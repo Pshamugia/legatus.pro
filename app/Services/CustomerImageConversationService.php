@@ -76,8 +76,8 @@ class CustomerImageConversationService
             $result = [
                 'status' => 'failed',
                 'text' => $georgian
-                    ? 'ფოტოს დამუშავება ამჯერად ვერ მოხერხდა. შეგიძლიათ მოგვიანებით ხელახლა სცადოთ ან პროდუქტის დასახელება ტექსტად მოგვწეროთ.'
-                    : 'I could not process the photo reliably this time. Please try again later or send the product name as text.',
+                    ? 'ბოდიში, ფოტო მივიღე, მაგრამ ტექნიკური შეფერხების გამო ვერ შევამოწმე. ეს არ ნიშნავს, რომ ფოტო ცუდად ჩანს. თუ დასახელებას მომწერთ, კატალოგში გადავამოწმებ.'
+                    : 'Sorry, I received the photo, but a technical issue prevented me from checking it. This does not mean the photo is unclear. If you send the product name, I can check the catalog.',
                 'products' => [],
                 'product_ids' => [],
                 'tools_used' => [],

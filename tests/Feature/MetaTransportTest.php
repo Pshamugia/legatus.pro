@@ -2168,8 +2168,37 @@ class MetaTransportTest extends TestCase
 
         $assistant = $connection->conversations()->sole()->messages()->where('role', 'assistant')->sole();
         $this->assertTrue((bool) data_get($assistant->metadata, 'image_recognition_failed'));
-        $this->assertStringContainsString('could not process the photo reliably', $assistant->content);
+        $this->assertStringContainsString('technical issue prevented me from checking it', $assistant->content);
+        $this->assertStringContainsString('pass the conversation to an operator', $assistant->content);
+        $this->assertSame('human', $assistant->conversation->fresh()->status);
         Http::assertSent(fn ($request): bool => str_contains((string) data_get($request->data(), 'fields'), 'attachments'));
+    }
+
+    public function test_punctuation_follow_up_to_an_older_failed_photo_is_answered_in_the_established_language_and_handed_off(): void
+    {
+        $connection = $this->connection('facebook', 'page-image-failure-follow-up');
+        $conversation = $connection->agent->conversations()->create([
+            'visitor_id' => 'meta:facebook:'.$connection->id.':image-failure-follow-up',
+            'channel' => 'facebook',
+            'status' => 'ai',
+        ]);
+        $conversation->messages()->create(['role' => 'customer', 'content' => '[Customer sent an image.]']);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'გაქვთ?']);
+        $conversation->messages()->create([
+            'role' => 'assistant',
+            'content' => 'ფოტოს შემოწმება ტექნიკური შეცდომის გამო ვერ შევძელი.',
+            'metadata' => ['image_recognition_failed' => true],
+        ]);
+
+        $reply = app(ConversationEngine::class)->handle(
+            $connection->agent, '??', 'facebook', 'meta:facebook:'.$connection->id.':image-failure-follow-up',
+        );
+
+        $this->assertTrue($reply['handoff']);
+        $this->assertStringContainsString('ჩვენი სისტემის', $reply['text']);
+        $this->assertStringContainsString('ოპერატორს', $reply['text']);
+        $this->assertStringNotContainsString('Please rephrase', $reply['text']);
+        $this->assertSame('human', $conversation->fresh()->status);
     }
 
     private function metaWebhook(string $body, string $signature)

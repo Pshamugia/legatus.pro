@@ -38,6 +38,10 @@ class SalesAgentService
             ];
         }
 
+        if ($conversation && ($imageFailureReply = $this->replyAfterImageFailure($agent, $conversation, $message))) {
+            return $imageFailureReply;
+        }
+
         if ($conversation && $interactionIntent === 'guided_recommendation') {
             return $this->guidedRecommendationClarification($agent, $conversation, $message);
         }
@@ -139,6 +143,42 @@ class SalesAgentService
             : [];
 
         return $reply + ['escalation_reason' => null, 'sources' => $sources, 'tools_used' => ['local_fallback']];
+    }
+
+    private function replyAfterImageFailure(Agent $agent, Conversation $conversation, string $message): ?array
+    {
+        if (preg_match('/^[\p{P}\p{S}\s]+$/u', $message) !== 1) {
+            return null;
+        }
+
+        $lastAssistant = $conversation->messages()->where('role', 'assistant')->latest('id')->first();
+        if (! (bool) data_get($lastAssistant?->metadata, 'image_recognition_failed')) {
+            return null;
+        }
+
+        $recentCustomerText = $conversation->messages()->where('role', 'customer')->latest('id')->limit(8)
+            ->pluck('content')->first(fn ($text): bool => is_string($text)
+                && ! str_starts_with($text, '[Customer sent an image')
+                && preg_match('/\p{L}/u', $text) === 1);
+        $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', (string) ($recentCustomerText ?: $lastAssistant->content)) === 1;
+        $handoff = $agent->humanHandoffEnabled();
+
+        return [
+            'text' => $georgian
+                ? ($handoff
+                    ? 'ბოდიში, პრობლემა ჩვენი სისტემის მხრიდანაა და არა დადასტურებულად ფოტოს ხარისხში. საუბარს ოპერატორს გადავცემ, რომ ფოტო და პროდუქტი გადაამოწმოს.'
+                    : 'ბოდიში, ჩვენი სისტემის ტექნიკური შეცდომის გამო ფოტო ვერ გადავამოწმე. ფოტოს ხარისხი მიზეზად არ დაგვიდგენია. თუ დასახელებას მომწერთ, კატალოგში შევამოწმებ.')
+                : ($handoff
+                    ? 'Sorry, our system could not check the photo; we have not established that its quality was the problem. I will pass this to an operator to check the photo and product.'
+                    : 'Sorry, a technical issue prevented our system from checking the photo. We have not established that its quality was the problem. If you send the product name, I can check the catalog.'),
+            'intent' => $handoff ? 'handoff' : 'conversation',
+            'confidence' => .8,
+            'handoff' => $handoff,
+            'escalation_reason' => $handoff ? 'The preceding customer photo could not be processed by the image recognition workflow.' : null,
+            'products' => [],
+            'sources' => [],
+            'tools_used' => ['image_failure_follow_up'],
+        ];
     }
 
     private function quotaExceeded(Agent $agent): bool

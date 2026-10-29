@@ -1624,7 +1624,7 @@ class OpenAiSalesOrchestrator
                 // Invalid model metadata is not a customer safety incident. Keep
                 // the conversation in AI mode instead of punishing the customer
                 // with an operator transfer for a malformed clarification draft.
-                $georgian = preg_match('/[\x{10A0}-\x{10FF}]/u', $message) === 1;
+                $georgian = $this->usesGeorgianForShortTurn($conversation, $message);
                 $wholesale = ($data['intent'] ?? null) === 'wholesale';
                 $data = [
                     'text' => $wholesale

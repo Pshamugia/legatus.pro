@@ -535,8 +535,8 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             $result = [
                 'status' => 'failed',
                 'text' => $georgian
-                    ? 'ფოტოს ამჯერად სანდოდ დამუშავება ვერ მოვახერხე. შეგიძლიათ ცოტა მოგვიანებით თავიდან გამოგზავნოთ ან პროდუქტის დასახელება ტექსტურად მომწეროთ.'
-                    : 'I could not process the photo reliably this time. Please try sending it again later or send the product name as text.',
+                    ? 'ბოდიში, ფოტო მივიღე, მაგრამ ტექნიკური შეფერხების გამო ვერ შევამოწმე. ეს არ ნიშნავს, რომ ფოტო ცუდად ჩანს.'
+                    : 'Sorry, I received the photo, but a technical issue prevented me from checking it. This does not mean the photo is unclear.',
                 'products' => [],
                 'product_ids' => [],
                 'tools_used' => [],
@@ -554,6 +554,20 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             $this->finishImageRecords($record, $imageRecord, 'human', []);
 
             return;
+        }
+
+        if ($result['status'] === 'failed' && $connection->agent->humanHandoffEnabled()) {
+            $conversation->update([
+                'status' => 'human',
+                'priority' => 'high',
+                'handoff_reason' => 'Image recognition failed: '.($result['error_code'] ?? 'image_recognition_unknown_failure'),
+                'handoff_summary' => 'The customer asked about a product photo. Technical image processing failed; no catalog or stock claim was verified. Review the photo in the channel inbox and answer the customer.',
+                'suggested_reply' => 'Review the customer photo and check the product in this business catalog before replying.',
+                'outcome' => 'human_handoff',
+            ]);
+            $result['text'] .= (preg_match('/[\x{10A0}-\x{10FF}]/u', (string) $result['text']) === 1)
+                ? ' საუბარს ოპერატორს გადავცემ, რომ გადაამოწმოს.'
+                : ' I will pass the conversation to an operator to check it.';
         }
 
         $assistant = $conversation->messages()->firstOrCreate(
