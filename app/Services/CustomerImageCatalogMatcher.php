@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Models\Agent;
 use App\Models\Conversation;
 use App\Models\Product;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
@@ -33,6 +35,28 @@ class CustomerImageCatalogMatcher
             $this->prepareImageBytes($bytes),
             $customerText,
         );
+    }
+
+    public static function failureCode(\Throwable $exception): string
+    {
+        if ($exception instanceof RequestException) {
+            return 'vision_http_'.$exception->response->status();
+        }
+        if ($exception instanceof ConnectionException) {
+            return 'vision_connection_failed';
+        }
+
+        return match ($exception->getMessage()) {
+            'The customer image URL is not an approved Meta media host.' => 'image_host_rejected',
+            'The customer image could not be downloaded from Meta.' => 'image_download_failed',
+            'The customer image is empty or too large.' => 'image_invalid_size',
+            'The customer attachment is not a supported image.' => 'image_unsupported_format',
+            'OpenAI image recognition is not configured.' => 'vision_not_configured',
+            'Vision returned an invalid product identity result.' => 'vision_identity_invalid_output',
+            'Vision returned an incomplete product identity result.' => 'vision_identity_incomplete',
+            'Vision returned an incomplete catalog comparison.' => 'vision_comparison_incomplete',
+            default => 'image_recognition_unknown_failure',
+        };
     }
 
     /** @param array{data_url: string, mime: string} $image @return array<string, mixed> */
@@ -95,6 +119,11 @@ class CustomerImageCatalogMatcher
         $matchedId = $match['id'] ?? null;
 
         if ($matchedId === null || ! $products->has($matchedId)) {
+            $namedResult = $this->namedCatalogResult($identity, $products, $agent, $conversation, $customerText, $toolCalls, $usage, $model);
+            if ($namedResult !== null) {
+                return $namedResult;
+            }
+
             return $this->uncertainResult($identity, $customerText, $conversation, $toolCalls, $usage, $model);
         }
 
@@ -190,8 +219,8 @@ class CustomerImageCatalogMatcher
 
         $response = $this->openAi()->post('/responses', [
             'model' => $model,
-            'reasoning' => ['effort' => 'medium'],
-            'max_output_tokens' => 600,
+            'reasoning' => ['effort' => 'low'],
+            'max_output_tokens' => 2000,
             'input' => [[
                 'role' => 'user',
                 'content' => [
@@ -202,6 +231,9 @@ class CustomerImageCatalogMatcher
             'text' => ['format' => $this->identityFormat()],
         ])->throw()->json();
         $this->addUsage($usage, $response);
+        if (($response['status'] ?? null) === 'incomplete') {
+            throw new \RuntimeException('Vision returned an incomplete product identity result.');
+        }
         $data = $this->structuredOutput($response);
         if (! is_array($data)) {
             throw new \RuntimeException('Vision returned an invalid product identity result.');
@@ -286,6 +318,77 @@ class CustomerImageCatalogMatcher
         return preg_replace('/\s+/u', ' ', Str::lower(trim($value))) ?? '';
     }
 
+    /**
+     * A readable name can establish catalog availability without proving that
+     * the photographed variant is the same one. Keep that distinction explicit.
+     *
+     * @param Collection<int, Product> $products
+     * @param array<string, int> $usage
+     * @return array<string, mixed>|null
+     */
+    private function namedCatalogResult(array $identity, Collection $products, Agent $agent, Conversation $conversation, string $customerText, array $toolCalls, array $usage, string $model): ?array
+    {
+        if (($identity['identifying_text_readable'] ?? false) !== true) {
+            return null;
+        }
+
+        $name = $this->normalizedTextIdentity((string) ($identity['exact_name'] ?? ''));
+        if (mb_strlen($name) < 5 || $name === $this->normalizedTextIdentity((string) ($identity['product_type'] ?? ''))
+            || $name === $this->normalizedTextIdentity((string) ($identity['category'] ?? ''))) {
+            return null;
+        }
+
+        $namedProducts = $products->filter(function (Product $product) use ($identity, $name): bool {
+            $catalogName = $this->normalizedTextIdentity((string) $product->name);
+            if (! preg_match('/(?<![\p{L}\p{N}])'.preg_quote($name, '/').'(?![\p{L}\p{N}])/u', $catalogName)) {
+                return false;
+            }
+
+            return $this->visibleIdentityFieldAgrees($product, $identity, 'creator', ['creator', 'author'])
+                && $this->visibleIdentityFieldAgrees($product, $identity, 'brand', ['brand', 'manufacturer'])
+                && $this->visibleIdentityFieldAgrees($product, $identity, 'model', ['model'])
+                && $this->visibleIdentityFieldAgrees($product, $identity, 'variant', ['variant', 'edition', 'size']);
+        });
+
+        $verified = collect();
+        foreach ($namedProducts as $product) {
+            $arguments = ['product_id' => $product->id, 'quantity' => 1];
+            $stock = $this->tools->execute('check_stock', $arguments, $agent, $conversation);
+            $toolCalls[] = ['name' => 'check_stock', 'arguments' => $arguments, 'result' => $stock];
+            if (($stock['ok'] ?? false) === true) {
+                $verified->push(['product' => $product, 'stock' => $stock]);
+            }
+        }
+
+        if ($verified->isEmpty()) {
+            return null;
+        }
+
+        $available = $verified->filter(fn (array $item): bool => (bool) ($item['stock']['available'] ?? false));
+        $shown = ($available->isNotEmpty() ? $available : $verified)->take(3);
+        $labels = $shown->map(fn (array $item): string => '“'.trim((string) $item['product']->name).'”')->implode(', ');
+        $georgian = $this->isGeorgianConversation($customerText, $conversation);
+        $text = $georgian
+            ? ($available->isNotEmpty()
+                ? "ფოტოზე „{$identity['exact_name']}“ წავიკითხე. ამ სახელწოდებით ჩვენს კატალოგში {$labels} ამჟამად ხელმისაწვდომია. ფოტოზე ზუსტად იგივე ვარიანტია თუ არა, ვერ დავადასტურე."
+                : "ფოტოზე „{$identity['exact_name']}“ წავიკითხე. ამ სახელწოდებით ჩვენს კატალოგში {$labels} მოვძებნე, მაგრამ ამჟამად მარაგში არ არის. ფოტოზე ზუსტად იგივე ვარიანტია თუ არა, ვერ დავადასტურე.")
+            : ($available->isNotEmpty()
+                ? "I read “{$identity['exact_name']}” in the photo. Our catalog lists {$labels} as currently available. I could not verify that the photographed variant is exactly the same."
+                : "I read “{$identity['exact_name']}” in the photo. I found {$labels} in our catalog, but it is currently sold out. I could not verify that the photographed variant is exactly the same.");
+
+        return [
+            'status' => $available->isNotEmpty() ? 'available' : 'unavailable',
+            'text' => $text,
+            'product_ids' => $shown->map(fn (array $item): int => (int) $item['product']->id)->all(),
+            'products' => $shown->map(fn (array $item): array => $this->publicProduct($item['product'], $item['stock']))->all(),
+            'identity' => $identity,
+            'match_type' => 'name_only',
+            'tools_used' => $toolCalls,
+            'model' => $model,
+            'usage' => $usage,
+        ];
+    }
+
     /** @param Collection<int, Product> $products @param array<string, int> $usage */
     private function verifyVisualIdentity(array $image, array $identity, Collection $products, string $model, array &$usage): ?array
     {
@@ -315,11 +418,14 @@ class CustomerImageCatalogMatcher
         $response = $this->openAi()->post('/responses', [
             'model' => $model,
             'reasoning' => ['effort' => 'low'],
-            'max_output_tokens' => 400,
+            'max_output_tokens' => 1000,
             'input' => [['role' => 'user', 'content' => $content]],
             'text' => ['format' => $this->verificationFormat()],
         ])->throw()->json();
         $this->addUsage($usage, $response);
+        if (($response['status'] ?? null) === 'incomplete') {
+            throw new \RuntimeException('Vision returned an incomplete catalog comparison.');
+        }
         $verification = $this->structuredOutput($response);
         $matchedId = is_numeric($verification['matched_product_id'] ?? null)
             ? (int) $verification['matched_product_id']

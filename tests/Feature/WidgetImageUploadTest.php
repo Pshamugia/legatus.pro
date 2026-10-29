@@ -85,6 +85,30 @@ class WidgetImageUploadTest extends TestCase
         $this->get(route('widget.frame', $agent))->assertOk()->assertDontSee('id="attach-image"', false);
     }
 
+    public function test_technical_vision_failure_records_a_safe_diagnostic_code_instead_of_a_catalog_miss(): void
+    {
+        $agent = Agent::create([
+            'name' => 'Shop Assistant', 'slug' => 'failing-photo-shop',
+            'business_name' => 'Photo Shop', 'channels' => ['web'], 'is_active' => true,
+        ]);
+        $matcher = Mockery::mock(CustomerImageCatalogMatcher::class);
+        $matcher->shouldReceive('resolveBytes')->once()
+            ->andThrow(new \RuntimeException('Vision returned an incomplete product identity result.'));
+        $this->app->instance(CustomerImageCatalogMatcher::class, $matcher);
+
+        $this->post(route('chat.image', $agent), [
+            'image' => $this->tinyPng(), 'message' => 'Do you have this product?',
+            'request_id' => (string) Str::uuid(), 'channel' => 'widget',
+        ], ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('intent', 'image_product_lookup')
+            ->assertJsonPath('products', []);
+
+        $this->assertDatabaseHas('agent_runs', [
+            'agent_id' => $agent->id, 'route' => 'image_catalog_match',
+            'status' => 'failed', 'error' => 'vision_identity_incomplete',
+        ]);
+    }
+
     private function tinyPng(): UploadedFile
     {
         $bytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);

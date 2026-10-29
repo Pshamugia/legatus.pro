@@ -542,6 +542,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 'tools_used' => [],
                 'model' => (string) config('services.openai.image_recognition_model', 'gpt-5.6-sol'),
                 'usage' => ['input_tokens' => 0, 'output_tokens' => 0, 'requests' => 0],
+                'error_code' => CustomerImageCatalogMatcher::failureCode($exception),
             ];
         }
 
@@ -584,6 +585,7 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
             'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
             'latency_ms' => (int) ((microtime(true) - $started) * 1000),
+            'error' => $result['status'] === 'failed' ? ($result['error_code'] ?? 'image_recognition_unknown_failure') : null,
         ]);
         $this->finishImageRecords($record, $imageRecord, (string) $result['status'], $productIds->all());
         $this->discloseAiIdentityOnFirstReply($assistant, $conversation, $connection->agent, $text);

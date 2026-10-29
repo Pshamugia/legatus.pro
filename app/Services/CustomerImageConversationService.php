@@ -83,7 +83,7 @@ class CustomerImageConversationService
                 'tools_used' => [],
                 'model' => (string) config('services.openai.image_recognition_model', 'gpt-5.6-sol'),
                 'usage' => ['input_tokens' => 0, 'output_tokens' => 0],
-                'error' => $exception->getMessage(),
+                'error_code' => CustomerImageCatalogMatcher::failureCode($exception),
             ];
         }
 
@@ -142,7 +142,7 @@ class CustomerImageConversationService
             'input_tokens' => (int) ($usage['input_tokens'] ?? 0),
             'output_tokens' => (int) ($usage['output_tokens'] ?? 0),
             'latency_ms' => (int) ((microtime(true) - $started) * 1000),
-            'error' => $status === 'failed' ? 'Image recognition failed.' : null,
+            'error' => $status === 'failed' ? ($result['error_code'] ?? 'image_recognition_unknown_failure') : null,
         ]);
 
         return $this->remember($customer, [

@@ -63,6 +63,9 @@ class CustomerImageCatalogMatcherTest extends TestCase
             ->filter(fn ($request): bool => str_ends_with($request->url(), '/responses'))->values();
         $this->assertCount(2, $openAiRequests);
         $this->assertSame('original', data_get($openAiRequests[0]->data(), 'input.0.content.1.detail'));
+        $this->assertSame('low', data_get($openAiRequests[0]->data(), 'reasoning.effort'));
+        $this->assertSame(2000, data_get($openAiRequests[0]->data(), 'max_output_tokens'));
+        $this->assertSame(1000, data_get($openAiRequests[1]->data(), 'max_output_tokens'));
         $this->assertStringStartsWith('data:image/', (string) data_get($openAiRequests[0]->data(), 'input.0.content.1.image_url'));
         $this->assertTrue(collect(data_get($openAiRequests[1]->data(), 'input.0.content', []))
             ->contains(fn ($item): bool => data_get($item, 'image_url') === $product->image));
@@ -70,6 +73,27 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'this is not an OCR-only task',
             (string) data_get($openAiRequests[0]->data(), 'input.0.content.0.text'),
         );
+    }
+
+    public function test_incomplete_vision_response_is_classified_without_exposing_provider_payload(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        config(['services.openai.key' => 'test-key']);
+        $image = UploadedFile::fake()->image('customer.jpg', 900, 1200);
+        $bytes = file_get_contents($image->getRealPath());
+        Http::fake(['https://api.openai.com/v1/responses' => Http::response([
+            'status' => 'incomplete',
+            'incomplete_details' => ['reason' => 'max_output_tokens'],
+            'output' => [],
+            'usage' => ['input_tokens' => 120, 'output_tokens' => 2000],
+        ])]);
+
+        try {
+            app(CustomerImageCatalogMatcher::class)->resolveBytes($agent, $conversation, $bytes, 'Do you have this?');
+            $this->fail('An incomplete vision response must not be treated as an unidentified product.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('vision_identity_incomplete', CustomerImageCatalogMatcher::failureCode($exception));
+        }
     }
 
     public function test_unique_visible_title_and_creator_confirm_catalog_identity_without_a_second_visual_call(): void
@@ -207,7 +231,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
         $this->assertSame('check_stock', collect($result['tools_used'])->last()['name']);
     }
 
-    public function test_similar_catalog_item_is_not_presented_when_visual_verifier_cannot_confirm_identity(): void
+    public function test_readable_name_reports_catalog_variants_without_claiming_visual_identity(): void
     {
         [$agent, $conversation] = $this->tenant();
         $agent->products()->create([
@@ -236,10 +260,43 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'ეს წიგნი გაქვთ?',
         );
 
-        $this->assertSame('uncertain', $result['status']);
-        $this->assertSame([], $result['products']);
-        $this->assertStringContainsString('ზუსტად ამ პროდუქტის ჩვენს კატალოგთან დამთხვევა ვერ დავადასტურე', $result['text']);
-        $this->assertStringNotContainsString('ხელმისაწვდომია', $result['text']);
+        $this->assertSame('available', $result['status']);
+        $this->assertSame('name_only', $result['match_type']);
+        $this->assertCount(2, $result['products']);
+        $this->assertStringContainsString('ამ სახელწოდებით ჩვენს კატალოგში', $result['text']);
+        $this->assertStringContainsString('ფოტოზე ზუსტად იგივე ვარიანტია თუ არა, ვერ დავადასტურე', $result['text']);
+        $this->assertCount(2, collect($result['tools_used'])->where('name', 'check_stock'));
+    }
+
+    public function test_partial_visible_name_can_report_sold_out_catalog_entry_after_visual_rejection(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'Poems. The Mountain',
+            'sku' => 'POEMS-1',
+            'category' => 'Books',
+            'search_text' => 'Poems The Mountain Alex Writer',
+            'price' => 15,
+            'stock' => 0,
+            'image' => 'https://catalog.example/poems.jpg',
+            'metadata' => ['author' => 'Alex Writer', 'product_url' => 'https://shop.example/poems'],
+            'is_active' => true,
+        ]);
+        $this->fakeVision([
+            $this->identity('The Mountain', 'Alex Writer'),
+            ['same_product' => false, 'similar_product' => false, 'matched_product_id' => null, 'reason' => 'Cover edition differs.'],
+        ]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'Do you have this?',
+        );
+
+        $this->assertSame('unavailable', $result['status']);
+        $this->assertSame('name_only', $result['match_type']);
+        $this->assertSame([$product->id], $result['product_ids']);
+        $this->assertStringContainsString('currently sold out', $result['text']);
+        $this->assertStringContainsString('could not verify that the photographed variant', $result['text']);
+        $this->assertSame('check_stock', collect($result['tools_used'])->last()['name']);
     }
 
     public function test_readable_photo_identity_with_no_catalog_match_returns_honest_not_found_answer(): void
