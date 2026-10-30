@@ -2425,6 +2425,99 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('could not find', $result['text']);
     }
 
+    public function test_deterministic_catalog_recovery_preserves_stock_confirmed_recommendation_shortlist(): void
+    {
+        $fallback = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'verifiedCatalogFallbackReply');
+        $result = $fallback->invoke(app(OpenAiSalesOrchestrator::class), 'Please suggest an adventure title', collect([
+            [
+                'name' => 'recommend_products',
+                'arguments' => ['query' => 'adventure', 'limit' => 2],
+                'result' => [
+                    'ok' => true,
+                    'result_scope' => 'shortlist',
+                    'returned_count' => 2,
+                    'has_more' => true,
+                    'recommendations' => [
+                        ['id' => 101, 'name' => 'Verified Adventure', 'available' => true],
+                        ['id' => 102, 'name' => 'Unverified Adventure', 'available' => true],
+                    ],
+                ],
+            ],
+            ['name' => 'check_stock', 'arguments' => ['product_id' => 101, 'quantity' => 1],
+                'result' => ['ok' => true, 'product_id' => 101, 'available' => true]],
+            ['name' => 'check_stock', 'arguments' => ['product_id' => 102, 'quantity' => 1],
+                'result' => ['ok' => true, 'product_id' => 102, 'available' => false]],
+        ]));
+
+        $this->assertSame('recommendation', $result['intent']);
+        $this->assertSame([101], $result['product_ids']);
+        $this->assertStringContainsString('Verified Adventure', $result['text']);
+        $this->assertStringNotContainsString('Unverified Adventure', $result['text']);
+    }
+
+    public function test_verified_recommendation_and_stock_checks_cannot_end_as_catalog_miss(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $product = $agent->products()->create([
+            'name' => 'Adventure Compass', 'sku' => 'ADVENTURE-COMPASS',
+            'category' => 'Adventure', 'search_text' => 'adventure compass',
+            'price' => 20, 'stock' => 4, 'is_active' => true,
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'verified-recommendation-miss', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        config(['services.openai.key' => 'test-key']);
+        $orchestrationCalls = 0;
+
+        Http::fake(function ($request) use (&$orchestrationCalls, $product) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                return Http::response($this->catalogContextResponse([], 'adventure-context'));
+            }
+            if (! str_ends_with($request->url(), '/responses')) {
+                return Http::response('<html><body>No results</body></html>');
+            }
+
+            $orchestrationCalls++;
+            if ($orchestrationCalls === 1) {
+                return Http::response(['id' => 'adventure-recommend', 'output' => [[
+                    'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'recommend-call',
+                    'arguments' => json_encode([
+                        'query' => 'Adventure', 'budget' => null, 'quantity' => null,
+                        'category' => null, 'mood' => null, 'occasion' => null,
+                        'limit' => 3, 'exclude_product_ids' => [],
+                    ]),
+                ]], 'usage' => []]);
+            }
+            if ($orchestrationCalls === 2) {
+                return Http::response(['id' => 'adventure-stock', 'output' => [[
+                    'type' => 'function_call', 'name' => 'check_stock', 'call_id' => 'stock-call',
+                    'arguments' => json_encode(['product_id' => $product->id, 'quantity' => 1]),
+                ]], 'usage' => []]);
+            }
+
+            return Http::response(['id' => 'adventure-false-miss', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I could not find a matching product.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'clarification_next_tool' => null,
+                    'clarification_missing_input' => null, 'product_ids' => [],
+                    'sources' => [], 'factual_claims' => [],
+                ])]],
+            ]], 'usage' => []]);
+        });
+
+        $reply = app(SalesAgentService::class)->reply($agent, 'Please suggest an adventure title', $conversation);
+
+        $this->assertSame('recommendation', $reply['intent']);
+        $this->assertSame([$product->id], $reply['products']->pluck('id')->all());
+        $this->assertStringContainsString($product->name, $reply['text']);
+        $this->assertStringNotContainsString('could not find', $reply['text']);
+    }
+
     public function test_empty_catalog_evidence_is_never_sent_to_a_model_for_naturalization(): void
     {
         $this->seed();

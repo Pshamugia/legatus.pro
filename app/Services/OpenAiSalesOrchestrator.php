@@ -1115,6 +1115,15 @@ class OpenAiSalesOrchestrator
         $fallbackRecommendations = $fallbackRecommendationCalls
             ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
             ->filter(fn ($product): bool => is_array($product) && (int) ($product['id'] ?? 0) > 0);
+        $confirmedRecommendations = $this->confirmedAvailableRecommendations($usedCollection);
+        if ($confirmedRecommendations->isNotEmpty()
+            && collect($data['product_ids'] ?? [])->isEmpty()
+            && in_array($data['intent'] ?? null, ['recommendation', 'discovery', 'clarification'], true)) {
+            // A completed shortlist plus positive stock checks cannot become
+            // a customer-facing catalog miss just because the final model
+            // draft ignored its own tool evidence.
+            $data = $this->verifiedRecommendationReply($message, $confirmedRecommendations);
+        }
         if (! $fallbackUsed
             && ($data['intent'] ?? null) === 'recommendation'
             && collect($data['product_ids'] ?? [])->isEmpty()
@@ -2211,10 +2220,15 @@ class OpenAiSalesOrchestrator
             }
         }
 
-        // A deterministic recovery may repeat verified exact-search evidence,
-        // but it must never turn ranked recommendation candidates into a
-        // customer-facing suggestion. Recommendations require a valid Luna
-        // answer that interprets the customer's topic and explains the fit.
+        // Preserve a recommendation only when the tenant-scoped shortlist has
+        // been independently confirmed by successful stock checks. A loose
+        // or unverified candidate is not evidence that the requested item is
+        // available; the exact sold-out branch above remains authoritative.
+        $confirmedRecommendations = $this->confirmedAvailableRecommendations($used);
+        if ($confirmedRecommendations->isNotEmpty()) {
+            return $this->verifiedRecommendationReply($customerMessage, $confirmedRecommendations);
+        }
+
         $products = $availableSearchProducts->take(5)->values();
         $georgian = (bool) preg_match('/[\x{10A0}-\x{10FF}]/u', $customerMessage);
 
@@ -2244,6 +2258,26 @@ class OpenAiSalesOrchestrator
                 'reference' => null,
             ])->all(),
         ];
+    }
+
+    private function confirmedAvailableRecommendations(Collection $used): Collection
+    {
+        $confirmedIds = $used->where('name', 'check_stock')
+            ->filter(fn (array $call): bool => data_get($call, 'result.ok') === true
+                && data_get($call, 'result.available') === true)
+            ->map(fn (array $call): int => (int) data_get($call, 'result.product_id'))
+            ->filter()->unique();
+
+        return $used->where('name', 'recommend_products')
+            ->filter(fn (array $call): bool => data_get($call, 'result.ok') === true
+                && data_get($call, 'result.result_scope') === 'shortlist')
+            ->flatMap(fn (array $call) => data_get($call, 'result.recommendations', []))
+            ->filter(fn ($product): bool => is_array($product)
+                && (int) ($product['id'] ?? 0) > 0
+                && ($product['available'] ?? false) === true
+                && $confirmedIds->contains((int) $product['id']))
+            ->unique(fn (array $product): int => (int) $product['id'])
+            ->values();
     }
 
     private function missingProductIdentityClarification(
