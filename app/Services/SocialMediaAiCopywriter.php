@@ -336,6 +336,17 @@ PROMPT;
             if (! is_string($fragment) || trim($fragment) === '' || ! str_contains($safeCaption, $fragment)) {
                 throw new \RuntimeException('AI Copywriter returned an invalid factual audit fragment.');
             }
+            // The audit may remove a whole sentence or line, never arbitrary
+            // bytes inside a title or another word. A model returning a short
+            // substring must fail closed rather than silently mutilating copy.
+            $units = array_merge(
+                preg_split('/\R/u', $safeCaption) ?: [],
+                preg_split('/(?<=[.!?])\s+|\R/u', $safeCaption) ?: [],
+            );
+            if (substr_count($safeCaption, $fragment) !== 1
+                || ! collect($units)->contains(fn (string $unit): bool => trim($unit) === trim($fragment))) {
+                throw new \RuntimeException('AI Copywriter factual audit fragment is not a complete sentence or line.');
+            }
             $safeCaption = str_replace($fragment, '', $safeCaption);
         }
         if (($audit['supported'] === true) !== ($audit['unsupported_fragments'] === [])) {
@@ -483,13 +494,28 @@ PROMPT;
             return $this->normalizeProtectedReference((string) $mention);
         })->filter();
 
-        foreach ($protected->map(fn ($reference): string => $this->normalizeProtectedReference((string) $reference))->filter()->unique() as $reference) {
-            if (Str::contains($normalizedCaption, $reference)) {
-                continue;
-            }
-
+        $normalizedProtected = $protected->map(fn ($reference): string => $this->normalizeProtectedReference((string) $reference))
+            ->filter()->unique();
+        foreach ($normalizedProtected as $reference) {
             $referenceWords = $this->words($reference);
             if (count($referenceWords) < 2) {
+                // Quoted single-word names can also be clipped (for example,
+                // a final syllable may disappear). Restrict this check to a
+                // substantial quoted prefix to avoid treating ordinary prose
+                // as a misspelled product reference.
+                if (count($referenceWords) === 1 && mb_strlen($reference) >= 5) {
+                    $abbreviation = $quotedMentions->first(fn (string $mention): bool => mb_strlen($mention) >= 4
+                        && $mention !== $reference
+                        && ! $normalizedProtected->contains($mention)
+                        && Str::startsWith($reference, $mention));
+                    if ($abbreviation !== null) {
+                        return 'The complete verified reference is "'.$reference.'".';
+                    }
+                }
+
+                continue;
+            }
+            if (Str::contains($normalizedCaption, $reference)) {
                 continue;
             }
             $prefixWordCount = count($referenceWords) >= 3 ? 2 : 1;

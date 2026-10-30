@@ -1952,6 +1952,39 @@ class SocialMediaSchedulerTest extends TestCase
         ));
     }
 
+    public function test_social_copy_detects_a_clipped_single_word_quoted_title(): void
+    {
+        $facts = [
+            'title' => ['label' => 'Title', 'value' => 'თეთრი ხომალდი'],
+            'description' => ['label' => 'Description', 'value' => 'წიგნში შესულია „ჯამილა“ და სხვა ნაწარმოებები.'],
+        ];
+        $check = new \ReflectionMethod(SocialMediaAiCopywriter::class, 'protectedReferenceFailure');
+        $copywriter = app(SocialMediaAiCopywriter::class);
+
+        $this->assertNotNull($check->invoke($copywriter, 'წაიკითხეთ „ჯამი“ და სხვა ნაწარმოებები.', $facts));
+        $this->assertNotNull($check->invoke($copywriter, 'წაიკითხეთ „ჯამილა“ და „ჯამი“.', $facts));
+        $this->assertNull($check->invoke($copywriter, 'წაიკითხეთ „ჯამილა“ და სხვა ნაწარმოებები.', $facts));
+    }
+
+    public function test_social_fact_audit_cannot_remove_letters_from_inside_a_title(): void
+    {
+        config()->set('services.openai.key', 'test-openai-key');
+        $post = new SocialMediaPost(['image_url' => null]);
+        $caption = 'წიგნში შესულია „ჯამილა“ და სხვა ნაწარმოებები.';
+        Http::fake(['https://api.openai.com/v1/responses' => Http::response([
+            'output' => [['content' => [['type' => 'output_text', 'text' => json_encode([
+                'supported' => false, 'unsupported_fragments' => ['ილა'],
+                'distinct_from_recent' => true, 'similarity_reason' => '',
+                'core_identity_preserved' => true, 'identity_reason' => '',
+            ], JSON_UNESCAPED_UNICODE)]]]],
+        ])]);
+
+        $sanitize = new \ReflectionMethod(SocialMediaAiCopywriter::class, 'sanitizeCaption');
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('not a complete sentence or line');
+        $sanitize->invoke(app(SocialMediaAiCopywriter::class), $post, $caption, [], [], 'test-model');
+    }
+
     public function test_ai_copywriter_rewrites_a_caption_that_obscures_a_verified_product_type(): void
     {
         [, $agent] = $this->tenant('poetry-identity-copy');
