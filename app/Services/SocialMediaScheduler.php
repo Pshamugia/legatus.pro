@@ -48,6 +48,7 @@ class SocialMediaScheduler
         $products = $allProducts
             ->reject(fn (array $variant): bool => isset($previouslyPosted[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => isset($usedProductIds[(int) $variant['product']->id]))
+            ->sort(fn (array $left, array $right): int => $this->compareProductRecency($left['product'], $right['product']))
             ->values();
         $starts = CarbonImmutable::parse($data['starts_on'], $data['timezone'])->startOfDay();
         $ends = CarbonImmutable::parse($data['ends_on'], $data['timezone'])->startOfDay();
@@ -262,12 +263,6 @@ class SocialMediaScheduler
             );
         }
 
-        if ($currentProductIsEligible && ! isset($excludedProductIds[(int) $product->id])) {
-            $this->refreshPendingProductFacts($pending, $product);
-
-            return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
-        }
-
         // Published and already-claimed products are globally unavailable for
         // replacement. Future scheduled products may be pulled forward; their
         // own slot will be revalidated in exactly the same way when it is due.
@@ -292,13 +287,35 @@ class SocialMediaScheduler
             ->reject(fn (array $variant): bool => isset($reservedProductIds[(int) $variant['product']->id]))
             ->reject(fn (array $variant): bool => isset($excludedProductIds[(int) $variant['product']->id]))
             ->unique(fn (array $variant): int => (int) $variant['product']->id)
-            ->sortByDesc(fn (array $variant): bool => $this->productHasSocialDescription(
-                $variant['product'],
-                $variant['language'],
-            ))
+            ->sort(fn (array $left, array $right): int => $this->compareProductRecency($left['product'], $right['product']))
             ->values();
         $providers = $pending->pluck('provider')->all();
-        $replacement = $allReplacements
+        $newerProduct = null;
+        // A schedule may have been created before new catalog items arrived.
+        // Let a newer, still-unused and live-available product take this slot;
+        // the old assignment remains eligible for a later slot.
+        if ($currentProductIsEligible && ! isset($excludedProductIds[(int) $product->id])) {
+            $newerProduct = $allReplacements
+                ->takeWhile(fn (array $variant): bool => $this->compareProductRecency($variant['product'], $product) < 0)
+                ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
+                    $schedule->agent,
+                    $variant['product'],
+                    $providers,
+                ))
+                ->first(function (array $variant) use ($schedule, $requiresDescription): bool {
+                    if ($requiresDescription && ! $this->productHasSocialDescription($variant['product'], $variant['language'])) {
+                        return false;
+                    }
+
+                    return $this->liveAvailabilityAllows($schedule->agent, $variant['product']);
+                });
+            if (! $newerProduct) {
+                $this->refreshPendingProductFacts($pending, $product);
+
+                return $pending->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            }
+        }
+        $replacement = $newerProduct ?: $allReplacements
             ->reject(fn (array $variant): bool => $this->publicationHistory->wasUsedOnAny(
                 $schedule->agent,
                 $variant['product'],
@@ -681,5 +698,13 @@ class SocialMediaScheduler
         $description = trim(preg_replace('/\s+/u', ' ', strip_tags((string) $product->socialDescription($language))) ?? '');
 
         return mb_strlen($description) >= 20;
+    }
+
+    private function compareProductRecency(Product $left, Product $right): int
+    {
+        // created_at records when this tenant's catalog first gained the
+        // product; updated_at changes on every sync and is not an addition.
+        return ($right->created_at?->getTimestamp() ?? 0) <=> ($left->created_at?->getTimestamp() ?? 0)
+            ?: (int) $right->id <=> (int) $left->id;
     }
 }

@@ -214,6 +214,119 @@ class SocialMediaSchedulerTest extends TestCase
         ));
     }
 
+    public function test_new_schedules_prioritize_recently_added_products_without_promoting_resynced_old_products(): void
+    {
+        [$user, $agent] = $this->tenant('new-product-priority');
+        $this->connections($agent);
+        $old = $agent->products()->create($this->product('Older Product', 'General', 2));
+        $old->update(['created_at' => now()->subDays(10)]);
+        $recent = $agent->products()->create($this->product('Recently Added Product', 'General', 2));
+        $recent->update(['created_at' => now()->subDay()]);
+        $old->update(['description' => 'Refreshed during the latest catalog sync.']);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 2,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $slots = $agent->socialMediaPosts()->orderBy('scheduled_for')->get()->groupBy(
+            fn ($post): string => $post->scheduled_for->toIso8601String(),
+        )->values();
+        $this->assertCount(2, $slots);
+        $this->assertSame([$recent->id], $slots[0]->pluck('product_id')->unique()->values()->all());
+        $this->assertSame([$old->id], $slots[1]->pluck('product_id')->unique()->values()->all());
+    }
+
+    public function test_existing_schedule_pulls_a_new_catalog_product_forward_and_keeps_older_products_for_later(): void
+    {
+        [$user, $agent] = $this->tenant('future-slot-new-product');
+        $this->connections($agent);
+        $older = $agent->products()->create($this->product('Older Product One', 'General', 2));
+        $older->update(['created_at' => now()->subDays(10)]);
+        $other = $agent->products()->create($this->product('Older Product Two', 'General', 2));
+        $other->update(['created_at' => now()->subDays(9)]);
+
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 3,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $slots = $schedule->posts()->orderBy('scheduled_for')->get()->groupBy(
+            fn ($post): string => $post->scheduled_for->toIso8601String(),
+        )->values();
+        $this->assertSame([$other->id], $slots[0]->pluck('product_id')->unique()->values()->all());
+        $new = $agent->products()->create($this->product('Just Added Product', 'General', 2));
+        Http::fake(function ($request) use ($new, $older, $other) {
+            foreach ([$new, $older, $other] as $product) {
+                $url = data_get($product->metadata, 'product_url');
+                if ($request->url() === $url) {
+                    return Http::response($this->storefrontCard($product->name, $url, true), 200, ['Content-Type' => 'text/html']);
+                }
+            }
+
+            return Http::response('image', 200, ['Content-Type' => 'image/jpeg']);
+        });
+
+        $firstIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $slots[0][0]->scheduled_for);
+        $this->assertCount(2, $firstIds);
+        $this->assertSame([$new->id], $slots[0]->map(fn ($post) => $post->fresh()->product_id)->unique()->values()->all());
+
+        // Once the new product has been consumed, the old assignment remains
+        // available for a later publishing slot.
+        $slots[0]->each->update(['status' => 'published']);
+        $secondIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $slots[1][0]->scheduled_for);
+        $this->assertCount(2, $secondIds);
+        $this->assertSame([$other->id], $slots[1]->map(fn ($post) => $post->fresh()->product_id)->unique()->values()->all());
+        $slots[1]->each->update(['status' => 'published']);
+        $thirdIds = app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $slots[2][0]->scheduled_for);
+        $this->assertCount(2, $thirdIds);
+        $this->assertSame([$older->id], $slots[2]->map(fn ($post) => $post->fresh()->product_id)->unique()->values()->all());
+    }
+
+    public function test_newly_added_but_sold_out_product_does_not_displace_an_available_assignment(): void
+    {
+        [$user, $agent] = $this->tenant('new-product-live-stock');
+        $this->connections($agent);
+        $old = $agent->products()->create($this->product('Available Older Product', 'General', 2));
+        $old->update(['metadata' => array_replace($old->metadata, [
+            'product_url' => 'https://example.com/products/available-older-product',
+        ])]);
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(),
+            'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1,
+            'providers' => ['facebook', 'instagram'],
+            'timezone' => 'Asia/Tbilisi',
+        ])->assertSessionHasNoErrors();
+        $schedule = $agent->socialMediaSchedules()->firstOrFail();
+        $new = $agent->products()->create($this->product('Newly Sold Out Product', 'General', 2));
+        $new->update(['metadata' => array_replace($new->metadata, [
+            'product_url' => 'https://example.com/products/newly-sold-out-product',
+        ])]);
+        Http::fake(function ($request) use ($old, $new) {
+            foreach ([$old, $new] as $product) {
+                $url = data_get($product->metadata, 'product_url');
+                if ($request->url() === $url) {
+                    return Http::response($this->storefrontCard($product->name, $url, $product->id === $old->id), 200, ['Content-Type' => 'text/html']);
+                }
+            }
+
+            return Http::response('image', 200, ['Content-Type' => 'image/jpeg']);
+        });
+
+        $slot = $schedule->posts()->firstOrFail()->scheduled_for;
+        $this->assertCount(2, app(SocialMediaScheduler::class)->prepareDueSlot($schedule->fresh('agent'), $slot));
+        $this->assertSame([$old->id], $schedule->posts()->pluck('product_id')->unique()->values()->all());
+        $this->assertSame(0, $new->fresh()->stock);
+    }
+
     public function test_one_schedule_keeps_future_slots_after_every_unused_product_has_been_reserved(): void
     {
         [$user, $agent] = $this->tenant('single-schedule-no-repeat');
@@ -3012,6 +3125,7 @@ class SocialMediaSchedulerTest extends TestCase
         [, $agent] = $this->tenant('preflight-ai-slot');
         $rejected = $agent->products()->create($this->product('Rejected AI Product', 'General', 2));
         $replacement = $agent->products()->create($this->product('Prepared Replacement', 'General', 2));
+        $replacement->update(['created_at' => now()->subDay()]);
         $schedule = $this->replacementSchedule($agent, ['facebook', 'instagram', 'threads']);
         $schedule->update(['copy_mode' => 'ai', 'ai_tone' => 'simple']);
         $dueAt = now('UTC')->subMinute();
