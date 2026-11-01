@@ -88,6 +88,44 @@ class SuperAdminController extends Controller
             $usageRows->filter(fn ($row) => Carbon::parse($row->created_at)->greaterThanOrEqualTo($todayStart)),
             $costEstimator,
         );
+        $aiMonthlyHistory = [];
+        for ($monthsAgo = 1; $monthsAgo <= 12; $monthsAgo++) {
+            $month = $monthStart->copy()->subMonthsNoOverflow($monthsAgo);
+            $aiMonthlyHistory[$month->format('Y-m')] = [
+                'label' => $month->format('F Y'),
+                'usd' => 0.0,
+                'unpriced_models' => [],
+            ];
+        }
+        foreach (DB::table('agent_runs')
+            ->join('agents', 'agents.id', '=', 'agent_runs.agent_id')
+            ->join('organizations', 'organizations.id', '=', 'agents.organization_id')
+            ->whereNull('organizations.settings->system_fixture')
+            ->where(function ($query): void {
+                $query->whereNull('agents.settings->assistant_mode')
+                    ->orWhere('agents.settings->assistant_mode', '!=', 'platform_support');
+            })
+            ->where('agent_runs.provider', 'openai')
+            ->where('agent_runs.created_at', '>=', $monthStart->copy()->subMonthsNoOverflow(12))
+            ->where('agent_runs.created_at', '<', $monthStart)
+            ->where(function ($query): void {
+                $query->where('agent_runs.input_tokens', '>', 0)
+                    ->orWhere('agent_runs.output_tokens', '>', 0);
+            })
+            ->select('agent_runs.model', 'agent_runs.input_tokens', 'agent_runs.output_tokens', 'agent_runs.model_usage', 'agent_runs.created_at')
+            ->orderBy('agent_runs.id')
+            ->cursor() as $row) {
+            $month = Carbon::parse($row->created_at)->format('Y-m');
+            if (! isset($aiMonthlyHistory[$month])) {
+                continue;
+            }
+            $estimate = $costEstimator->estimate($row);
+            $aiMonthlyHistory[$month]['usd'] += $estimate['usd'];
+            $aiMonthlyHistory[$month]['unpriced_models'] = array_values(array_unique(array_merge(
+                $aiMonthlyHistory[$month]['unpriced_models'], $estimate['unpriced_models'],
+            )));
+        }
+        $aiMonthlyHistory = array_values($aiMonthlyHistory);
 
         $currentSubscriptions = PaddleSubscription::where('environment', $environment)
             ->whereHas('organization', fn ($query) => $query->customerBusiness())
@@ -130,7 +168,7 @@ class SuperAdminController extends Controller
 
         return view('super-admin.index', compact(
             'organizations', 'metrics', 'runway', 'reliabilityStatuses', 'platformHealth',
-            'openHealthIncidents', 'resolvedHealthIncidents', 'environment', 'search',
+            'openHealthIncidents', 'resolvedHealthIncidents', 'environment', 'search', 'aiMonthlyHistory',
         ));
     }
 

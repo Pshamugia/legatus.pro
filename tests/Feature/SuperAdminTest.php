@@ -173,6 +173,51 @@ class SuperAdminTest extends TestCase
             ->assertSee('No business is automatically blocked by this dashboard.');
     }
 
+    public function test_super_admin_can_expand_the_previous_twelve_months_of_ai_spend(): void
+    {
+        config(['openai_costs.models' => [
+            'history-model' => ['input' => 1.00, 'cached_input' => 1.00, 'cache_write' => 1.00, 'output' => 1.00],
+        ]]);
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        $organization = Organization::create(['name' => 'History Store', 'slug' => 'history-store']);
+        $agent = $organization->agents()->create([
+            'name' => 'History Assistant', 'slug' => 'history-assistant',
+            'business_name' => 'History Store', 'channels' => ['web'], 'settings' => [],
+        ]);
+        $previousMonth = now()->startOfMonth()->subMonthNoOverflow()->addDay();
+        AgentRun::create([
+            'agent_id' => $agent->id, 'provider' => 'openai', 'model' => 'history-model',
+            'status' => 'completed', 'route' => 'primary', 'input_tokens' => 1_000_000,
+            'output_tokens' => 0, 'created_at' => $previousMonth,
+        ]);
+        AgentRun::create([
+            'agent_id' => $agent->id, 'provider' => 'openai', 'model' => 'history-model',
+            'status' => 'completed', 'route' => 'primary', 'input_tokens' => 2_000_000,
+            'output_tokens' => 0,
+        ]);
+        $supportAgent = $organization->agents()->create([
+            'name' => 'Internal Support', 'slug' => 'history-support',
+            'business_name' => 'Internal Support', 'channels' => ['web'],
+            'settings' => ['assistant_mode' => 'platform_support'],
+        ]);
+        AgentRun::create([
+            'agent_id' => $supportAgent->id, 'provider' => 'openai', 'model' => 'history-model',
+            'status' => 'completed', 'route' => 'primary', 'input_tokens' => 10_000_000,
+            'output_tokens' => 0, 'created_at' => $previousMonth,
+        ]);
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Estimated AI spend · current month')
+            ->assertSee('Previous 12 months')
+            ->assertSee('<details class="ai-history">', false)
+            ->assertSee($previousMonth->format('F Y'))
+            ->assertViewHas('metrics', fn (array $metrics): bool => $metrics['ai_month_usd'] === 2.0)
+            ->assertViewHas('aiMonthlyHistory', fn (array $history): bool => count($history) === 12
+                && $history[0]['usd'] === 1.0
+                && $history[1]['usd'] === 0.0);
+    }
+
     public function test_super_admin_can_grant_and_revoke_complimentary_business_access(): void
     {
         config([
