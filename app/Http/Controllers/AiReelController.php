@@ -70,7 +70,7 @@ class AiReelController extends Controller
 
         return response()->json(['max_reels' => collect([5, 10, 15])->mapWithKeys(
             fn ($duration) => [$duration => $capacity->maxReels($duration)]
-        )]);
+        )])->header('Cache-Control', 'private, no-store');
     }
 
     public function music(string $trackId, TenantContext $tenant, ReelMusicService $music)

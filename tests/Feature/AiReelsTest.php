@@ -64,9 +64,9 @@ class AiReelsTest extends TestCase
             ->assertSee('Epic &amp; powerful — Heroic Adventure', false)
             ->assertSee('World &amp; acoustic — Shenzhen Nightlife', false)
             ->assertSee('Minimum 5 seconds · Maximum 15 seconds')
-            ->assertSee('15 seconds — 3 credits')
+            ->assertSee('15 seconds — checking availability')
             ->assertSee('Each business has its own Reel credit balance')
-            ->assertSee('This business')
+            ->assertSee('Saved Reel credits')
             ->assertSee('Minimum 10')
             ->assertSee('Schedule Facebook')
             ->assertSee('Instagram Reels')
@@ -82,6 +82,10 @@ class AiReelsTest extends TestCase
         $this->assertStringContainsString('https://cdn.paddle.com', (string) $response->headers->get('Content-Security-Policy'));
         $this->assertStringContainsString('.form-submit>span{', $response->getContent());
         $this->assertStringNotContainsString('.form-submit span{', $response->getContent());
+        $this->assertStringContainsString('id="custom-reel-duration" name="duration_seconds" required disabled', $response->getContent());
+        $this->assertStringContainsString('id="schedule-reel-duration" name="duration_seconds" required disabled', $response->getContent());
+        $this->assertMatchesRegularExpression('/id="generate-reel-preview"[^>]* disabled>/', $response->getContent());
+        $this->assertStringNotContainsString('15 seconds — 3 credits', $response->getContent());
     }
 
     public function test_provider_shortage_blocks_reel_before_customer_credits_are_debited(): void
@@ -95,7 +99,11 @@ class AiReelsTest extends TestCase
         $this->app->instance(ReelGenerationCapacity::class, new ReelGenerationCapacity($runway));
 
         $this->actingAs($user)->getJson(route('ai-reels.capacity'))
-            ->assertOk()->assertJsonPath('max_reels.15', 0);
+            ->assertOk()
+            ->assertHeader('Cache-Control', 'no-store, private')
+            ->assertJsonPath('max_reels.5', 0)
+            ->assertJsonPath('max_reels.10', 0)
+            ->assertJsonPath('max_reels.15', 0);
         $this->actingAs($user)->from(route('ai-reels.index'))->post(route('ai-reels.custom.store'), [
             'prompt' => 'A cinematic product video with a gentle camera movement.',
             'duration_seconds' => 15,
