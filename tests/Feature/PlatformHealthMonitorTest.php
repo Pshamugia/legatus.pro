@@ -7,6 +7,7 @@ use App\Notifications\PlatformHealthDigest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Tests\TestCase;
@@ -21,6 +22,60 @@ class PlatformHealthMonitorTest extends TestCase
         config(['legatus.super_admin_email' => 'operator@example.com']);
         Notification::fake();
         Cache::clear();
+    }
+
+    public function test_runway_balance_alerts_before_and_after_exhaustion_without_duplicate_email(): void
+    {
+        $this->seed();
+        config(['services.runway.key' => 'runway-test-key']);
+        $agent = Agent::firstOrFail();
+        $agent->organization->reelCreditLedger()->create([
+            'amount' => 9,
+            'type' => 'purchase',
+            'reference' => 'paddle:runway-monitor-test',
+        ]);
+        Http::fake(['https://api.dev.runwayml.com/v1/organization' => Http::sequence()
+            ->push(['creditBalance' => 42])
+            ->push(['creditBalance' => 42])
+            ->push(['creditBalance' => 120])
+            ->push(['creditBalance' => 1000])]);
+
+        $this->artisan('legatus:monitor-platform-health')->assertSuccessful();
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'runway.generation_exhausted', 'severity' => 'critical', 'status' => 'open',
+        ]);
+        Notification::assertSentOnDemandTimes(PlatformHealthDigest::class, 1);
+
+        $this->artisan('legatus:monitor-platform-health')->assertSuccessful();
+        Notification::assertSentOnDemandTimes(PlatformHealthDigest::class, 1);
+
+        $this->artisan('legatus:monitor-platform-health')->assertSuccessful();
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'runway.balance_low', 'severity' => 'warning', 'status' => 'open',
+        ]);
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'runway.generation_exhausted', 'status' => 'resolved',
+        ]);
+        Notification::assertSentOnDemandTimes(PlatformHealthDigest::class, 2);
+
+        $this->artisan('legatus:monitor-platform-health')->assertSuccessful();
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'runway.balance_low', 'status' => 'resolved',
+        ]);
+        Notification::assertSentOnDemandTimes(PlatformHealthDigest::class, 3);
+    }
+
+    public function test_runway_balance_check_failure_is_not_reported_as_healthy(): void
+    {
+        $this->seed();
+        config(['services.runway.key' => 'runway-test-key']);
+        Http::fake(['https://api.dev.runwayml.com/v1/organization' => Http::response(['error' => 'unavailable'], 503)]);
+
+        $this->artisan('legatus:monitor-platform-health')->assertSuccessful();
+
+        $this->assertDatabaseHas('platform_health_incidents', [
+            'incident_key' => 'runway.balance_unavailable', 'severity' => 'error', 'status' => 'open',
+        ]);
     }
 
     public function test_monitor_opens_deduplicates_and_resolves_operational_incidents_in_one_digest(): void

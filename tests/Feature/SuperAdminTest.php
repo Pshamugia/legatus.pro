@@ -261,6 +261,29 @@ class SuperAdminTest extends TestCase
             ->assertSee('Unavailable');
     }
 
+    public function test_super_admin_sees_immediate_critical_runway_warning_with_the_real_balance(): void
+    {
+        config(['services.runway.key' => 'runway-test-key']);
+        Http::fake([
+            'https://api.dev.runwayml.com/v1/organization' => Http::response(['creditBalance' => 42]),
+        ]);
+        $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);
+        $organization = Organization::create(['name' => 'Reel Store', 'slug' => 'reel-store-alert']);
+        $organization->reelCreditLedger()->create([
+            'amount' => 9,
+            'type' => 'purchase',
+            'reference' => 'paddle:test-runway-low-balance',
+        ]);
+
+        $this->actingAs($admin)->get(route('super-admin.index'))
+            ->assertOk()
+            ->assertSee('Runway cannot generate any Reel')
+            ->assertSee('42 credits remain')
+            ->assertSee('585')
+            ->assertSee('Legatus Runway Dev project')
+            ->assertSee('Runway balance');
+    }
+
     public function test_only_super_admin_can_read_isolated_legatus_support_conversations(): void
     {
         $admin = User::factory()->create(['email' => 'pshamugia@gmail.com']);

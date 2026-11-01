@@ -111,7 +111,7 @@ class SuperAdminController extends Controller
             'business_reel_credits' => max(0, (int) DB::table('reel_credit_ledger')->sum('amount')),
         ];
 
-        $runway = $this->runwaySummary($runwayClient);
+        $runway = $this->runwaySummary($runwayClient, $metrics['business_reel_credits']);
         $reliabilityStatuses = collect(['contract', 'live'])
             ->mapWithKeys(fn (string $mode): array => [$mode => Cache::get('legatus:reliability:last:'.$mode)])
             ->filter(fn ($status): bool => is_array($status));
@@ -245,7 +245,7 @@ class SuperAdminController extends Controller
     /**
      * @return array{status: string, credits: int|null, usd: float|null, product_reels: int|null, custom_reels: int|null, checked_at: Carbon|null}
      */
-    private function runwaySummary(RunwayClient $client): array
+    private function runwaySummary(RunwayClient $client, int $businessReelCredits): array
     {
         $empty = [
             'status' => blank(config('services.runway.key')) ? 'not_configured' : 'unavailable',
@@ -254,6 +254,8 @@ class SuperAdminController extends Controller
             'product_reels' => null,
             'custom_reels' => null,
             'checked_at' => null,
+            'health' => 'unavailable',
+            'backing_required' => null,
         ];
 
         if ($empty['status'] === 'not_configured') {
@@ -266,9 +268,15 @@ class SuperAdminController extends Controller
                 'organization' => $client->organization(),
                 'checked_at' => now()->toIso8601String(),
             ]);
-            $credits = max(0, (int) data_get($cached, 'organization.creditBalance', 0));
+            $balance = data_get($cached, 'organization.creditBalance');
+            if (! is_numeric($balance)) {
+                return $empty;
+            }
+            $credits = max(0, (int) $balance);
             $duration = 5;
             $multiShotRate = max(0, (int) config('services.runway.multi_shot_credit_rate_per_second', 13));
+            $minimum = $multiShotRate * $duration;
+            $backingRequired = max($minimum * 3, $businessReelCredits * $minimum);
 
             return [
                 'status' => 'available',
@@ -277,6 +285,8 @@ class SuperAdminController extends Controller
                 'product_reels' => $multiShotRate > 0 ? intdiv($credits, $multiShotRate * $duration) : null,
                 'custom_reels' => $multiShotRate > 0 ? intdiv($credits, $multiShotRate * $duration) : null,
                 'checked_at' => Carbon::parse((string) $cached['checked_at']),
+                'health' => $minimum === 0 ? 'unavailable' : ($credits < $minimum ? 'critical' : ($credits < $backingRequired ? 'warning' : 'healthy')),
+                'backing_required' => $backingRequired,
             ];
         } catch (\Throwable) {
             return $empty;

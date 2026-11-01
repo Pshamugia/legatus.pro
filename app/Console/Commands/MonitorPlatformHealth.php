@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\KnowledgeSource;
 use App\Models\SocialMediaPost;
 use App\Services\PlatformHealthIncidentService;
+use App\Services\RunwayClient;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -16,7 +17,7 @@ class MonitorPlatformHealth extends Command
 
     protected $description = 'Record and notify platform-wide operational health incidents';
 
-    public function handle(PlatformHealthIncidentService $incidents): int
+    public function handle(PlatformHealthIncidentService $incidents, RunwayClient $runway): int
     {
         if (! Schema::hasTable('platform_health_incidents')
             || ! Schema::hasTable('platform_health_monitor_states')) {
@@ -38,11 +39,67 @@ class MonitorPlatformHealth extends Command
             'queue' => $this->queueObservations($monitoringStartedAt),
             'meta_publishing' => $this->metaPublishingObservations($monitoringStartedAt),
             'catalog_sync' => $this->catalogSyncObservations($monitoringStartedAt),
+            'runway' => $this->runwayObservations($runway),
         ]);
 
         $this->info('Platform health state synchronized.');
 
         return self::SUCCESS;
+    }
+
+    private function runwayObservations(RunwayClient $runway): array
+    {
+        if (blank(config('services.runway.key'))) {
+            return [];
+        }
+
+        try {
+            $balance = $runway->organization()['creditBalance'] ?? null;
+            if (! is_numeric($balance)) {
+                throw new \RuntimeException('Runway did not return a credit balance.');
+            }
+            $credits = max(0, (int) $balance);
+        } catch (\Throwable) {
+            return [[
+                'key' => 'runway.balance_unavailable',
+                'severity' => 'error',
+                'title' => 'Runway balance could not be checked',
+                'summary' => 'Check the Runway Dev project and its API connection. Reel generation availability cannot be confirmed.',
+            ]];
+        }
+
+        $perReelCredit = max(0, (int) config('services.runway.multi_shot_credit_rate_per_second', 13)) * 5;
+        if ($perReelCredit === 0) {
+            return [];
+        }
+        $outstanding = Schema::hasTable('reel_credit_ledger')
+            ? max(0, (int) DB::table('reel_credit_ledger')->sum('amount')) : 0;
+        $backingRequired = $outstanding * $perReelCredit;
+        $minimumForFiveSeconds = $perReelCredit;
+        $minimumForFifteenSeconds = $perReelCredit * 3;
+
+        if ($credits < $minimumForFiveSeconds) {
+            return [[
+                'key' => 'runway.generation_exhausted',
+                'severity' => 'critical',
+                'title' => 'Runway cannot generate any Reel',
+                'summary' => "{$credits} Runway credits remain; a 5-second Reel needs {$minimumForFiveSeconds}. Add credits to the Legatus Runway Dev project.",
+                'context' => ['credits' => $credits, 'minimum' => $minimumForFiveSeconds],
+            ]];
+        }
+
+        $required = max($minimumForFifteenSeconds, $backingRequired);
+        if ($credits < $required) {
+            return [[
+                'key' => 'runway.balance_low',
+                'severity' => 'warning',
+                'title' => 'Runway Reel capacity is running low',
+                'summary' => "{$credits} Runway credits remain; {$required} are needed to cover a 15-second Reel and the {$outstanding} unused business Reel credits.",
+                'context' => ['credits' => $credits, 'required' => $required, 'business_reel_credits' => $outstanding],
+            ]];
+        }
+
+        return [];
     }
 
     private function queueObservations(mixed $monitoringStartedAt): array
