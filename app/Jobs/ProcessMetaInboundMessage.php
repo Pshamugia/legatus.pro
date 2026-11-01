@@ -556,12 +556,17 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        if ($result['status'] === 'failed' && $connection->agent->humanHandoffEnabled()) {
+        if (in_array($result['status'], ['failed', 'uncertain'], true) && $connection->agent->humanHandoffEnabled()) {
+            $failed = $result['status'] === 'failed';
             $conversation->update([
                 'status' => 'human',
                 'priority' => 'high',
-                'handoff_reason' => 'Image recognition failed: '.($result['error_code'] ?? 'image_recognition_unknown_failure'),
-                'handoff_summary' => 'The customer asked about a product photo. Technical image processing failed; no catalog or stock claim was verified. Review the photo in the channel inbox and answer the customer.',
+                'handoff_reason' => $failed
+                    ? 'Image recognition failed: '.($result['error_code'] ?? 'image_recognition_unknown_failure')
+                    : 'Product photo could not be reliably matched to this business catalog.',
+                'handoff_summary' => $failed
+                    ? 'The customer asked about a product photo. Technical image processing failed; no catalog or stock claim was verified. Review the photo in the channel inbox and answer the customer.'
+                    : 'The customer asked about a product photo. The image lookup could not verify product identity or inventory. Review the photo and business catalog before answering.',
                 'suggested_reply' => 'Review the customer photo and check the product in this business catalog before replying.',
                 'outcome' => 'human_handoff',
             ]);

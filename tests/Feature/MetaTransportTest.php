@@ -1154,6 +1154,35 @@ class MetaTransportTest extends TestCase
         $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
     }
 
+    public function test_uncertain_social_photo_lookup_is_handed_to_an_operator_instead_of_denied(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-image-uncertain');
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound', 'provider_message_id' => 'image-uncertain-mid',
+            'provider_sender_id' => 'image-uncertain-customer', 'provider_recipient_id' => 'page-image-uncertain',
+            'message_type' => 'attachment', 'status' => 'received',
+            'payload' => ['text' => 'ეს წიგნი გაქვთ?', 'attachments' => [[
+                'type' => 'image', 'url' => 'https://scontent.xx.fbcdn.net/product.jpg',
+            ]]], 'received_at' => now(),
+        ]);
+        $matcher = \Mockery::mock(CustomerImageCatalogMatcher::class);
+        $matcher->shouldReceive('resolve')->once()->andReturn([
+            'status' => 'uncertain', 'text' => 'ფოტო მივიღე, მაგრამ კატალოგთან ვერ დავადასტურე.',
+            'products' => [], 'product_ids' => [], 'tools_used' => [], 'model' => 'test-vision',
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5, 'requests' => 1],
+        ]);
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            app(ConversationEngine::class), app(ChannelMessageDispatcher::class), $matcher,
+        );
+
+        $conversation = $connection->conversations()->sole();
+        $this->assertSame('human', $conversation->status);
+        $this->assertStringContainsString('ოპერატორს გადავცემ', $conversation->messages()->where('role', 'assistant')->sole()->content);
+        $this->assertSame('uncertain', data_get($inbound->fresh()->payload, 'image_recognition_status'));
+    }
+
     public function test_attachment_only_and_ungrounded_postback_events_are_preserved_without_pausing_ai(): void
     {
         Queue::fake();
@@ -1370,10 +1399,11 @@ class MetaTransportTest extends TestCase
         $this->assertCount(1, $assistantMessages);
         $this->assertTrue($assistantMessages->every(
             fn ($message): bool => data_get($message->metadata, 'image_recognition_status') === 'uncertain'
-                && str_contains($message->content, 'could not read the product name clearly')
+                && str_contains($message->content, 'could not reliably match the product to our catalog')
                 && Str::isUuid($message->request_id)
                 && strlen($message->request_id) === 36,
         ));
+        $this->assertSame('human', $conversation->status);
         $allReplies = $assistantMessages->pluck('content')->implode(' ');
         $this->assertStringNotContainsString('exact product was not found', $allReplies);
         $this->assertStringNotContainsString('similar alternatives', $allReplies);

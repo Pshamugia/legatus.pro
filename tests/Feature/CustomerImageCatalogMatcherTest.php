@@ -59,7 +59,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
         $this->assertSame([$product->id], $result['product_ids']);
         $this->assertStringContainsString('ზუსტად ეს პროდუქტი გადავამოწმე', $result['text']);
         $this->assertStringContainsString('ხელმისაწვდომია', $result['text']);
-        $this->assertSame(['search_products', 'search_products', 'check_stock'], collect($result['tools_used'])->pluck('name')->all());
+        $this->assertSame(['search_products', 'search_products', 'search_products', 'check_stock'], collect($result['tools_used'])->pluck('name')->all());
 
         $openAiRequests = collect(Http::recorded())->map(fn ($pair) => $pair[0])
             ->filter(fn ($request): bool => str_ends_with($request->url(), '/responses'))->values();
@@ -170,8 +170,8 @@ class CustomerImageCatalogMatcherTest extends TestCase
             $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', '[Customer sent an image.]',
         );
 
-        $this->assertSame('not_found', $result['status']);
-        $this->assertStringContainsString('ფოტოზე', $result['text']);
+        $this->assertSame('uncertain', $result['status']);
+        $this->assertStringContainsString('ფოტო მივიღე', $result['text']);
         $this->assertStringNotContainsString('I could read', $result['text']);
     }
 
@@ -187,7 +187,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
         );
 
         $this->assertSame('uncertain', $result['status']);
-        $this->assertStringContainsString('სავარაუდოდ „სავარაუდო სათაური“', $result['text']);
+        $this->assertStringNotContainsString('სავარაუდო სათაური', $result['text']);
         $this->assertStringNotContainsString('ვერ დაგიდასტურებთ, რომ ეს პროდუქტი გვაქვს', $result['text']);
     }
 
@@ -301,7 +301,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
         $this->assertSame('check_stock', collect($result['tools_used'])->last()['name']);
     }
 
-    public function test_readable_photo_identity_with_no_catalog_match_returns_honest_not_found_answer(): void
+    public function test_readable_photo_identity_with_no_catalog_match_never_claims_the_product_is_absent(): void
     {
         [$agent, $conversation] = $this->tenant();
         $this->fakeVision([$this->identity('არარსებული პროდუქტი', 'უცნობი ავტორი')]);
@@ -313,11 +313,10 @@ class CustomerImageCatalogMatcherTest extends TestCase
             'ეს გაქვთ?',
         );
 
-        $this->assertSame('not_found', $result['status']);
+        $this->assertSame('uncertain', $result['status']);
         $this->assertSame([], $result['products']);
-        $this->assertStringContainsString('ფოტოზე „არარსებული პროდუქტი“ წერია', $result['text']);
-        $this->assertStringContainsString('ამ სახელწოდების პროდუქტი ჩვენს კატალოგში არ გვაქვს', $result['text']);
-        $this->assertStringNotContainsString('ვერ დაგიდასტურებთ', $result['text']);
+        $this->assertStringContainsString('ეს არ ნიშნავს, რომ არ გვაქვს', $result['text']);
+        $this->assertStringNotContainsString('არარსებული პროდუქტი', $result['text']);
         $this->assertNotContains('check_stock', collect($result['tools_used'])->pluck('name')->all());
     }
 
@@ -336,6 +335,117 @@ class CustomerImageCatalogMatcherTest extends TestCase
 
         $this->assertSame('uncertain', $result['status']);
         $this->assertStringNotContainsString('do not have', $result['text']);
+    }
+
+    public function test_foreign_cover_title_can_retrieve_a_localized_catalog_item_by_visible_creator_then_visual_match(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'არტისტული ყვავილები', 'sku' => 'POETRY-1', 'category' => 'პოეზია',
+            'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე', 'price' => 14, 'stock' => 25,
+            'image' => 'https://catalog.example/poetry.jpg',
+            'metadata' => ['author' => 'გალაკტიონ ტაბიძე', 'product_url' => 'https://shop.example/poetry/1'],
+            'is_active' => true,
+        ]);
+        $this->fakeVision([
+            $this->identity('CRÂNE AUX FLEURS ARTISTIQUES', 'გალაკტიონ ტაბიძე'),
+            ['same_product' => true, 'matched_product_id' => $product->id, 'reason' => 'The cover and creator match.'],
+        ]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'ეს წიგნი გაქვთ?',
+        );
+
+        $this->assertSame('available', $result['status']);
+        $this->assertSame([$product->id], $result['product_ids']);
+        $this->assertTrue(collect($result['tools_used'])->contains(fn (array $tool): bool => ($tool['name'] ?? null) === 'search_products'
+            && data_get($tool, 'arguments.query') === 'გალაკტიონ ტაბიძე'
+            && data_get($tool, 'arguments._entity_family_match') === true));
+        $this->assertSame('check_stock', collect($result['tools_used'])->last()['name']);
+    }
+
+    public function test_foreign_cover_title_can_use_a_translated_search_hint_only_after_visual_verification(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'არტისტული ყვავილები', 'sku' => 'POETRY-2', 'category' => 'პოეზია',
+            'search_text' => 'არტისტული ყვავილები', 'price' => 14, 'stock' => 25,
+            'image' => 'https://catalog.example/poetry-2.jpg',
+            'metadata' => ['product_url' => 'https://shop.example/poetry/2'], 'is_active' => true,
+        ]);
+        $identity = $this->identity('FLEURS ARTISTIQUES');
+        $identity['catalog_search_queries'] = ['არტისტული ყვავილები'];
+        $this->fakeVision([
+            $identity,
+            ['same_product' => true, 'matched_product_id' => $product->id, 'reason' => 'The cover agrees.'],
+        ]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'ეს წიგნი გაქვთ?',
+        );
+
+        $this->assertSame('available', $result['status']);
+        $this->assertTrue(collect($result['tools_used'])->contains(fn (array $tool): bool => ($tool['name'] ?? null) === 'search_products'
+            && data_get($tool, 'arguments.query') === 'არტისტული ყვავილები'
+            && data_get($tool, 'arguments._identity_match') === false));
+    }
+
+    public function test_recent_tenant_photos_can_recover_a_match_when_ocr_has_no_catalog_search_hit(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $product = $agent->products()->create([
+            'name' => 'ლოკალიზებული დასახელება', 'sku' => 'LOCAL-1', 'category' => 'წიგნები',
+            'search_text' => 'ლოკალიზებული დასახელება', 'price' => 14, 'stock' => 7,
+            'image' => 'https://catalog.example/recent-cover.jpg',
+            'metadata' => ['product_url' => 'https://shop.example/recent/1'], 'is_active' => true,
+        ]);
+        $otherOrganization = Organization::create(['name' => 'Other shop', 'slug' => 'other-shop']);
+        $otherAgent = $otherOrganization->agents()->create([
+            'name' => 'Other Assistant', 'slug' => 'other-photo-agent', 'business_name' => 'Other shop',
+            'channels' => ['facebook'], 'settings' => [], 'is_active' => true,
+        ]);
+        $other = $otherAgent->products()->create([
+            'name' => 'Unrelated shop item', 'sku' => 'OTHER-1', 'category' => 'Books',
+            'search_text' => 'Unrelated shop item', 'price' => 9, 'stock' => 2,
+            'image' => 'https://catalog.example/other-cover.jpg',
+            'metadata' => ['product_url' => 'https://other.example/item/1'], 'is_active' => true,
+        ]);
+        $this->fakeVision([
+            $this->identity('FLEURS ARTISTIQUES'),
+            ['same_product' => true, 'matched_product_id' => $product->id, 'reason' => 'The visible cover agrees.'],
+        ]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'ეს წიგნი გაქვთ?',
+        );
+
+        $this->assertSame('available', $result['status']);
+        $this->assertSame([$product->id], $result['product_ids']);
+        $this->assertSame([$product->id], collect($result['tools_used'])->firstWhere('name', 'recent_visual_candidates')['result']['product_ids']);
+        $comparison = collect(Http::recorded())->map(fn ($pair) => $pair[0])
+            ->filter(fn ($request): bool => str_ends_with($request->url(), '/responses'))->last();
+        $images = collect(data_get($comparison->data(), 'input.0.content', []))->pluck('image_url');
+        $this->assertContains($product->image, $images);
+        $this->assertNotContains($other->image, $images);
+    }
+
+    public function test_multiple_visible_products_are_never_concatenated_into_a_fake_catalog_title(): void
+    {
+        [$agent, $conversation] = $this->tenant();
+        $identity = $this->identity('The Maze Runner; The Hunger Games');
+        // Even if Vision forgets the multi-product flag, a concatenated title
+        // must not become one invented catalog identity.
+        $identity['multiple_products_visible'] = false;
+        $this->fakeVision([$identity]);
+
+        $result = app(CustomerImageCatalogMatcher::class)->resolve(
+            $agent, $conversation, 'https://scontent.xx.fbcdn.net/customer-photo.jpg', 'რომელიმე გაქვთ?',
+        );
+
+        $this->assertSame('uncertain', $result['status']);
+        $this->assertStringContainsString('რამდენიმე პროდუქტია', $result['text']);
+        $this->assertStringNotContainsString('The Maze Runner', $result['text']);
+        $this->assertSame([], $result['tools_used']);
     }
 
     public function test_unique_exact_identifier_can_confirm_the_catalog_item_without_a_second_visual_guess(): void
@@ -413,6 +523,7 @@ class CustomerImageCatalogMatcherTest extends TestCase
     {
         return [
             'image_is_product' => true,
+            'multiple_products_visible' => false,
             'identifying_text_readable' => true,
             'exact_name' => $name,
             'creator' => $creator,

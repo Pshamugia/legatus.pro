@@ -109,6 +109,32 @@ class WidgetImageUploadTest extends TestCase
         ]);
     }
 
+    public function test_unverified_image_lookup_hands_the_customer_to_an_operator_without_an_absence_claim(): void
+    {
+        $agent = Agent::create([
+            'name' => 'Shop Assistant', 'slug' => 'uncertain-photo-shop',
+            'business_name' => 'Photo Shop', 'channels' => ['web'], 'is_active' => true,
+        ]);
+        $matcher = Mockery::mock(CustomerImageCatalogMatcher::class);
+        $matcher->shouldReceive('resolveBytes')->once()->andReturn([
+            'status' => 'uncertain', 'text' => 'ფოტო მივიღე, მაგრამ კატალოგთან ვერ დავადასტურე.',
+            'product_ids' => [], 'products' => [], 'tools_used' => [], 'model' => 'vision-test-model',
+            'usage' => ['input_tokens' => 12, 'output_tokens' => 4],
+        ]);
+        $this->app->instance(CustomerImageCatalogMatcher::class, $matcher);
+
+        $this->post(route('chat.image', $agent), [
+            'image' => $this->tinyPng(), 'message' => 'ეს გაქვთ?',
+            'request_id' => (string) Str::uuid(), 'channel' => 'widget',
+        ], ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('handoff', true)
+            ->assertJsonPath('products', []);
+
+        $conversation = $agent->conversations()->sole();
+        $this->assertSame('human', $conversation->status);
+        $this->assertStringContainsString('ოპერატორს გადავცემ', $conversation->messages()->where('role', 'assistant')->sole()->content);
+    }
+
     private function tinyPng(): UploadedFile
     {
         $bytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', true);

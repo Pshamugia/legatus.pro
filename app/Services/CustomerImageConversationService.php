@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Agent;
 use App\Models\AgentRun;
-use App\Models\Conversation;
 use App\Models\Message;
 use App\Support\PrivacyRedactor;
 
@@ -104,6 +103,22 @@ class CustomerImageConversationService
         }
 
         $status = (string) ($result['status'] ?? 'failed');
+        $handoff = in_array($status, ['failed', 'uncertain'], true) && $agent->humanHandoffEnabled();
+        if ($handoff) {
+            $conversation->update([
+                'status' => 'human',
+                'priority' => 'high',
+                'handoff_reason' => $status === 'failed'
+                    ? 'Image recognition failed: '.($result['error_code'] ?? 'image_recognition_unknown_failure')
+                    : 'Product photo could not be reliably matched to this business catalog.',
+                'handoff_summary' => 'Review the customer photo and verify the product against this business catalog before answering.',
+                'suggested_reply' => 'Check the photographed product and its live stock before replying to the customer.',
+                'outcome' => 'human_handoff',
+            ]);
+            $result['text'] .= preg_match('/[\x{10A0}-\x{10FF}]/u', (string) $result['text']) === 1
+                ? ' საუბარს ოპერატორს გადავცემ, რომ გადაამოწმოს.'
+                : ' I will pass the conversation to an operator to check it.';
+        }
         $confidence = in_array($status, ['available', 'unavailable', 'not_found'], true) ? 1.0 : .8;
         $toolNames = collect($result['tools_used'] ?? [])->pluck('name')->filter()->unique()->values()->all();
         $assistant = $conversation->messages()->create([
@@ -117,6 +132,7 @@ class CustomerImageConversationService
                 'image_recognition_status' => $status,
                 'image_recognition_model' => $result['model'] ?? null,
                 'image_recognition_failed' => $status === 'failed',
+                'handoff' => $handoff,
                 'request_id' => $requestId,
             ],
         ]);
@@ -149,7 +165,7 @@ class CustomerImageConversationService
             'text' => $assistant->content,
             'intent' => 'image_product_lookup',
             'confidence' => $confidence,
-            'handoff' => false,
+            'handoff' => $handoff,
             'products' => $result['products'] ?? [],
             'sources' => [],
             'tools_used' => $toolNames,
