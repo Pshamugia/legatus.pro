@@ -13,6 +13,7 @@ class AiReel extends Model
 
     protected $casts = [
         'providers' => 'array',
+        'reference_image_paths' => 'array',
         'duration_seconds' => 'integer',
         'credit_cost' => 'integer',
         'video_duration_ms' => 'integer',

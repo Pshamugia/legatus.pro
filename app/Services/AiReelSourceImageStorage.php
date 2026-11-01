@@ -97,8 +97,35 @@ class AiReelSourceImageStorage
 
     public function delete(AiReel $reel): void
     {
-        if (filled($reel->source_image_path)) {
-            Storage::disk('local')->delete($reel->source_image_path);
+        Storage::disk('local')->delete(array_values(array_filter([
+            $reel->source_image_path,
+            ...($reel->reference_image_paths ?? []),
+        ])));
+    }
+
+    public function prepareReferenceForRunway(string $path): string
+    {
+        $input = Storage::disk('local')->get($path);
+        $source = @imagecreatefromstring($input);
+        throw_unless($source, new \RuntimeException('A Reel reference image could not be read.'));
+
+        try {
+            $width = imagesx($source);
+            $height = imagesy($source);
+            $scale = min(1280 / max(1, $width), 1280 / max(1, $height));
+            $targetWidth = max(1, (int) round($width * $scale));
+            $targetHeight = max(1, (int) round($height * $scale));
+            $canvas = imagecreatetruecolor($targetWidth, $targetHeight);
+            imagecopyresampled($canvas, $source, 0, 0, 0, 0, $targetWidth, $targetHeight, $width, $height);
+            ob_start();
+            imagejpeg($canvas, null, 88);
+            $contents = (string) ob_get_clean();
+            imagedestroy($canvas);
+            throw_if($contents === '' || strlen($contents) > 3_500_000, new \RuntimeException('A Reel reference image is too large for Runway.'));
+
+            return 'data:image/jpeg;base64,'.base64_encode($contents);
+        } finally {
+            imagedestroy($source);
         }
     }
 

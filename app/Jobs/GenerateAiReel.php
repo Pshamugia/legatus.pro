@@ -78,7 +78,14 @@ class GenerateAiReel implements ShouldBeUnique, ShouldQueue
                 return;
             }
             $sourceImageUrl = $images->prepareForRunway($reel);
-            $taskId = $runway->create($copy['prompt'], $sourceImageUrl, (int) $reel->duration_seconds);
+            $referencePaths = $reel->reference_image_paths ?? [];
+            if ($referencePaths !== []) {
+                throw_if(blank($sourceImageUrl), new \RuntimeException('The Reel opening image is missing.'));
+                $references = array_map(fn (string $path): string => $images->prepareReferenceForRunway($path), $referencePaths);
+                $taskId = $runway->createWithReferences($copy['prompt'], $sourceImageUrl, $references, (int) $reel->duration_seconds, (string) $reel->user_prompt);
+            } else {
+                $taskId = $runway->create($copy['prompt'], $sourceImageUrl, (int) $reel->duration_seconds);
+            }
             $reel->update(['runway_task_id' => $taskId]);
             $reel->refresh();
             if ($reel->status === 'canceling') {

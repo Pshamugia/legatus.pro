@@ -132,6 +132,8 @@ class AiReelController extends Controller
             'duration_seconds' => ['required', 'integer', Rule::in([5, 10, 15])],
             'music_track' => ['required', 'string', Rule::in([ReelMusicService::NO_MUSIC, ...array_keys(config('reel_music.tracks', []))])],
             'source_image' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:min_width=640,min_height=640,max_width=8000,max_height=8000'],
+            'reference_images' => ['nullable', 'array', 'max:5'],
+            'reference_images.*' => ['file', 'mimes:jpg,jpeg,png,webp', 'max:10240', 'dimensions:min_width=640,min_height=640,max_width=8000,max_height=8000'],
             'providers' => ['required', 'array', 'min:1'], 'providers.*' => [Rule::in(['facebook', 'instagram'])],
         ]);
         $data['caption'] = filled($data['caption'] ?? null)
@@ -146,20 +148,38 @@ class AiReelController extends Controller
         $product = filled($data['reference_url'] ?? null)
             ? $agent->customerProducts()->where('is_active', true)->get()->first(fn ($candidate) => $candidate->matchesPublicProductUrl($data['reference_url']))
             : null;
-        $uploadedImage = $request->file('source_image');
-        if ($uploadedImage) {
+        $uploadedImages = $request->file('reference_images') ?? [];
+        $legacyImage = $request->file('source_image');
+        if ($uploadedImages !== [] && $legacyImage) {
+            throw ValidationException::withMessages(['reference_images' => 'Choose images through one upload field.']);
+        }
+        foreach (array_filter([$legacyImage, ...$uploadedImages]) as $uploadedImage) {
             $dimensions = @getimagesize($uploadedImage->getRealPath());
             $ratio = $dimensions ? $dimensions[0] / max(1, $dimensions[1]) : 0;
             if ($ratio < 0.5 || $ratio > 2) {
                 throw ValidationException::withMessages([
-                    'source_image' => 'The Reel image width-to-height ratio must be between 1:2 and 2:1.',
+                    $uploadedImage === $legacyImage ? 'source_image' : 'reference_images' => 'Each Reel image width-to-height ratio must be between 1:2 and 2:1.',
                 ]);
             }
         }
-        $storedImage = $uploadedImage ? $images->store($uploadedImage) : null;
+        $firstImage = $legacyImage ?? array_shift($uploadedImages);
+        $storedImage = null;
+        $referencePaths = [];
+        try {
+            $storedImage = $firstImage ? $images->store($firstImage) : null;
+            foreach ($uploadedImages as $uploadedImage) {
+                $referencePaths[] = $images->store($uploadedImage)['path'];
+            }
+        } catch (\Throwable $exception) {
+            $images->deletePath($storedImage['path'] ?? null);
+            foreach ($referencePaths as $path) {
+                $images->deletePath($path);
+            }
+            throw $exception;
+        }
         $creditCost = $credits->creditsForDuration((int) $data['duration_seconds']);
         try {
-            $reel = DB::transaction(function () use ($agent, $data, $product, $credits, $storedImage, $creditCost): AiReel {
+            $reel = DB::transaction(function () use ($agent, $data, $product, $credits, $storedImage, $creditCost, $referencePaths): AiReel {
                 $reel = $agent->aiReels()->create([
                     'product_id' => $product?->id, 'mode' => 'custom', 'providers' => array_values($data['providers']),
                     'duration_seconds' => $data['duration_seconds'], 'credit_cost' => $creditCost,
@@ -168,6 +188,7 @@ class AiReelController extends Controller
                     'caption' => $data['caption'],
                     'source_image_url' => $storedImage['url'] ?? $product?->publicImageUrl(),
                     'source_image_path' => $storedImage['path'] ?? null, 'status' => 'queued',
+                    'reference_image_paths' => $referencePaths,
                 ]);
                 $credits->debit($agent->organization, $creditCost, 'custom-reel:'.$reel->id, [
                     'reel_id' => $reel->id,
@@ -181,6 +202,9 @@ class AiReelController extends Controller
             }, 3);
         } catch (\Throwable $exception) {
             $images->deletePath($storedImage['path'] ?? null);
+            foreach ($referencePaths as $path) {
+                $images->deletePath($path);
+            }
 
             throw $exception;
         }

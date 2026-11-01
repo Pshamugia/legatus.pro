@@ -72,6 +72,10 @@ class AiReelsTest extends TestCase
             ->assertSee('Instagram Reels')
             ->assertSee('Reels your way')
             ->assertSee('Describe the video you want')
+            ->assertSee('name="reference_images[]"', false)
+            ->assertSee('id="custom-reel-image-list"', false)
+            ->assertDontSee('name="person_image"', false)
+            ->assertDontSee('name="product_images[]"', false)
             ->assertSee('Facebook & Instagram post caption', false)
             ->assertSee('Leave blank and Luna will write the caption for you.')
             ->assertSee('3,000 characters')
@@ -596,6 +600,104 @@ class AiReelsTest extends TestCase
             ->assertHeader('Content-Type', 'image/png')
             ->assertHeader('Cross-Origin-Resource-Policy', 'cross-origin');
         Queue::assertPushed(GenerateAiReel::class);
+    }
+
+    public function test_custom_reel_keeps_numbered_images_as_private_references(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('multi-image-reel');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 3, 'txn-multi-image');
+
+        $this->actingAs($user)->post(route('ai-reels.custom.store'), [
+            'prompt' => 'Show this person holding this exact book in a warm library scene.',
+            'duration_seconds' => 15,
+            'reference_images' => [
+                UploadedFile::fake()->image('person.jpg', 720, 1280),
+                UploadedFile::fake()->image('cover.webp', 800, 1100),
+            ],
+            'providers' => ['facebook'],
+        ])->assertRedirect(route('ai-reels.index', ['tab' => 'custom']));
+
+        $reel = AiReel::query()->sole();
+        $this->assertCount(1, $reel->reference_image_paths);
+        Storage::disk('local')->assertExists($reel->source_image_path);
+        Storage::disk('local')->assertExists($reel->reference_image_paths[0]);
+        $this->assertSame(0, app(ReelCreditService::class)->balance($organization));
+        Queue::assertPushed(GenerateAiReel::class);
+    }
+
+    public function test_custom_reel_rejects_more_than_five_images_without_charging(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [$user, $agent, $organization] = $this->tenant('too-many-reel-images');
+        $this->connections($agent);
+        app(ReelCreditService::class)->grantPurchase($organization, 1, 'txn-too-many-images');
+
+        $this->actingAs($user)->from(route('ai-reels.index', ['tab' => 'custom']))
+            ->post(route('ai-reels.custom.store'), [
+                'prompt' => 'Create a cinematic product scene with slow camera movement and warm light.',
+                'reference_images' => array_map(fn ($i) => UploadedFile::fake()->image("reference-{$i}.jpg", 720, 900), range(1, 6)),
+                'providers' => ['facebook'],
+            ])->assertSessionHasErrors('reference_images');
+
+        $this->assertDatabaseCount('ai_reels', 0);
+        $this->assertSame(1, app(ReelCreditService::class)->balance($organization));
+        Queue::assertNothingPushed();
+    }
+
+    public function test_multi_image_reel_sends_numbered_images_to_reference_capable_model(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+        [, $agent] = $this->tenant('multi-reference-task');
+        $person = app(AiReelSourceImageStorage::class)->store(UploadedFile::fake()->image('person.jpg', 720, 1280));
+        $cover = app(AiReelSourceImageStorage::class)->store(UploadedFile::fake()->image('cover.jpg', 800, 1100));
+        $reel = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['facebook'], 'status' => 'queued',
+            'source_image_path' => $person['path'], 'source_image_url' => $person['url'],
+            'reference_image_paths' => [$cover['path']],
+            'user_prompt' => 'Image 1 is the reader; Image 2 is the book cover.',
+        ]);
+        $writer = \Mockery::mock(AiReelPromptWriter::class);
+        $writer->shouldReceive('write')->once()->andReturn(['prompt' => 'A person presents the exact product.', 'caption' => 'Caption']);
+        $runway = \Mockery::mock(RunwayClient::class);
+        $runway->shouldReceive('createWithReferences')->once()->with(
+            'A person presents the exact product.',
+            \Mockery::on(fn ($image) => str_starts_with($image, 'data:image/jpeg;base64,')),
+            \Mockery::on(fn ($references) => count($references) === 1 && str_starts_with($references[0], 'data:image/jpeg;base64,')),
+            5,
+            'Image 1 is the reader; Image 2 is the book cover.',
+        )->andReturn('multi-reference-task');
+        $runway->shouldNotReceive('create');
+
+        (new GenerateAiReel($reel->id))->handle($writer, $runway, app(ReelCreditService::class), app(AiReelSourceImageStorage::class), $this->availableMusic());
+
+        $this->assertSame('multi-reference-task', $reel->fresh()->runway_task_id);
+        Queue::assertPushed(PollAiReelGeneration::class);
+    }
+
+    public function test_reference_model_request_keeps_user_defined_image_roles_and_existing_reel_price(): void
+    {
+        config()->set('services.runway.key', 'runway-test-key');
+        Http::fake(['https://api.dev.runwayml.com/v1/image_to_video' => Http::response(['id' => 'reference-task'])]);
+
+        $id = app(RunwayClient::class)->createWithReferences('A reader presents the product.', 'data:image/jpeg;base64,PERSON', ['data:image/jpeg;base64,COVER'], 15, 'Image 1 is the reader; Image 2 is the actual book cover.');
+
+        $this->assertSame('reference-task', $id);
+        Http::assertSent(fn ($request) => $request->url() === 'https://api.dev.runwayml.com/v1/image_to_video'
+            && $request['model'] === 'klingO3_standard'
+            && $request['promptImage'] === 'data:image/jpeg;base64,PERSON'
+            && data_get($request->data(), 'references.0.uri') === 'data:image/jpeg;base64,COVER'
+            && str_contains($request['promptText'], '<<<image_1>>> is the first uploaded image')
+            && str_contains($request['promptText'], '<<<image_2>>> is uploaded image 2')
+            && str_contains($request['promptText'], 'Image 2 is the actual book cover')
+            && $request['ratio'] === '720:1280'
+            && $request['duration'] === 15
+            && $request['audio'] === false);
+        $this->assertSame(3, app(ReelCreditService::class)->creditsForDuration(15));
     }
 
     public function test_custom_reel_rejects_an_uploaded_image_that_is_too_small_for_runway(): void
