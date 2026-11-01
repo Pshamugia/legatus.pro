@@ -8,9 +8,9 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Full-site knowledge refresh remains manual. Refresh one due public catalog
-// per tick so newly listed products can enter existing social schedules.
-Schedule::command('legatus:sync-knowledge --auto-catalog')->everyFiveMinutes()->withoutOverlapping(10);
+// Full-site knowledge refresh remains manual. Refresh one due catalog,
+// language or category index per tick so new products enter rotation.
+Schedule::command('legatus:sync-knowledge --auto-social-sources')->everyFiveMinutes()->withoutOverlapping(10);
 Schedule::command('legatus:purge-expired-data')->dailyAt('03:45')->withoutOverlapping();
 Schedule::command('legatus:expire-reservations')->everyMinute()->withoutOverlapping();
 // The catalog is an authoritative discovery snapshot. Price and stock are checked

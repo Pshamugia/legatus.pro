@@ -1106,7 +1106,7 @@ HTML;
         $this->assertSame('ready', $source->fresh()->status);
     }
 
-    public function test_automatic_catalog_refresh_queues_only_one_due_source_per_run(): void
+    public function test_automatic_social_refresh_queues_catalogs_then_active_schedule_language_and_category_one_at_a_time(): void
     {
         Queue::fake();
         $agent = Agent::create(['name' => 'Shop', 'slug' => 'auto-catalog-shop', 'business_name' => 'Shop']);
@@ -1131,8 +1131,14 @@ HTML;
             'url' => 'https://shop.example/category', 'status' => 'ready', 'progress' => 100,
             'last_synced_at' => now()->subHours(4),
         ]);
+        $language = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Georgian',
+            'name' => 'Georgian catalog', 'url' => 'https://shop.example/ka',
+            'status' => 'ready', 'progress' => 100,
+            'last_synced_at' => now()->subHours(4),
+        ]);
 
-        $this->artisan('legatus:sync-knowledge --auto-catalog')->assertSuccessful();
+        $this->artisan('legatus:sync-knowledge --auto-social-sources')->assertSuccessful();
         Queue::assertPushed(CrawlPublicWebsite::class, 1);
         Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $old->id);
         $this->assertSame('processing', $old->fresh()->status);
@@ -1140,13 +1146,28 @@ HTML;
         $this->assertSame('ready', $fresh->fresh()->status);
         $this->assertSame('ready', $category->fresh()->status);
 
-        $this->artisan('legatus:sync-knowledge --auto-catalog')->assertSuccessful();
+        $this->artisan('legatus:sync-knowledge --auto-social-sources')->assertSuccessful();
         Queue::assertPushed(CrawlPublicWebsite::class, 2);
         Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $due->id);
         $this->assertSame('processing', $due->fresh()->status);
 
-        $this->artisan('legatus:sync-knowledge --auto-catalog')->assertSuccessful();
+        $this->artisan('legatus:sync-knowledge --auto-social-sources')->assertSuccessful();
         Queue::assertPushed(CrawlPublicWebsite::class, 2);
+
+        $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today()->addDay(),
+            'posts_per_day' => 1, 'categories' => ['General'], 'languages' => ['Georgian'],
+            'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+        ]);
+        $this->artisan('legatus:sync-knowledge --auto-social-sources')->assertSuccessful();
+        Queue::assertPushed(CrawlPublicWebsite::class, 3);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $language->id);
+        $this->assertSame('processing', $language->fresh()->status);
+
+        $this->artisan('legatus:sync-knowledge --auto-social-sources')->assertSuccessful();
+        Queue::assertPushed(CrawlPublicWebsite::class, 4);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $category->id);
+        $this->assertSame('processing', $category->fresh()->status);
     }
 
     public function test_seeded_fixture_sources_are_static_labeled_and_embedding_honest(): void

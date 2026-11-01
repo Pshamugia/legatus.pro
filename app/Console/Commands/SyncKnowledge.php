@@ -9,19 +9,18 @@ use Illuminate\Console\Command;
 
 class SyncKnowledge extends Command
 {
-    protected $signature = 'legatus:sync-knowledge {--source=} {--url=} {--auto-catalog : Queue one due public catalog refresh}';
+    protected $signature = 'legatus:sync-knowledge {--source=} {--url=} {--auto-social-sources : Queue one due catalog, language or category refresh}';
 
     protected $description = 'Synchronize refreshable Legatus knowledge sources';
 
     public function handle(KnowledgeIngestionService $service): int
     {
-        if ($this->option('auto-catalog')) {
-            // Refresh only one complete public catalog at a time. The crawl
-            // imports newly discovered listings as it progresses, while the
-            // knowledge worker bounds storefront traffic on shared hosting.
-            $source = KnowledgeSource::query()
+        if ($this->option('auto-social-sources')) {
+            // Refresh one source at a time. The primary catalog discovers new
+            // products; language and category indexes make them eligible for
+            // filtered schedules. Keep full-site sources manual.
+            $due = KnowledgeSource::query()
                 ->where('type', 'url')
-                ->where('source_scope', 'catalog')
                 ->where('status', 'ready')
                 ->where('progress', 100)
                 ->whereNull('error')
@@ -29,15 +28,20 @@ class SyncKnowledge extends Command
                 ->where(function ($query): void {
                     $query->whereNull('last_synced_at')
                         ->orWhere('last_synced_at', '<=', now()->subHour());
-                })
-                ->orderBy('last_synced_at')
-                ->orderBy('id')
-                ->first();
+                });
+            $source = (clone $due)->where('source_scope', 'catalog')
+                ->orderBy('last_synced_at')->orderBy('id')->first();
+            $source ??= (clone $due)->where('source_scope', 'language')
+                ->whereHas('agent.socialMediaSchedules', fn ($query) => $query->where('status', 'active'))
+                ->orderBy('last_synced_at')->orderBy('id')->first();
+            $source ??= (clone $due)->where('source_scope', 'category')
+                ->whereHas('agent.socialMediaSchedules', fn ($query) => $query->where('status', 'active'))
+                ->orderBy('last_synced_at')->orderBy('id')->first();
 
             if ($source) {
                 $source->update(['status' => 'processing', 'progress' => 1, 'error' => null, 'crawl_state' => null]);
                 CrawlPublicWebsite::dispatch($source->id);
-                $this->info("Queued catalog refresh #{$source->id} {$source->name}");
+                $this->info("Queued social source refresh #{$source->id} {$source->name}");
             }
 
             return self::SUCCESS;
