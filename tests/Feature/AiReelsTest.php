@@ -1060,6 +1060,42 @@ class AiReelsTest extends TestCase
             ->assertSee('Your custom Reel previews will appear here.');
     }
 
+    public function test_reel_failure_panel_shows_only_the_latest_issue_until_history_is_opened(): void
+    {
+        [$user, $agent] = $this->tenant('failed-reel-summary');
+        $older = $agent->aiReels()->create([
+            'mode' => 'scheduled', 'providers' => ['facebook'], 'status' => 'generation_failed',
+            'last_error' => 'Older music processing failure.', 'credit_cost' => 1,
+            'credit_refunded_at' => now()->subDay(),
+        ]);
+        $older->timestamps = false;
+        $older->update(['created_at' => now()->subDay()]);
+        $latest = $agent->aiReels()->create([
+            'mode' => 'custom', 'providers' => ['instagram'], 'status' => 'generation_failed',
+            'last_error' => 'Latest video service failure.', 'credit_cost' => 3,
+            'credit_refunded_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)->get(route('ai-reels.index', ['tab' => 'custom']))->assertOk()
+            ->assertSee('Your latest Reel could not be created')
+            ->assertSee('View previous failed attempts')
+            ->assertSee('3 Reel credits returned to this business.');
+        $dom = new \DOMDocument;
+        @$dom->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($dom);
+        $latestReason = $xpath->query('//section[contains(@class,"reel-failures")]/p[contains(@class,"reel-failure-reason")]');
+        $history = $xpath->query('//section[contains(@class,"reel-failures")]/details[contains(@class,"reel-failure-history")]');
+
+        $this->assertSame(1, $latestReason->length);
+        $this->assertStringContainsString('Latest video service failure.', $latestReason->item(0)->textContent);
+        $this->assertSame(1, $history->length);
+        $this->assertFalse($history->item(0)->hasAttribute('open'));
+        $this->assertStringContainsString('Older music processing failure.', $history->item(0)->textContent);
+        $this->assertStringNotContainsString('Latest video service failure.', $history->item(0)->textContent);
+        $this->assertStringContainsString('Scheduled Reel #'.$older->id, $history->item(0)->textContent);
+        $this->assertStringNotContainsString('Custom Reel #'.$latest->id, $history->item(0)->textContent);
+    }
+
     public function test_failed_reel_reasons_are_tenant_scoped(): void
     {
         [$user, $agent] = $this->tenant('failed-reel-owner');

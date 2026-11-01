@@ -38,16 +38,40 @@
         </div>
 
         @if($failedReels->isNotEmpty())
-            <section class="panel reel-failures" aria-label="Recent failed Reel attempts">
-                <h2>Recent failed Reel attempts</h2>
-                <p class="section-copy">These attempts did not produce a video. The recorded reason is shown below; a difficult brief is not assumed to be the cause.</p>
-                @foreach($failedReels as $failedReel)
-                    <div class="reel-failure-row">
-                        <strong>{{ $failedReel->mode === 'custom' ? 'Custom Reel' : 'Scheduled Reel' }} #{{ $failedReel->id }}</strong>
-                        <small>{{ $failedReel->created_at?->format('M j, Y H:i') }} @if($failedReel->credit_refunded_at) · {{ $failedReel->credit_cost }} {{ Str::plural('credit', $failedReel->credit_cost) }} returned @else · Credit return not confirmed; contact support @endif</small>
-                        <p>{{ $failedReel->visibleFailureReason() }}</p>
+            @php
+                $latestFailure = $failedReels->first();
+            @endphp
+            <section class="panel reel-failures" aria-labelledby="reel-failures-title">
+                <div class="reel-failure-heading">
+                    <span class="reel-failure-icon" aria-hidden="true">!</span>
+                    <div>
+                        <span class="reel-failure-eyebrow">Reel update</span>
+                        <h2 id="reel-failures-title">Your latest Reel could not be created</h2>
+                        <p>{{ $latestFailure->mode === 'custom' ? 'Custom' : 'Scheduled' }} Reel #{{ $latestFailure->id }} · {{ $latestFailure->created_at?->format('M j, Y H:i') }}</p>
                     </div>
-                @endforeach
+                </div>
+                <p class="reel-failure-reason">{{ $latestFailure->visibleFailureReason() }}</p>
+                <p @class(['reel-failure-credit', 'reel-failure-credit-pending' => ! $latestFailure->credit_refunded_at])>
+                    @if($latestFailure->credit_refunded_at)
+                        {{ $latestFailure->credit_cost }} {{ Str::plural('Reel credit', $latestFailure->credit_cost) }} returned to this business.
+                    @else
+                        Credit return is not confirmed. Please contact support and mention Reel #{{ $latestFailure->id }}.
+                    @endif
+                </p>
+                @if($failedReels->count() > 1)
+                    <details class="reel-failure-history">
+                        <summary>View previous failed attempts <span>{{ $failedReels->count() - 1 }}</span></summary>
+                        <div class="reel-failure-history-grid">
+                            @foreach($failedReels->skip(1) as $failedReel)
+                                <article class="reel-failure-history-card">
+                                    <div><strong>{{ $failedReel->mode === 'custom' ? 'Custom' : 'Scheduled' }} Reel #{{ $failedReel->id }}</strong><small>{{ $failedReel->created_at?->format('M j, Y H:i') }}</small></div>
+                                    <p>{{ $failedReel->visibleFailureReason() }}</p>
+                                    <small>{{ $failedReel->credit_refunded_at ? $failedReel->credit_cost.' '.Str::plural('credit', $failedReel->credit_cost).' returned' : 'Credit return not confirmed · Contact support' }}</small>
+                                </article>
+                            @endforeach
+                        </div>
+                    </details>
+                @endif
             </section>
         @endif
 
@@ -136,7 +160,7 @@
 .reel-spinner{width:15px;height:15px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:reel-spin .7s linear infinite}.reel-success-button{background:#397249!important;color:#fff!important}.reel-notification{position:fixed;z-index:1000;top:22px;right:22px;max-width:390px;padding:15px 18px;border-radius:13px;background:#285f3d;color:#fff;box-shadow:0 16px 45px rgba(15,42,32,.24);font-weight:800;opacity:0;transform:translateY(-10px);transition:.2s ease}.reel-notification.error{background:#963e32}.reel-notification.visible{opacity:1;transform:translateY(0)}#generate-reel-preview{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-width:210px}@keyframes reel-spin{to{transform:rotate(360deg)}}
 .reel-card-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.reel-card-actions form{margin:0}.reel-remove-button{background:#fff!important;color:#a44135!important;border:1px solid #e7b3ac!important}
 .reel-card-actions form:first-child{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.status.saved{background:#e8f0ff;color:#315b94}
-.reel-failures{margin-bottom:18px;border-color:#f0c7bf}.reel-failures h2{margin-bottom:6px}.reel-failure-row{padding:12px 0;border-top:1px solid var(--line)}.reel-failure-row strong,.reel-failure-row small{display:block}.reel-failure-row small{color:var(--muted);margin-top:3px}.reel-failure-row p{margin:8px 0 0;color:#923b2d;overflow-wrap:anywhere}
+.reel-failures{margin-bottom:18px;border-color:#f0d6ce;background:#fffdfc}.reel-failure-heading{display:flex;align-items:flex-start;gap:13px}.reel-failure-icon{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:11px;background:#fff0eb;color:#a34031;font-weight:900}.reel-failure-eyebrow{display:block;color:#a34031;font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase}.reel-failure-heading h2{margin:3px 0 2px;font-size:18px}.reel-failure-heading p{margin:0;color:var(--muted);font-size:12px}.reel-failure-reason{margin:16px 0 12px;line-height:1.55;overflow-wrap:anywhere}.reel-failure-credit{display:inline-block;margin:0;padding:7px 10px;border-radius:9px;background:#edf7ea;color:#306b35;font-size:12px;font-weight:700}.reel-failure-credit-pending{background:#fff0eb;color:#923b2d}.reel-failure-history{margin-top:18px;border-top:1px solid var(--line)}.reel-failure-history summary{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;padding:15px 2px 0;color:var(--green);font-size:12px;font-weight:800;cursor:pointer;list-style:none}.reel-failure-history summary::-webkit-details-marker{display:none}.reel-failure-history summary:focus-visible{outline:2px solid var(--green);outline-offset:3px}.reel-failure-history summary span{padding:2px 7px;border-radius:99px;background:#edf1ed;color:var(--muted)}.reel-failure-history-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}.reel-failure-history-card{min-width:0;padding:13px;border:1px solid var(--line);border-radius:12px;background:#fff}.reel-failure-history-card>div{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.reel-failure-history-card strong{font-size:12px}.reel-failure-history-card small{color:var(--muted);font-size:11px}.reel-failure-history-card p{margin:10px 0;color:#923b2d;font-size:12px;line-height:1.45;overflow-wrap:anywhere}@media(max-width:700px){.reel-failure-history-grid{grid-template-columns:1fr}.reel-failure-heading h2{font-size:16px}}
 .reel-caption-editor{margin:14px 0}.reel-caption-editor label,.reel-caption-preview strong{display:block;margin-bottom:7px;font-size:12px;font-weight:800}.reel-caption-editor textarea{width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);font:inherit;font-size:12px;line-height:1.55;resize:vertical}.reel-caption-editor small{display:block;margin-top:6px;color:var(--muted)}.reel-caption-preview{margin:14px 0;padding:12px;border-radius:11px;background:#f5f7f4}.reel-caption-preview p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .music-preview{display:block;width:100%;height:34px;margin-top:10px}.reel-pricing a{color:var(--green);font-weight:700;text-decoration:underline;text-underline-offset:2px}
 .reel-trimmer{margin:14px 0;padding:13px;border:1px solid var(--line);border-radius:12px;background:#f7f9f5}.reel-trimmer>strong{display:block;margin-bottom:10px;font-size:12px}.reel-trimmer>div{display:flex;gap:10px}.reel-trimmer label{flex:1;font-size:11px}.reel-trimmer input{width:100%;box-sizing:border-box;margin-top:5px;padding:9px;border:1px solid var(--line);border-radius:9px}.reel-trimmer label small{display:block;margin-top:3px;color:var(--muted)}.reel-trimmer-actions{margin-top:10px}.reel-trimmer-actions .btn,.restore-reel-form .btn{padding:9px 11px;font-size:11px}.restore-reel-form{margin:-5px 0 12px}
