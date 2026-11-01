@@ -8,8 +8,9 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// Full-site knowledge refresh is intentionally manual. Automatically queuing
-// every tenant/source at once can exhaust shared-hosting CPU and process limits.
+// Full-site knowledge refresh remains manual. Refresh one due public catalog
+// per tick so newly listed products can enter existing social schedules.
+Schedule::command('legatus:sync-knowledge --auto-catalog')->everyFiveMinutes()->withoutOverlapping(10);
 Schedule::command('legatus:purge-expired-data')->dailyAt('03:45')->withoutOverlapping();
 Schedule::command('legatus:expire-reservations')->everyMinute()->withoutOverlapping();
 // The catalog is an authoritative discovery snapshot. Price and stock are checked

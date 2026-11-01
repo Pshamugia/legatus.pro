@@ -1106,6 +1106,49 @@ HTML;
         $this->assertSame('ready', $source->fresh()->status);
     }
 
+    public function test_automatic_catalog_refresh_queues_only_one_due_source_per_run(): void
+    {
+        Queue::fake();
+        $agent = Agent::create(['name' => 'Shop', 'slug' => 'auto-catalog-shop', 'business_name' => 'Shop']);
+        $another = Agent::create(['name' => 'Other', 'slug' => 'auto-catalog-other', 'business_name' => 'Other']);
+        $old = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Old catalog',
+            'url' => 'https://shop.example/catalog', 'status' => 'ready', 'progress' => 100,
+            'last_synced_at' => now()->subHours(3),
+        ]);
+        $due = $another->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Due catalog',
+            'url' => 'https://other.example/catalog', 'status' => 'ready', 'progress' => 100,
+            'last_synced_at' => now()->subHours(2),
+        ]);
+        $fresh = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Fresh catalog',
+            'url' => 'https://shop.example/fresh', 'status' => 'ready', 'progress' => 100,
+            'last_synced_at' => now()->subMinutes(5),
+        ]);
+        $category = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'category', 'name' => 'Category',
+            'url' => 'https://shop.example/category', 'status' => 'ready', 'progress' => 100,
+            'last_synced_at' => now()->subHours(4),
+        ]);
+
+        $this->artisan('legatus:sync-knowledge --auto-catalog')->assertSuccessful();
+        Queue::assertPushed(CrawlPublicWebsite::class, 1);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $old->id);
+        $this->assertSame('processing', $old->fresh()->status);
+        $this->assertSame('ready', $due->fresh()->status);
+        $this->assertSame('ready', $fresh->fresh()->status);
+        $this->assertSame('ready', $category->fresh()->status);
+
+        $this->artisan('legatus:sync-knowledge --auto-catalog')->assertSuccessful();
+        Queue::assertPushed(CrawlPublicWebsite::class, 2);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $due->id);
+        $this->assertSame('processing', $due->fresh()->status);
+
+        $this->artisan('legatus:sync-knowledge --auto-catalog')->assertSuccessful();
+        Queue::assertPushed(CrawlPublicWebsite::class, 2);
+    }
+
     public function test_seeded_fixture_sources_are_static_labeled_and_embedding_honest(): void
     {
         $this->seed();
