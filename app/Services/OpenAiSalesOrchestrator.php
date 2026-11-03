@@ -1373,8 +1373,16 @@ class OpenAiSalesOrchestrator
             && ($catalogContext['is_catalog_follow_up'] ?? false) === true
             && ($catalogContext['recommendation_scope'] ?? 'none') === 'none'
             && ($catalogContext['catalog_match_scope'] ?? 'exact_identity') === 'exact_identity';
+        // A catalog lookup may be incidental to a question about delivery or
+        // business terms. Its empty result must not replace the answer to the
+        // customer's actual question with a product-availability refusal.
+        $nonCatalogGoal = is_array($catalogContext)
+            && (($catalogContext['is_existing_order_request'] ?? false) === true
+                || ($catalogContext['delivery_request_type'] ?? 'none') !== 'none'
+                || ($catalogContext['is_business_knowledge_request'] ?? false) === true);
         $exactLookupSearches = $directExactRequest ? $canonicalExactSearches : $successfulCatalogSearches;
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
+            && ! $nonCatalogGoal
             && $budgetConstraint === null
             && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
             && (! is_array($catalogContext) || ($catalogContext['catalog_match_scope'] ?? 'exact_identity') === 'exact_identity')
@@ -1388,6 +1396,7 @@ class OpenAiSalesOrchestrator
                 data_get($call, 'result.unavailable_products', []),
             ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
         $broadLookupMiss = ! $exactLookupMiss
+            && ! $nonCatalogGoal
             && $successfulCatalogSearches->isNotEmpty()
             && $successfulCatalogSearches->contains(fn (array $call): bool => data_get($call, 'arguments._entity_family_match') === true
                 || data_get($call, 'arguments.match_scope') === 'entity_family')

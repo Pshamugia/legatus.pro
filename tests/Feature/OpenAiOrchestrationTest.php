@@ -511,6 +511,58 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertTrue((bool) data_get($resolverRequest?->data(), 'text.format.schema.properties.is_delivery_request'));
     }
 
+    public function test_an_incidental_empty_catalog_lookup_cannot_replace_a_verified_delivery_answer(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'text', 'source_scope' => 'delivery', 'name' => 'Delivery terms',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source->chunks()->create([
+            'agent_id' => $agent->id, 'kind' => 'policy', 'title' => 'Delivery terms',
+            'content' => 'თბილისში მიწოდება 2 სამუშაო დღეში ხდება.',
+            'content_hash' => hash('sha256', 'incidental-catalog-delivery'),
+        ]);
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'delivery-context-customer', 'status' => 'ai', 'channel' => 'facebook',
+        ]);
+        $question = 'შეკვეთილ წიგნს რამდენ ხანში მივიღებ?';
+        $conversation->messages()->create(['role' => 'customer', 'content' => $question]);
+        config(['services.openai.key' => 'test-key']);
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'mixed-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => true,
+                    'delivery_request_type' => 'general_policy',
+                    'is_catalog_follow_up' => true,
+                    'catalog_scope_action' => 'replace',
+                    'recommendation_scope' => 'none',
+                    'resolved_query' => 'არარსებული წიგნი',
+                    'resolved_queries' => ['არარსებული წიგნი'],
+                    'catalog_match_scope' => 'exact_identity',
+                    'exclude_product_ids' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []])
+            ->push(['id' => 'delivery-answer', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'თბილისში მიწოდებას ჩვეულებრივ 2 სამუშაო დღე სჭირდება.',
+                    'intent' => 'delivery', 'confidence' => .99, 'handoff' => false,
+                    'escalation_reason' => null, 'clarification_next_tool' => null,
+                    'clarification_missing_input' => null, 'product_ids' => [],
+                    'sources' => [], 'factual_claims' => [],
+                ], JSON_UNESCAPED_UNICODE)]],
+            ]], 'usage' => []]);
+
+        $reply = app(OpenAiSalesOrchestrator::class)->respond($agent, $conversation, $question);
+
+        $this->assertSame('delivery', $reply['intent']);
+        $this->assertStringContainsString('2 სამუშაო დღე', $reply['text']);
+        $this->assertStringNotContainsString('კატალოგში ვერ მოვიძიე', $reply['text']);
+        $this->assertContains('calculate_delivery', $reply['tools_used']);
+    }
+
     public function test_semantic_delivery_intent_uses_prior_dialogue_for_an_indirect_follow_up(): void
     {
         $this->seed();
