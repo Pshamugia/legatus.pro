@@ -289,6 +289,7 @@ class OpenAiSalesOrchestrator
                     ];
                 if ($matchScope === 'exact_identity'
                     && $explicitNameIdentity === null
+                    && in_array($catalogContext['catalog_scope_action'] ?? 'replace', ['continue', 'refine'], true)
                     && $resolvedQueries->count() === 1
                     && ($result['products'] ?? []) === []
                     && ($result['unavailable_products'] ?? []) === []
@@ -361,6 +362,8 @@ class OpenAiSalesOrchestrator
                     'resolved_category' => $resolvedCategory,
                     'product_language' => $catalogContext['product_language'] ?? null,
                     'catalog_match_scope' => $matchScope,
+                    'is_catalog_follow_up' => (bool) ($catalogContext['is_catalog_follow_up'] ?? false),
+                    'recommendation_scope' => $catalogContext['recommendation_scope'] ?? 'none',
                     'explicit_name_identity' => $explicitNameIdentity,
                     'exclude_product_ids' => $excludedIds->all(),
                     'expects_complete_set' => $expectsCompleteSet,
@@ -779,6 +782,18 @@ class OpenAiSalesOrchestrator
                     );
                 }
                 $semanticResolution = collect($used)->firstWhere('name', 'resolve_catalog_context');
+                if ($toolName === 'recommend_products'
+                    && is_array($semanticResolution)
+                    && data_get($semanticResolution, 'result.is_catalog_follow_up') === true
+                    && data_get($semanticResolution, 'result.recommendation_scope', 'none') === 'none') {
+                    // A direct inventory question does not authorize a
+                    // recommendation, even when a related catalog item exists.
+                    $result = ['ok' => true, 'recommendations' => [], 'not_requested' => true];
+                    $used[] = ['name' => 'recommendation_boundary', 'arguments' => $args, 'result' => $result];
+                    $outputs[] = ['type' => 'function_call_output', 'call_id' => $call['call_id'], 'output' => json_encode($result, JSON_UNESCAPED_UNICODE)];
+
+                    continue;
+                }
                 if (is_array($semanticResolution) && in_array($toolName, ['search_products', 'recommend_products'], true)) {
                     $resolvedCatalogQuery = (string) data_get($semanticResolution, 'result.resolved_query', $args['query'] ?? '');
                     $args['exclude_product_ids'] = data_get($semanticResolution, 'result.exclude_product_ids', []);
@@ -1345,16 +1360,30 @@ class OpenAiSalesOrchestrator
             $usedCollection = collect($used);
             $data = $this->verifiedLinkedCommentProductReply($agent, $message, $checked);
         }
+        $canonicalQueries = collect($catalogContext['resolved_queries'] ?? [])
+            ->push($catalogContext['resolved_query'] ?? null)
+            ->filter(fn ($query): bool => is_string($query) && trim($query) !== '')
+            ->map(fn (string $query): string => Str::lower(Str::squish($query)))
+            ->unique();
+        $canonicalExactSearches = $successfulCatalogSearches
+            ->filter(fn (array $call): bool => data_get($call, 'arguments._identity_match') === true
+                && data_get($call, 'arguments.match_scope', 'exact_identity') === 'exact_identity'
+                && $canonicalQueries->contains(Str::lower(Str::squish((string) data_get($call, 'arguments.query', '')))));
+        $directExactRequest = is_array($catalogContext)
+            && ($catalogContext['is_catalog_follow_up'] ?? false) === true
+            && ($catalogContext['recommendation_scope'] ?? 'none') === 'none'
+            && ($catalogContext['catalog_match_scope'] ?? 'exact_identity') === 'exact_identity';
+        $exactLookupSearches = $directExactRequest ? $canonicalExactSearches : $successfulCatalogSearches;
         $exactLookupMiss = ! $this->isBudgetRecommendationRequest($message)
             && $budgetConstraint === null
             && (! is_array($catalogContext) || ($catalogContext['recommendation_scope'] ?? 'none') === 'none')
             && (! is_array($catalogContext) || ($catalogContext['catalog_match_scope'] ?? 'exact_identity') === 'exact_identity')
             && ! $linkedCommentPriceRecovery
             && ! $searchedOnlyLinkedCommentProduct
-            && $successfulCatalogSearches->isNotEmpty()
-            && $successfulCatalogSearches->every(fn (array $call): bool => data_get($call, 'arguments._entity_family_match') !== true
+            && $exactLookupSearches->isNotEmpty()
+            && $exactLookupSearches->every(fn (array $call): bool => data_get($call, 'arguments._entity_family_match') !== true
                 && data_get($call, 'arguments.match_scope', 'exact_identity') === 'exact_identity')
-            && $successfulCatalogSearches->every(fn (array $call): bool => collect(array_merge(
+            && $exactLookupSearches->every(fn (array $call): bool => collect(array_merge(
                 data_get($call, 'result.products', []),
                 data_get($call, 'result.unavailable_products', []),
             ))->isEmpty() && blank(data_get($call, 'result.did_you_mean')));
@@ -2005,7 +2034,12 @@ class OpenAiSalesOrchestrator
                 && (int) ($product['id'] ?? 0) > 0
                 && ($product['available'] ?? true) === true)
             ->pluck('id')->map(fn ($id): int => (int) $id)->unique();
-        if ($draftProductIds->intersect($verifiedAlternativeIds)->isNotEmpty()
+        $directCatalogQuestion = $used->where('name', 'resolve_catalog_context')
+            ->contains(fn (array $call): bool => data_get($call, 'result.recommendation_scope', 'none') === 'none'
+                && (data_get($call, 'result.is_catalog_follow_up') === true
+                    || data_get($call, 'result.catalog_match_scope') === 'exact_identity'));
+        if (! $directCatalogQuestion
+            && $draftProductIds->intersect($verifiedAlternativeIds)->isNotEmpty()
             && $draftProductIds->diff($searchResults->keys()->merge($verifiedAlternativeIds))->isEmpty()) {
             return null;
         }
@@ -2920,7 +2954,7 @@ class OpenAiSalesOrchestrator
         $assistantIdentity .= $this->catalogIdentifierCapabilityInstructions($agent);
         $assistantIdentity .= '. Never offer, promise, or solicit customer data for an action that is not represented by an available tool. Legatus cannot place or finalize a connected-store order, accept payment, or collect recipient, shipping-address, card, or payment details for checkout. When a customer wants to buy, direct them to the verified product link and explain that they must complete the business website checkout there. If a customer nevertheless sends order or shipping details, do not repeat or treat them as an order or lead; briefly explain that checkout must be completed on the business website';
         $assistantIdentity .= '. A request to confirm whether the customer already placed an order, or to check, change, or resolve that order, concerns private order records—not product availability. Even when a product name is mentioned, catalog search and stock cannot answer it. Mark is_existing_order_request true and copy the current customer wording into existing_order_request_evidence so the server can route it safely. Never present a product listing, stock status, or link as confirmation of a customer order';
-        $assistantIdentity .= '. Sold-out replacement rules override any more permissive recommendation wording below: never recommend an unavailable product or present it as purchasable. Do not offer, promise, or ask whether the customer wants alternatives unless a successful tenant catalog tool in the current turn has already returned genuinely relevant available alternatives. Use the complete dialogue and the sold-out item’s verified attributes to choose the strongest meaningful relationship for an alternative—such as the same author, creator, brand, series, genre, taxonomy, category, theme, or product type—without assuming that author or category is always the right relationship. Call recommend_products with that one verified relationship as a mandatory constraint before mentioning alternatives. Offer only verified available alternatives from that contextual relationship; never drift to an unrelated attribute merely to return a result. If no matching available alternative exists, state only the sold-out fact instead of offering a search or guessing';
+        $assistantIdentity .= '. Answer a direct question about a specific item only for that item. Do not offer, mention, link, or ask about alternatives, related products, or other editions unless the customer explicitly asks for alternatives or recommendations in the current dialogue. A sold-out or missing exact item is not permission to browse for substitutes. Never present an unavailable item as purchasable. When alternatives are requested, use genuinely relevant available products verified by the current tenant catalog; do not drift to an unrelated attribute just to return a result.';
         $assistantIdentity .= '. Understand catalogue targets semantically before searching. When one request contains multiple independently searchable targets, call search_products separately for each target and combine only the verified results. Never build one query by joining independent targets with conjunctions, punctuation, or a broader umbrella term. A multiword proper name, title, brand, or phrase such as Leonardo da Vinci is one target unless the conversation clearly requests its parts separately';
 
         return "You are {$assistantIdentity}. If asked who you are, identify yourself as {$customerFacingIdentity}; never present the platform name Legatus as the business or chat identity. Legatus may be mentioned only as the underlying technology provider."
@@ -3250,6 +3284,15 @@ class OpenAiSalesOrchestrator
                 data_get($call, 'result.unavailable_products', []),
             ))
             ->filter(fn ($product): bool => is_array($product) && (int) ($product['id'] ?? 0) > 0);
+        $directCatalogQuestion = $successful
+            ->where('name', 'resolve_catalog_context')
+            ->contains(fn (array $call): bool => data_get($call, 'result.is_catalog_follow_up') === true
+                && data_get($call, 'result.recommendation_scope', 'none') === 'none');
+        if ($directCatalogQuestion
+            && $claimedProductIds->diff($verifiedSearchMatches->pluck('id')->map(fn ($id): int => (int) $id)
+                ->merge($verifiedLinkedCommentIds))->isNotEmpty()) {
+            return 'A direct catalog question included an unsolicited product outside its verified search results.';
+        }
         if ($verifiedSearchMatches->isNotEmpty()
             && $claimedProductIds->isEmpty()
             && in_array($data['intent'] ?? null, ['clarification', 'discovery', 'price', 'stock', 'recommendation'], true)) {

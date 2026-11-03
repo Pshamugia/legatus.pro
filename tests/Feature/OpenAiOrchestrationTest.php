@@ -2891,7 +2891,7 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertStringContainsString('before a successful tenant recommendation', $reason);
     }
 
-    public function test_sold_out_alternatives_use_a_verified_contextual_attribute_before_they_are_shown(): void
+    public function test_direct_sold_out_request_does_not_show_a_verified_alternative_without_being_asked(): void
     {
         $this->seed();
         $agent = Agent::firstOrFail();
@@ -2922,7 +2922,8 @@ class OpenAiOrchestrationTest extends TestCase
         ];
         $used = collect([
             ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
-                'ok' => true, 'catalog_match_scope' => 'exact_identity', 'recommendation_scope' => 'none',
+                'ok' => true, 'is_catalog_follow_up' => true,
+                'catalog_match_scope' => 'exact_identity', 'recommendation_scope' => 'none',
             ]],
             ['name' => 'search_products', 'arguments' => ['query' => $soldOut->name, '_identity_match' => true], 'result' => [
                 'ok' => true, 'products' => [], 'unavailable_products' => [$searchResult],
@@ -2952,8 +2953,47 @@ class OpenAiOrchestrationTest extends TestCase
 
         $this->assertSame('Verified Author', $groundedQuery->invoke($orchestrator, $agent, 'other books by Verified Author', $used));
         $this->assertNull($groundedQuery->invoke($orchestrator, $agent, 'Unrelated Creator', $used));
-        $this->assertNull($availabilityReply->invoke($orchestrator, $soldOut->name, $used, $draft));
-        $this->assertNull($guardrail->invoke($orchestrator, $agent, $conversation, $draft, $used));
+        $corrected = $availabilityReply->invoke($orchestrator, $soldOut->name, $used, $draft);
+        $this->assertSame([$soldOut->id], $corrected['product_ids']);
+        $this->assertStringNotContainsString($alternative->name, $corrected['text']);
+        $this->assertStringContainsString('unsolicited product', $guardrail->invoke($orchestrator, $agent, $conversation, $draft, $used));
+    }
+
+    public function test_direct_category_lookup_rejects_an_unrequested_product_outside_its_search_results(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'direct-category-without-recommendations', 'status' => 'ai', 'channel' => 'widget',
+        ]);
+        $requested = $agent->products()->create([
+            'name' => 'Verified category item', 'sku' => 'CATEGORY-ITEM',
+            'search_text' => 'Verified category item', 'price' => 12, 'stock' => 2, 'is_active' => true,
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'Unrelated recommendation', 'sku' => 'OTHER-ITEM',
+            'search_text' => 'Unrelated recommendation', 'price' => 13, 'stock' => 2, 'is_active' => true,
+        ]);
+        $used = collect([
+            ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
+                'ok' => true, 'is_catalog_follow_up' => true,
+                'catalog_match_scope' => 'entity_family', 'recommendation_scope' => 'none',
+            ]],
+            ['name' => 'search_products', 'arguments' => ['query' => 'Verified category', 'match_scope' => 'entity_family'],
+                'result' => ['ok' => true, 'products' => [['id' => $requested->id, 'name' => $requested->name]], 'unavailable_products' => []]],
+            ['name' => 'recommend_products', 'arguments' => ['query' => 'Other'],
+                'result' => ['ok' => true, 'recommendations' => [['id' => $unrelated->id, 'name' => $unrelated->name]]]],
+        ]);
+        $draft = [
+            'text' => "You could also buy {$unrelated->name}.", 'intent' => 'recommendation',
+            'confidence' => 1, 'handoff' => false, 'escalation_reason' => null,
+            'product_ids' => [$unrelated->id], 'sources' => [], 'factual_claims' => [],
+        ];
+
+        $reason = (new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason'))
+            ->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, $draft, $used);
+
+        $this->assertStringContainsString('unsolicited product', $reason);
     }
 
     public function test_guardrail_rejects_promised_photo_identification_and_an_identifier_missing_from_the_tenant_catalog(): void
@@ -3910,6 +3950,73 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('სამწუხაროდ, ეს კონკრეტული პროდუქტი კატალოგში ვერ მოვიძიე.', $response->json('text'));
         $this->assertStringNotContainsString($volume->name, $response->json('text'));
         $this->assertSame([], $response->json('products'));
+    }
+
+    public function test_a_direct_exact_request_cannot_turn_an_unrelated_catalog_item_into_an_unsolicited_offer(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $agent->products()->update(['is_active' => false]);
+        $wrongBook = $agent->products()->create([
+            'name' => 'Collected Essays (Volume 5)', 'sku' => 'UNRELATED-1001',
+            'description' => 'A different work by a different author.',
+            'search_text' => 'Collected Essays (Volume 5)',
+            'price' => 10, 'stock' => 2, 'is_active' => true,
+        ]);
+        $agent->update(['settings' => array_replace($agent->settings ?? [], [
+            'catalog_search_url' => 'https://shop.example/search?q={query}',
+        ])]);
+        config(['services.openai.key' => 'test-key', 'legatus.semantic_orchestration_enabled' => true]);
+        $ordinaryResponses = 0;
+
+        Http::fake(function ($request) use (&$ordinaryResponses, $wrongBook) {
+            if (str_ends_with($request->url(), '/moderations')) {
+                return Http::response(['results' => [['flagged' => false]]]);
+            }
+            if (str_ends_with($request->url(), '/responses')) {
+                if (($request->data()['text']['format']['name'] ?? null) === 'catalog_follow_up') {
+                    return Http::response(['id' => 'exact-resolution', 'output' => [[
+                        'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                            'is_catalog_follow_up' => true, 'catalog_scope_action' => 'replace',
+                            'recommendation_scope' => 'none', 'resolved_query' => 'One Thousand Nights eight-volume set',
+                            'resolved_queries' => ['One Thousand Nights eight-volume set'],
+                            'catalog_match_scope' => 'exact_identity', 'exclude_product_ids' => [],
+                            'expects_complete_set' => false,
+                        ])]],
+                    ]], 'usage' => []]);
+                }
+                $ordinaryResponses++;
+                if ($ordinaryResponses === 1) {
+                    return Http::response(['id' => 'unwanted-recommendation', 'output' => [[
+                        'type' => 'function_call', 'name' => 'recommend_products', 'call_id' => 'unwanted-call',
+                        'arguments' => json_encode(['query' => $wrongBook->name, 'budget' => null,
+                            'quantity' => null, 'category' => null, 'mood' => null,
+                            'occasion' => null, 'limit' => 3, 'exclude_product_ids' => []]),
+                    ]], 'usage' => []]);
+                }
+
+                return Http::response(['id' => 'wrong-final', 'output' => [[
+                    'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                        'text' => "We do not have the requested set, but {$wrongBook->name} costs 10.",
+                        'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                        'escalation_reason' => null, 'product_ids' => [$wrongBook->id],
+                        'sources' => [], 'factual_claims' => [],
+                    ])]],
+                ]], 'usage' => []]);
+            }
+
+            return Http::response('<html><body>No matching products</body></html>');
+        });
+
+        $response = $this->postJson("/demo/{$agent->slug}/message", [
+            'message' => 'Do you have the One Thousand Nights eight-volume set?',
+        ])->assertOk()->assertJsonPath('products', []);
+
+        $this->assertSame("Sorry, I couldn't find that specific product in the catalog.", $response->json('text'));
+        $this->assertStringNotContainsString($wrongBook->name, $response->json('text'));
+        $run = AgentRun::where('agent_id', $agent->id)->latest('id')->firstOrFail();
+        $this->assertContains('recommendation_boundary', collect($run->tools_used)->pluck('name')->all());
+        $this->assertNotContains('recommend_products', collect($run->tools_used)->pluck('name')->all());
     }
 
     public function test_a_quoted_exact_title_is_not_broadened_to_another_product_after_an_empty_lookup(): void

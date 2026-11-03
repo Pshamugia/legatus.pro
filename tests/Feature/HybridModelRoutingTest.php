@@ -510,6 +510,7 @@ class HybridModelRoutingTest extends TestCase
                     'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
                         'is_delivery_request' => false,
                         'is_catalog_follow_up' => true,
+                        'catalog_scope_action' => 'continue',
                         'recommendation_scope' => 'none',
                         'recommendation_query' => null,
                         'recommendation_category' => null,
