@@ -3186,6 +3186,18 @@ class OpenAiSalesOrchestrator
         $successful = $used->filter(fn ($call) => ($call['result']['ok'] ?? false) === true);
         $successfulNames = $successful->pluck('name')->unique()->values();
         $text = (string) ($data['text'] ?? '');
+        $newExactLookup = $successful->where('name', 'resolve_catalog_context')
+            ->first(fn (array $call): bool => data_get($call, 'result.is_catalog_follow_up') === true
+                && data_get($call, 'result.catalog_scope_action') === 'replace'
+                && data_get($call, 'result.catalog_match_scope') === 'exact_identity'
+                && data_get($call, 'result.recommendation_scope', 'none') === 'none');
+        if ($newExactLookup && collect($data['product_ids'] ?? [])->isNotEmpty()
+            && ! $this->catalogQueryIsGroundedInCurrentTurn(
+                (string) data_get($newExactLookup, 'result.resolved_query', ''),
+                (string) $recentCustomerTexts->first(),
+            )) {
+            return 'The exact product identity used for this answer is absent from the customer request.';
+        }
         if (data_get($conversation->context, 'reply_mode') === 'public_comment'
             && $this->publicCommentLanguageMismatch((string) $recentCustomerTexts->first(), $text, $successful)) {
             return 'The public comment reply used a different language from the customer comment.';

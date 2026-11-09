@@ -4614,6 +4614,34 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame('search_products', data_get($conversation->fresh()->context, 'active_catalog_scope.tool'));
     }
 
+    public function test_new_exact_lookup_rejects_a_verified_but_unrequested_product_identity(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $wrong = $agent->products()->where('stock', '>', 0)->firstOrFail();
+        $conversation = $agent->conversations()->create(['visitor_id' => 'wrong-exact-identity', 'status' => 'ai']);
+        $conversation->messages()->create(['role' => 'customer', 'content' => 'გამარჯობა, გრაფი მონტე კრისტო თუ გაქვთ?']);
+        $used = collect([
+            ['name' => 'resolve_catalog_context', 'arguments' => [], 'result' => [
+                'ok' => true, 'is_catalog_follow_up' => true, 'catalog_scope_action' => 'replace',
+                'catalog_match_scope' => 'exact_identity', 'recommendation_scope' => 'none',
+                'resolved_query' => 'ჰანა არენდტი სიცოცხლე ნარატივია',
+            ]],
+            ['name' => 'search_products', 'arguments' => ['query' => 'ჰანა არენდტი სიცოცხლე ნარატივია', '_identity_match' => true],
+                'result' => ['ok' => true, 'products' => [['id' => $wrong->id, 'name' => $wrong->name]], 'unavailable_products' => []]],
+        ]);
+        $draft = [
+            'text' => "დიახ, {$wrong->name} მარაგშია.", 'intent' => 'discovery', 'confidence' => 1,
+            'handoff' => false, 'product_ids' => [$wrong->id], 'factual_claims' => [],
+        ];
+
+        $guard = new \ReflectionMethod(OpenAiSalesOrchestrator::class, 'guardrailReason');
+        $this->assertSame(
+            'The exact product identity used for this answer is absent from the customer request.',
+            $guard->invoke(app(OpenAiSalesOrchestrator::class), $agent, $conversation, $draft, $used),
+        );
+    }
+
     public function test_singular_purchase_reference_uses_the_product_named_in_the_prior_reply_not_incidental_cards(): void
     {
         $this->seed();

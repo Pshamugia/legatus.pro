@@ -1550,7 +1550,7 @@ class SalesToolbox
             'წიგნი', 'წიგნები', 'წიგნის', 'წიგნებს', 'პროდუქტი', 'პროდუქტები',
             'ნამუშევარი', 'ნამუშევრები', 'გამოცემა', 'გამოცემები', 'გამოცემული',
             'ფასი', 'ღირს', 'მარაგი', 'მარაგშია', 'მარაგში', 'ხელმისაწვდომი', 'ხელმისაწვდომია',
-            'რამე', 'საერთოდ', 'შემირჩიე', 'შემირჩიეთ', 'შეარჩიე', 'შეარჩიეთ',
+            'რამე', 'საერთოდ', 'შემირჩიე', 'შემირჩიეთ', 'შეარჩიე', 'შეარჩიეთ', 'შეძენა',
             'ლარი', 'ლარის', 'ლარად', 'ლარში', 'ფარგლებში', 'ბიუჯეტში', 'თანხის', 'მაგ', 'იმავე',
         ];
 
@@ -1617,6 +1617,13 @@ class SalesToolbox
         }
 
         $variants = [$token];
+        // Georgian plural genitive/oblique forms must resolve back to the
+        // catalogue's plural nominative, e.g. a title ending in -ები.
+        if (Str::endsWith($token, 'ების') && mb_strlen($token) > 6) {
+            $pluralStem = mb_substr($token, 0, -4);
+            $variants[] = $pluralStem.'ები';
+            $variants[] = $pluralStem;
+        }
         if (Str::endsWith($token, 'ები') && mb_strlen($token) > 5) {
             $pluralStem = mb_substr($token, 0, -3);
             $variants[] = $pluralStem;

@@ -602,6 +602,29 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertNull($result['did_you_mean']);
     }
 
+    public function test_exact_title_search_recovers_georgian_plural_genitive_without_matching_an_unrelated_title(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 4);
+        $product->update([
+            'name' => 'არტისტული ყვავილები',
+            'search_text' => 'არტისტული ყვავილები გალაკტიონ ტაბიძე',
+            'metadata' => ['author' => 'გალაკტიონ ტაბიძე'],
+        ]);
+        $unrelated = $agent->products()->create([
+            'name' => 'ჰანა არენდტი: სიცოცხლე ნარატივია',
+            'search_text' => 'ჰანა არენდტი: სიცოცხლე ნარატივია',
+            'price' => 6, 'stock' => 2, 'is_active' => true,
+        ]);
+
+        $result = app(SalesToolbox::class)->execute('search_products', [
+            'query' => 'გალაკტიონის არტისტული ყვავილების შეძენა მინდა',
+            'category' => null, 'max_price' => null, '_identity_match' => true,
+        ], $agent, $conversation);
+
+        $this->assertSame([$product->id], collect($result['products'])->pluck('id')->all());
+        $this->assertNotContains($unrelated->id, collect($result['products'])->pluck('id')->all());
+    }
+
     public function test_exact_lookup_never_projects_to_a_generic_final_word_from_an_unrelated_title(): void
     {
         [$agent, $product, $conversation] = $this->context(stock: 4);
