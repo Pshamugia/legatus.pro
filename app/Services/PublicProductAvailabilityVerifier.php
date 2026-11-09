@@ -37,7 +37,8 @@ class PublicProductAvailabilityVerifier
                 $product->update(['description' => $description, 'metadata' => $metadata]);
             }
             $origin = (parse_url($url, PHP_URL_SCHEME) ?: 'https').'://'.parse_url($url, PHP_URL_HOST);
-            $available = $this->explicitPageAvailability($body);
+            $exactStock = $this->explicitPageStock($body);
+            $available = $exactStock === null ? null : $exactStock > 0;
 
             if ($available === null) {
                 $storefront = $this->matchingRecord(
@@ -59,12 +60,17 @@ class PublicProductAvailabilityVerifier
             if ($available === null) {
                 return $this->results[$product->id] = null;
             }
+            if ($available && $exactStock === null && (int) $product->stock === 0) {
+                // A generic InStock tag may be stale. Do not reverse a known
+                // sold-out listing without a current quantity control.
+                return $this->results[$product->id] = null;
+            }
 
             $metadata = $product->metadata ?? [];
-            $metadata['stock_precision'] = 'availability_only';
+            $metadata['stock_precision'] = $exactStock === null ? 'availability_only' : 'exact';
             $metadata['live_checked_at'] = now()->toIso8601String();
             $product->update([
-                'stock' => $available ? max(1, (int) $product->stock) : 0,
+                'stock' => $exactStock ?? ($available ? max(1, (int) $product->stock) : 0),
                 'metadata' => $metadata,
             ]);
 
@@ -82,7 +88,7 @@ class PublicProductAvailabilityVerifier
      * purchasable quantity in a language-neutral input even when their JSON-LD
      * still incorrectly advertises InStock.
      */
-    private function explicitPageAvailability(string $body): ?bool
+    private function explicitPageStock(string $body): ?int
     {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$body);
@@ -104,9 +110,16 @@ class PublicProductAvailabilityVerifier
             }
 
             $value = trim($node->getAttribute('value'));
-            if ($value !== '' && is_numeric($value) && (float) $value <= 0) {
-                return false;
+            if ($value !== '' && ctype_digit($value)) {
+                return (int) $value;
             }
+        }
+
+        // Some storefronts expose the product's purchasable limit in their
+        // page script rather than an input. This is an exact quantity, unlike
+        // JSON-LD InStock, which proves only non-zero availability.
+        if (preg_match('/\b(?:const|let|var)\s+maxQuantity\s*=\s*(\d+)\s*;/i', $body, $matches)) {
+            return (int) $matches[1];
         }
 
         return null;

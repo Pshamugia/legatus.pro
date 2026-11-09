@@ -737,7 +737,7 @@ class MetaTransportTest extends TestCase
 
         app(MetaGraphClient::class)->subscribe($connection);
 
-        Http::assertSent(fn ($request): bool => data_get($request->data(), 'subscribed_fields') === 'messages,messaging_postbacks,message_deliveries,message_reads,feed'
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'subscribed_fields') === 'messages,messaging_postbacks,message_deliveries,message_reads,message_echoes,feed'
         );
     }
 
@@ -2157,6 +2157,51 @@ class MetaTransportTest extends TestCase
             ->expectsOutput('Meta inbox reconciliation complete: 0 new message(s).')
             ->assertSuccessful();
         $this->assertDatabaseCount('channel_messages', 1);
+    }
+
+    public function test_reconciliation_recovers_a_missed_operator_reply_and_cancels_pending_ai(): void
+    {
+        Queue::fake();
+        $connection = $this->connection('facebook', 'page-human-reconcile');
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'meta:facebook:'.$connection->id.':customer-human-reconcile',
+            'external_thread_id' => 'customer-human-reconcile',
+            'channel' => 'facebook',
+            'status' => 'ai',
+        ]);
+        $assistant = $conversation->messages()->create(['role' => 'assistant', 'content' => 'Late AI reply']);
+        $pending = app(ChannelMessageDispatcher::class)->dispatch($assistant);
+        Http::fake(['https://graph.facebook.test/*' => Http::response([
+            'data' => [[
+                'id' => 'thread-human-reconcile',
+                'updated_time' => now()->toIso8601String(),
+                'messages' => ['data' => [[
+                    'id' => 'mid-human-reconciled',
+                    'message' => 'I will handle this order.',
+                    'from' => ['id' => 'page-human-reconcile', 'name' => 'Page'],
+                    'to' => ['data' => [['id' => 'customer-human-reconcile']]],
+                    'created_time' => now()->subMinutes(2)->toIso8601String(),
+                ]]],
+            ]],
+        ])]);
+
+        $this->artisan('legatus:reconcile-meta-inbox --lookback=5')
+            ->expectsOutput('Meta inbox reconciliation complete: 1 new message(s).')
+            ->assertSuccessful();
+
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame('ignored', $pending->fresh()->status);
+        $this->assertDatabaseHas('messages', [
+            'conversation_id' => $conversation->id,
+            'role' => 'human',
+            'content' => 'I will handle this order.',
+        ]);
+
+        $this->artisan('legatus:reconcile-meta-inbox --lookback=5')
+            ->expectsOutput('Meta inbox reconciliation complete: 0 new message(s).')
+            ->assertSuccessful();
+        $this->assertSame(1, $conversation->messages()->where('role', 'human')->count());
     }
 
     public function test_reconciliation_preserves_the_encrypted_image_url_for_safe_vision_processing(): void

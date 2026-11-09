@@ -10,7 +10,10 @@ use Illuminate\Support\Facades\Log;
 
 class MetaInboxReconciler
 {
-    public function __construct(private readonly MetaGraphClient $graph) {}
+    public function __construct(
+        private readonly MetaGraphClient $graph,
+        private readonly MetaNativeReplyRecorder $nativeReplies,
+    ) {}
 
     public function reconcile(ChannelConnection $connection, int $lookbackMinutes = 5): int
     {
@@ -19,8 +22,9 @@ class MetaInboxReconciler
         }
 
         $metadata = (array) $connection->metadata;
-        $cursor = $this->cursor($metadata['inbox_reconciled_at'] ?? null)
-            ?? now()->subMinutes(max(1, min(60, $lookbackMinutes)));
+        // Re-scan a bounded overlap: Graph replies can arrive after a prior
+        // reconciliation, and idempotent provider IDs prevent duplicates.
+        $cursor = now()->subMinutes(max(1, min(60, $lookbackMinutes)));
         $imported = 0;
 
         try {
@@ -51,7 +55,27 @@ class MetaInboxReconciler
                     ->all();
                 $hasAttachment = $attachments !== [];
                 if (! $createdAt || $createdAt->lte($cursor) || $messageId === '' || $senderId === ''
-                    || $senderId === $connection->external_account_id || ($text === '' && ! $hasAttachment)) {
+                    || ($text === '' && ! $hasAttachment)) {
+                    continue;
+                }
+                if ($senderId === $connection->external_account_id) {
+                    // Allow our Send API outbox time to persist its MID before
+                    // interpreting an unmatched Page reply as human takeover.
+                    if ($createdAt->gt(now()->subSeconds(45))) {
+                        continue;
+                    }
+                    $recipientId = trim((string) data_get($message, 'to.data.0.id', ''));
+                    if ($recipientId !== '' && $text !== '' && $this->nativeReplies->record($connection, [
+                        'provider_message_id' => $messageId,
+                        'sender_id' => $senderId,
+                        'recipient_id' => $recipientId,
+                        'message_type' => 'text',
+                        'text' => $text,
+                        'timestamp' => $createdAt->toIso8601String(),
+                    ])) {
+                        $imported++;
+                    }
+
                     continue;
                 }
                 if ($text === '') {

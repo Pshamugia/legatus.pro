@@ -88,7 +88,7 @@ class PublicStorefrontCatalogTest extends TestCase
             }
 
             if (str_contains($request->url(), '/books/paolo-iashvili/42')) {
-                return Http::response('<div class="product-price"><strong>14 ₾</strong><span class="old-price">20 ₾</span></div>', 200, ['Content-Type' => 'text/html']);
+                return Http::response('<div class="product-price"><strong>14 ₾</strong><span class="old-price">20 ₾</span></div><input id="maxquantity" value="1">', 200, ['Content-Type' => 'text/html']);
             }
 
             return Http::response([], 404);
@@ -102,15 +102,14 @@ class PublicStorefrontCatalogTest extends TestCase
         $this->assertStringContainsString('პაოლო იაშვილი', $reply['text']);
         $this->assertStringContainsString('20.00 ₾-ის ნაცვლად 14.00 ₾', $reply['text']);
         $this->assertStringContainsString('30% ფასდაკლება', $reply['text']);
-        $this->assertStringContainsString('მარაგშია', $reply['text']);
-        $this->assertStringNotContainsString('მარაგში 1 ც.', $reply['text']);
+        $this->assertStringContainsString('მარაგში 1 ც.', $reply['text']);
         $product = $agent->products()->firstOrFail();
         $check = app(SalesToolbox::class)->execute('check_stock', [
             'product_id' => $product->id,
             'quantity' => 1,
         ], $agent, $conversation);
-        $this->assertSame('availability_only', $check['stock_precision']);
-        $this->assertArrayNotHasKey('stock', $check);
+        $this->assertSame('exact', $check['stock_precision']);
+        $this->assertSame(1, $check['stock']);
         $this->assertDatabaseHas('products', [
             'agent_id' => $agent->id,
             'name' => 'საიუბილეო საარქივო გამოცემა',
@@ -118,7 +117,7 @@ class PublicStorefrontCatalogTest extends TestCase
             'stock' => 1,
             'is_active' => true,
         ]);
-        Http::assertSentCount(2);
+        Http::assertSentCount(4);
     }
 
     public function test_public_search_never_follows_a_cross_origin_product_url(): void
@@ -153,7 +152,7 @@ class PublicStorefrontCatalogTest extends TestCase
                 return Http::response(str_replace('პაოლო იაშვილი', 'ივანე ჯავახიშვილი', $this->searchCardsHtml()), 200, ['Content-Type' => 'text/html']);
             }
             if (str_contains($url, '/books/paolo-iashvili/42')) {
-                return Http::response('<div class="product-price"><strong>14 ₾</strong></div>', 200, ['Content-Type' => 'text/html']);
+                return Http::response('<div class="product-price"><strong>14 ₾</strong></div><input id="maxquantity" value="1">', 200, ['Content-Type' => 'text/html']);
             }
 
             return Http::response('<html></html>', 200, ['Content-Type' => 'text/html']);

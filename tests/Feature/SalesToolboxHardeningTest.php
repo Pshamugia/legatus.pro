@@ -6,6 +6,7 @@ use App\Jobs\CrawlPublicWebsite;
 use App\Models\Agent;
 use App\Models\Reservation;
 use App\Services\KnowledgeIngestionService;
+use App\Services\PublicProductAvailabilityVerifier;
 use App\Services\SalesToolbox;
 use App\Support\PrivacyRedactor;
 use Carbon\CarbonImmutable;
@@ -890,6 +891,101 @@ class SalesToolboxHardeningTest extends TestCase
         $this->assertArrayNotHasKey('stock', $check);
         $this->assertArrayNotHasKey('available_stock', $check);
         $this->assertArrayNotHasKey('catalog_stock', $check);
+    }
+
+    public function test_public_catalog_stock_uses_the_live_product_page_and_fails_closed_when_it_cannot_be_checked(): void
+    {
+        [$agent, $available, $conversation] = $this->context(stock: 0);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Public catalog',
+            'url' => 'https://shop.example/catalog', 'status' => 'ready', 'progress' => 100,
+        ]);
+        $available->update(['metadata' => [
+            'source_id' => $source->id, 'product_url' => 'https://shop.example/products/1',
+        ]]);
+        $soldOut = $agent->products()->create([
+            'name' => 'Second item', 'price' => 20, 'stock' => 5, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id, 'product_url' => 'https://shop.example/products/2'],
+        ]);
+        $unknown = $agent->products()->create([
+            'name' => 'Third item', 'price' => 20, 'stock' => 2, 'is_active' => true,
+            'metadata' => ['source_id' => $source->id, 'product_url' => 'https://shop.example/products/3'],
+        ]);
+
+        $verifier = \Mockery::mock(PublicProductAvailabilityVerifier::class);
+        $verifier->shouldReceive('verify')->times(3)->andReturnUsing(function ($product) use ($available, $soldOut): ?bool {
+            if ($product->id === $available->id) {
+                $product->update(['stock' => 1, 'metadata' => array_merge($product->metadata, ['stock_precision' => 'availability_only'])]);
+
+                return true;
+            }
+            if ($product->id === $soldOut->id) {
+                $product->update(['stock' => 0, 'metadata' => array_merge($product->metadata, ['stock_precision' => 'availability_only'])]);
+
+                return false;
+            }
+
+            return null;
+        });
+        app()->instance(PublicProductAvailabilityVerifier::class, $verifier);
+        $toolbox = app(SalesToolbox::class);
+        $live = $toolbox->execute('check_stock', ['product_id' => $available->id, 'quantity' => 1], $agent, $conversation);
+        $empty = $toolbox->execute('check_stock', ['product_id' => $soldOut->id, 'quantity' => 1], $agent, $conversation);
+        $unverified = $toolbox->execute('check_stock', ['product_id' => $unknown->id, 'quantity' => 1], $agent, $conversation);
+
+        $this->assertTrue($live['available']);
+        $this->assertSame('public_product_page', $live['source']['type']);
+        $this->assertFalse($empty['available']);
+        $this->assertFalse($unverified['ok']);
+    }
+
+    public function test_public_product_page_exact_quantity_overrides_stale_catalog_stock(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 0);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Public catalog',
+            'url' => 'https://example.com/catalog', 'status' => 'ready', 'progress' => 100,
+        ]);
+        $url = 'https://example.com/products/1';
+        $product->update(['metadata' => ['source_id' => $source->id, 'product_url' => $url]]);
+        Http::fake([$url => Http::response(
+            '<html><body><script>const maxQuantity = 74; // product inventory</script>'
+            .'<script type="application/ld+json">'.json_encode([
+                '@context' => 'https://schema.org', '@type' => 'Product', 'name' => $product->name,
+                'offers' => ['@type' => 'Offer', 'url' => $url, 'availability' => 'https://schema.org/InStock'],
+            ]).'</script></body></html>', 200, ['Content-Type' => 'text/html'],
+        )]);
+
+        $result = app(SalesToolbox::class)->execute('check_stock', ['product_id' => $product->id, 'quantity' => 4], $agent, $conversation);
+
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['available']);
+        $this->assertSame('exact', $result['stock_precision']);
+        $this->assertSame(74, $result['available_stock']);
+        $this->assertSame(74, $product->fresh()->stock);
+    }
+
+    public function test_public_page_with_only_in_stock_cannot_disprove_a_multi_item_order(): void
+    {
+        [$agent, $product, $conversation] = $this->context(stock: 1);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Public catalog',
+            'url' => 'https://example.com/catalog', 'status' => 'ready', 'progress' => 100,
+        ]);
+        $url = 'https://example.com/products/1';
+        $product->update(['metadata' => ['source_id' => $source->id, 'product_url' => $url]]);
+        Http::fake([$url => Http::response(
+            '<html><body><script type="application/ld+json">'.json_encode([
+                '@context' => 'https://schema.org', '@type' => 'Product', 'name' => $product->name,
+                'offers' => ['@type' => 'Offer', 'url' => $url, 'availability' => 'https://schema.org/InStock'],
+            ]).'</script></body></html>', 200, ['Content-Type' => 'text/html'],
+        )]);
+
+        $result = app(SalesToolbox::class)->execute('check_stock', ['product_id' => $product->id, 'quantity' => 4], $agent, $conversation);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('not the requested quantity', $result['error']);
+        $this->assertSame('availability_only', data_get($product->fresh()->metadata, 'stock_precision'));
     }
 
     public function test_recommendations_require_real_thematic_relevance_and_understand_georgian_adjectives(): void

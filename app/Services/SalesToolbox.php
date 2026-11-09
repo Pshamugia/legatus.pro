@@ -22,6 +22,7 @@ class SalesToolbox
         private EmbeddingService $embeddings,
         private CommerceConnectorClient $commerce,
         private PublicStorefrontCatalog $storefront,
+        private PublicProductAvailabilityVerifier $publicAvailability,
     ) {}
 
     public function definitions(?Agent $agent = null): array
@@ -1114,11 +1115,33 @@ class SalesToolbox
             }
         }
 
-        $available = $p ? $this->availableStock($p, $conversation) : 0;
-
         if (! $p) {
             return ['ok' => false, 'error' => 'Active product not found'];
         }
+
+        $livePage = false;
+        $sourceId = (int) data_get($p->metadata, 'source_id', 0);
+        $productUrl = data_get($p->metadata, 'product_url');
+        if ($sourceId > 0 && is_string($productUrl) && filter_var($productUrl, FILTER_VALIDATE_URL)) {
+            $source = $agent->knowledgeSources()->whereKey($sourceId)->where('type', 'url')->first();
+            $sourceHost = is_string($source?->url) ? parse_url($source->url, PHP_URL_HOST) : null;
+            $productHost = parse_url($productUrl, PHP_URL_HOST);
+            $livePage = is_string($sourceHost) && $sourceHost !== ''
+                && is_string($productHost) && strcasecmp($sourceHost, $productHost) === 0;
+        }
+
+        if ($livePage) {
+            $liveAvailability = $this->publicAvailability->verify($p);
+            if ($liveAvailability === null) {
+                return ['ok' => false, 'error' => 'The current product page could not verify availability. Do not quote cached stock.'];
+            }
+            $p->refresh();
+            if ($liveAvailability && $this->stockPrecision($p) !== 'exact' && $a['quantity'] > 1) {
+                return ['ok' => false, 'error' => 'The product page confirms availability but not the requested quantity. Do not call it sold out; offer human help.'];
+            }
+        }
+
+        $available = $this->availableStock($p, $conversation);
 
         $result = [
             'ok' => true,
@@ -1128,7 +1151,9 @@ class SalesToolbox
             'stock_precision' => $this->stockPrecision($p),
             'available' => $available >= $a['quantity'],
             'in_stock' => $available > 0,
-            'source' => $this->catalogSource($agent),
+            'source' => $livePage
+                ? ['label' => 'Live product page', 'type' => 'public_product_page', 'checked_at' => now()->toIso8601String()]
+                : $this->catalogSource($agent),
         ];
         if ($result['stock_precision'] === 'exact') {
             $result['catalog_stock'] = (int) $p->stock;
