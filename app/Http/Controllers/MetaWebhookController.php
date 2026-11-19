@@ -11,7 +11,6 @@ use App\Support\PrivacyRedactor;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -177,6 +176,8 @@ class MetaWebhookController extends Controller
                         'text' => PrivacyRedactor::text($text),
                         'post_id' => (string) ($event['post_id'] ?? ''),
                         'source' => 'social_comment',
+                        'sender_name' => mb_substr(trim((string) ($event['sender_name'] ?? '')), 0, 120),
+                        'human_review_only' => ! ((bool) config('meta.comment_to_sale_enabled') && $connection->agent->automaticCommentRepliesEnabled()),
                     ],
                     'received_at' => $this->date($event['timestamp'] ?? null) ?? now(),
                 ],
@@ -188,53 +189,11 @@ class MetaWebhookController extends Controller
             return;
         }
 
-        if ((bool) config('meta.comment_to_sale_enabled') && $connection->agent->automaticCommentRepliesEnabled()) {
-            ProcessMetaInboundMessage::dispatch($record->id)
-                ->onQueue('channels')
-                ->afterCommit();
-
-            return;
-        }
-
-        DB::transaction(function () use ($record, $connection, $event, $senderId, $text): void {
-            $locked = ChannelMessage::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
-            if ($locked->conversation_id) {
-                return;
-            }
-            $provider = (string) $connection->provider;
-            $conversation = $connection->agent->conversations()->create([
-                'channel_connection_id' => $connection->id,
-                'visitor_id' => "meta-comment:{$provider}:{$connection->id}:".hash('sha256', $senderId),
-                'external_thread_id' => (string) $event['provider_message_id'],
-                'customer_name' => filled($event['sender_name'] ?? null)
-                    ? mb_substr((string) $event['sender_name'], 0, 120)
-                    : ucfirst($provider).' commenter',
-                'channel' => $provider.'_comment',
-                'status' => 'human',
-                'intent' => 'social_comment',
-                'priority' => 'high',
-                'handoff_reason' => 'A customer commented on a social post. Review it before deciding whether to reply.',
-                'context' => [
-                    'source_type' => 'social_comment',
-                    'provider' => $provider,
-                    'post_id' => (string) ($event['post_id'] ?? ''),
-                ],
-                'last_message_at' => $this->date($event['timestamp'] ?? null) ?? now(),
-            ]);
-            $safeText = PrivacyRedactor::text($text);
-            $message = $conversation->messages()->create([
-                'role' => 'customer',
-                'content' => $safeText,
-                'metadata' => ['source_type' => 'social_comment', 'provider' => $provider],
-            ]);
-            $locked->update([
-                'conversation_id' => $conversation->id,
-                'message_id' => $message->id,
-                'status' => 'processed',
-                'payload' => ['source' => 'social_comment', 'content_removed' => true],
-                'processed_at' => now(),
-            ]);
-        });
+        // Both automatic and human-review comments use the same worker so a
+        // text-free webhook can be hydrated before any Inbox message is saved.
+        ProcessMetaInboundMessage::dispatch($record->id)
+            ->onQueue('channels')
+            ->afterCommit();
     }
 
     private function markDelivery(ChannelConnection $connection, array $event, string $status): void

@@ -99,6 +99,9 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 $payload = is_array($record->payload) ? $record->payload : [];
                 $payload['text'] = $text;
                 $payload['comment_text_hydrated'] = true;
+                $payload['sender_name'] = mb_substr(trim((string) ($connection->provider === 'instagram'
+                    ? data_get($details, 'from.username', data_get($payload, 'sender_name', ''))
+                    : data_get($details, 'from.name', data_get($payload, 'sender_name', '')))), 0, 120);
                 $record->update(['payload' => $payload]);
             }
         }
@@ -108,6 +111,15 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                 'payload' => $this->minimalPayload($record),
                 'processed_at' => now(),
             ]);
+
+            return;
+        }
+
+        if ($record->message_type === 'comment'
+            && ((bool) data_get($record->payload, 'human_review_only', false)
+                || ! (bool) config('meta.comment_to_sale_enabled')
+                || ! $connection->agent->automaticCommentRepliesEnabled())) {
+            $this->preserveCommentForHumanReview($record, $connection, $senderId, $text);
 
             return;
         }
@@ -265,6 +277,53 @@ class ProcessMetaInboundMessage implements ShouldBeUnique, ShouldQueue
                     'processed_at' => now(),
                 ]);
             });
+    }
+
+    private function preserveCommentForHumanReview(
+        ChannelMessage $record,
+        ChannelConnection $connection,
+        string $senderId,
+        string $text,
+    ): void {
+        DB::transaction(function () use ($record, $connection, $senderId, $text): void {
+            $locked = ChannelMessage::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
+            if ($locked->conversation_id || $locked->status !== 'received') {
+                return;
+            }
+
+            $provider = (string) $connection->provider;
+            $conversation = $connection->agent->conversations()->create([
+                'channel_connection_id' => $connection->id,
+                'visitor_id' => "meta-comment:{$provider}:{$connection->id}:".hash('sha256', $senderId),
+                'external_thread_id' => (string) $locked->provider_message_id,
+                'customer_name' => filled(data_get($locked->payload, 'sender_name'))
+                    ? data_get($locked->payload, 'sender_name')
+                    : ucfirst($provider).' commenter',
+                'channel' => $provider.'_comment',
+                'status' => 'human',
+                'intent' => 'social_comment',
+                'priority' => 'high',
+                'handoff_reason' => 'A customer commented on a social post. Review it before deciding whether to reply.',
+                'context' => [
+                    'source_type' => 'social_comment',
+                    'provider' => $provider,
+                    'post_id' => (string) data_get($locked->payload, 'post_id', ''),
+                ],
+                'last_message_at' => $locked->received_at ?? now(),
+            ]);
+            $message = $conversation->messages()->create([
+                'role' => 'customer',
+                'content' => $text,
+                'metadata' => ['source_type' => 'social_comment', 'provider' => $provider],
+            ]);
+            $locked->update([
+                'conversation_id' => $conversation->id,
+                'message_id' => $message->id,
+                'status' => 'processed',
+                'payload' => $this->minimalPayload($locked),
+                'processed_at' => now(),
+            ]);
+        });
     }
 
     private function prepareCommentConversation(

@@ -270,12 +270,18 @@ class MetaTransportTest extends TestCase
         $this->metaWebhook($body, $signature)->assertOk();
 
         $this->assertDatabaseCount('channel_messages', 1);
+        $record = ChannelMessage::query()->sole();
+        $this->assertDatabaseCount('conversations', 0);
+        Queue::assertPushed(ProcessMetaInboundMessage::class, 1);
+        (new ProcessMetaInboundMessage($record->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+        );
         $conversation = $agent->conversations()->sole();
         $this->assertSame('facebook_comment', $conversation->channel);
         $this->assertSame('human', $conversation->status);
         $this->assertSame('social_comment', data_get($conversation->context, 'source_type'));
         $this->assertSame('Is this still available?', $conversation->messages()->where('role', 'customer')->sole()->content);
-        Queue::assertNothingPushed();
 
         $this->actingAs($user)->get(route('inbox.index', ['conversation' => $conversation->id]))
             ->assertOk()
@@ -292,6 +298,61 @@ class MetaTransportTest extends TestCase
         ]);
         Queue::assertPushed(SendMetaMessage::class, 1);
         $this->assertSame($connection->id, $conversation->channel_connection_id);
+    }
+
+    public function test_comment_without_webhook_text_is_hydrated_before_human_review(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant();
+        $agent->update(['settings' => ['automatic_comment_replies_enabled' => false]]);
+        $agent->channelConnections()->create([
+            'provider' => 'facebook',
+            'status' => 'active',
+            'external_account_id' => 'page-missing-text',
+            'access_token' => 'page-access-token',
+            'connected_at' => now(),
+        ]);
+        Http::fake(['https://graph.facebook.test/v25.0/comment-missing-text*' => Http::response([
+            'id' => 'comment-missing-text',
+            'message' => 'Is this book available?',
+            'from' => ['id' => 'customer-commenter', 'name' => 'Interested Customer'],
+        ])]);
+        $payload = ['object' => 'page', 'entry' => [[
+            'id' => 'page-missing-text',
+            'changes' => [[
+                'field' => 'feed',
+                'value' => [
+                    'item' => 'comment',
+                    'verb' => 'add',
+                    'comment_id' => 'comment-missing-text',
+                    'post_id' => 'page-missing-text_post-1',
+                    'from' => ['id' => 'customer-commenter'],
+                ],
+            ]],
+        ]]];
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        $signature = 'sha256='.hash_hmac('sha256', $body, 'meta-app-secret');
+
+        $this->metaWebhook($body, $signature)->assertOk();
+        $this->metaWebhook($body, $signature)->assertOk();
+
+        $record = ChannelMessage::query()->sole();
+        $this->assertDatabaseCount('conversations', 0);
+        Queue::assertPushed(ProcessMetaInboundMessage::class, 1);
+
+        (new ProcessMetaInboundMessage($record->id))->handle(
+            app(ConversationEngine::class),
+            app(ChannelMessageDispatcher::class),
+            meta: app(MetaGraphClient::class),
+        );
+
+        $conversation = $agent->conversations()->sole();
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame('facebook_comment', $conversation->channel);
+        $this->assertSame('Interested Customer', $conversation->customer_name);
+        $this->assertSame('Is this book available?', $conversation->messages()->sole()->content);
+        $this->assertSame('processed', $record->fresh()->status);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/comment-missing-text?'));
     }
 
     public function test_rejected_comment_webhook_logs_only_a_content_free_shape(): void
