@@ -29,7 +29,17 @@ class SyncKnowledge extends Command
                     $query->whereNull('last_synced_at')
                         ->orWhere('last_synced_at', '<=', now()->subHour());
                 });
-            $source = (clone $due)->where('source_scope', 'catalog')
+            // A legacy language index could report ready/100% after seeing
+            // only homepage cards. Upgrade active schedules to the complete
+            // listing crawler before another product rotation is allowed.
+            $source = KnowledgeSource::query()
+                ->where('type', 'url')->where('source_scope', 'language')
+                ->where('status', 'ready')->where('progress', 100)
+                ->whereNull('error')->whereNotNull('url')
+                ->where('index_version', '<', 3)
+                ->whereHas('agent.socialMediaSchedules', fn ($query) => $query->where('status', 'active'))
+                ->orderBy('last_synced_at')->orderBy('id')->first();
+            $source ??= (clone $due)->where('source_scope', 'catalog')
                 ->orderBy('last_synced_at')->orderBy('id')->first();
             $source ??= (clone $due)->where('source_scope', 'language')
                 ->whereHas('agent.socialMediaSchedules', fn ($query) => $query->where('status', 'active'))

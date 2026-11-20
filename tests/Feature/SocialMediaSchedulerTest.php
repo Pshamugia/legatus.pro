@@ -2513,7 +2513,7 @@ class SocialMediaSchedulerTest extends TestCase
         $englishSource = $agent->knowledgeSources()->create([
             'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
             'name' => 'Website language: English', 'url' => 'https://shop.example/en',
-            'status' => 'ready', 'progress' => 100,
+            'status' => 'ready', 'progress' => 100, 'index_version' => 3,
         ]);
         $attributes = $this->product('Verified English Product', 'Books', 3);
         $attributes['metadata']['source_id'] = $englishSource->id;
@@ -2542,6 +2542,90 @@ class SocialMediaSchedulerTest extends TestCase
             'agent_id' => $agent->id,
             'provider' => 'instagram',
             'current_cycle' => 2,
+        ]);
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($secondPost->schedule, $secondPost->scheduled_for);
+        $this->assertSame([$secondPost->id], $safeIds);
+    }
+
+    public function test_secondary_language_cannot_repeat_from_an_old_partial_index(): void
+    {
+        [$user, $agent] = $this->tenant('partial-language-cycle');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Primary language',
+            'name' => 'Primary language', 'url' => 'https://shop.example',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $languageSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Secondary language',
+            'name' => 'Secondary language', 'url' => 'https://shop.example/secondary',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 2,
+        ]);
+        $attributes = $this->product('Only indexed product', 'General', 2);
+        $attributes['metadata']['source_id'] = $languageSource->id;
+        $attributes['metadata']['languages'] = ['Secondary language'];
+        $agent->products()->create($attributes);
+        $payload = [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['Secondary language'],
+        ];
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $first = $agent->socialMediaPosts()->sole();
+        $first->update(['status' => 'published', 'published_at' => now()]);
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $this->assertNull($agent->socialMediaSchedules()->latest('id')->firstOrFail()->posts()->value('product_id'));
+        $this->assertDatabaseCount('social_publication_cycles', 0);
+
+        $languageSource->update(['index_version' => 3]);
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $this->assertNotNull($agent->socialMediaSchedules()->latest('id')->firstOrFail()->posts()->value('product_id'));
+        $this->assertDatabaseHas('social_publication_cycles', [
+            'agent_id' => $agent->id, 'provider' => 'instagram', 'current_cycle' => 2,
+        ]);
+    }
+
+    public function test_complete_secondary_language_waits_for_every_eligible_product_before_restarting(): void
+    {
+        [$user, $agent] = $this->tenant('complete-language-cycle');
+        $this->connections($agent);
+        $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Primary language',
+            'name' => 'Primary language', 'url' => 'https://shop.example',
+            'status' => 'ready', 'progress' => 100,
+        ]);
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Secondary language',
+            'name' => 'Secondary language', 'url' => 'https://shop.example/secondary',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 3,
+        ]);
+        foreach (['First', 'Second'] as $name) {
+            $attributes = $this->product($name, 'General', 2);
+            $attributes['metadata']['source_id'] = $source->id;
+            $attributes['metadata']['languages'] = ['Secondary language'];
+            $agent->products()->create($attributes);
+        }
+        $payload = [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['instagram'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['Secondary language'],
+        ];
+
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $first = $agent->socialMediaSchedules()->latest('id')->firstOrFail()->posts()->sole();
+        $first->update(['status' => 'published', 'published_at' => now()]);
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $second = $agent->socialMediaSchedules()->latest('id')->firstOrFail()->posts()->sole();
+        $this->assertNotSame($first->product_id, $second->product_id);
+        $this->assertDatabaseCount('social_publication_cycles', 0);
+
+        $second->update(['status' => 'published', 'published_at' => now()]);
+        $this->actingAs($user)->post(route('social-media.store'), $payload)->assertSessionHasNoErrors();
+        $third = $agent->socialMediaSchedules()->latest('id')->firstOrFail()->posts()->sole();
+        $this->assertContains($third->product_id, [$first->product_id, $second->product_id]);
+        $this->assertDatabaseHas('social_publication_cycles', [
+            'agent_id' => $agent->id, 'provider' => 'instagram', 'current_cycle' => 2,
         ]);
     }
 
@@ -3459,6 +3543,26 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertSame([$replacement->id], $duePosts->pluck('product_id')->unique()->values()->all());
         $this->assertTrue($duePosts->every(fn ($post): bool => str_contains($post->caption, 'Unused Replacement')));
         Queue::assertPushed(PublishSocialMediaPost::class, 2);
+    }
+
+    public function test_dispatch_skips_day_old_unfilled_slots_instead_of_burst_publishing_after_sync(): void
+    {
+        Queue::fake();
+        [, $agent] = $this->tenant('expired-unfilled-social-slot');
+        $schedule = $this->replacementSchedule($agent, ['facebook']);
+        $post = $schedule->posts()->create([
+            'agent_id' => $agent->id, 'product_id' => null, 'provider' => 'facebook',
+            'status' => 'scheduled', 'scheduled_for' => now('UTC')->subDays(2),
+            'title' => 'Next eligible product', 'product_url' => '', 'caption' => '',
+        ]);
+
+        $this->artisan('legatus:dispatch-social-posts')
+            ->expectsOutput('0 social slots queued for preparation.')
+            ->assertSuccessful();
+
+        $this->assertSame('skipped', $post->fresh()->status);
+        $this->assertStringContainsString('backlog', (string) $post->fresh()->failure_reason);
+        Queue::assertNotPushed(PrepareSocialMediaSlot::class);
     }
 
     public function test_due_multi_channel_slot_replaces_a_product_that_sold_out_after_scheduling(): void

@@ -237,18 +237,11 @@ class SocialMediaScheduler
             ->whereIn('status', ['scheduled', 'preparing', 'queued'])
             ->where('scheduled_for', '<=', $scheduledFor)
             ->exists();
-        $alreadyPublished = $product && (
-            $schedule->agent->socialMediaPosts()
-                ->where('product_id', $product->id)
-                ->where('status', 'published')
-                ->whereNotIn('id', $slotPostIds)
-                ->exists()
-            || $this->publicationHistory->wasUsedOnAny(
+        $alreadyPublished = $product && $this->publicationHistory->wasUsedOnAny(
                 $schedule->agent,
                 $product,
                 $pending->pluck('provider')->all(),
-            )
-        );
+            );
         $requiresDescription = $pending->contains(
             fn ($post): bool => ($post->copy_mode ?: $schedule->copy_mode) === 'ai',
         );
@@ -263,13 +256,13 @@ class SocialMediaScheduler
             );
         }
 
-        // Published and already-claimed products are globally unavailable for
-        // replacement. Future scheduled products may be pulled forward; their
-        // own slot will be revalidated in exactly the same way when it is due.
+        // Published products are excluded by the current-cycle ledger below,
+        // not by all-time post history. Otherwise a completed cycle could
+        // never publish a product again when its next slot becomes due.
         $reservedProductIds = $schedule->agent->socialMediaPosts()
             ->whereNotIn('id', $slotPostIds)
             ->where(function ($query) use ($scheduledFor): void {
-                $query->whereIn('status', ['preparing', 'queued', 'published'])
+                $query->whereIn('status', ['preparing', 'queued'])
                     ->orWhere(function ($due) use ($scheduledFor): void {
                         $due->where('status', 'scheduled')
                             ->where('scheduled_for', '<=', $scheduledFor);
@@ -634,7 +627,7 @@ class SocialMediaScheduler
     private function startNewCycleWhenExhausted(Agent $agent, Collection $products, array $providers, ?Collection $usedProductIds = null): bool
     {
         if ($products->isEmpty()
-            || ! $this->catalogCoverageIsComplete($agent)
+            || ! $this->catalogCoverageIsComplete($agent, $products->pluck('language')->filter()->unique()->all())
             || $this->publicationHistory->hasClaims($agent, $providers)) {
             return false;
         }
@@ -650,18 +643,38 @@ class SocialMediaScheduler
         return true;
     }
 
-    private function catalogCoverageIsComplete(Agent $agent): bool
+    private function catalogCoverageIsComplete(Agent $agent, array $languages = []): bool
     {
         $catalogSources = $agent->knowledgeSources()
             ->where('type', 'url')
             ->where('source_scope', 'catalog')
             ->get(['status', 'progress', 'error']);
 
-        return $catalogSources->isEmpty() || $catalogSources->every(
+        $catalogReady = $catalogSources->isEmpty() || $catalogSources->every(
             fn ($source): bool => $source->status === 'ready'
                 && (int) $source->progress === 100
                 && blank($source->error),
         );
+        if (! $catalogReady || $languages === []) {
+            return $catalogReady;
+        }
+
+        $languageSources = $agent->knowledgeSources()
+            ->where('type', 'url')->where('source_scope', 'language')
+            ->get(['taxonomy_label', 'status', 'progress', 'error', 'index_version']);
+
+        return collect($languages)->every(function (string $language) use ($languageSources): bool {
+            $source = $languageSources->first(fn ($candidate): bool => Str::lower(trim((string) $candidate->taxonomy_label)) === Str::lower(trim($language)));
+
+            // Version 3 proves the full language listing was crawled with the
+            // restartable indexer. Older 'ready' indexes could contain only
+            // homepage cards, so they must be resynced before cycling.
+            return $source !== null
+                && $source->status === 'ready'
+                && (int) $source->progress === 100
+                && blank($source->error)
+                && (int) $source->index_version >= 3;
+        });
     }
 
     private function liveAvailabilityAllows(Agent $agent, $product): bool

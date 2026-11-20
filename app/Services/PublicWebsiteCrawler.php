@@ -5,7 +5,9 @@ namespace App\Services;
 use App\Jobs\CrawlPublicWebsite;
 use App\Jobs\EmbedKnowledgeSource;
 use App\Jobs\EnrichPublicCatalogProducts;
+use App\Jobs\EnrichPublicLanguageProducts;
 use App\Models\KnowledgeSource;
+use App\Models\Product;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -32,18 +34,18 @@ class PublicWebsiteCrawler
         $classificationOnly = $taxonomyOnly || $source->source_scope === 'language';
         $listingOnly = $classificationOnly || $source->source_scope === 'catalog';
         $catalogIndexOnly = $source->source_scope === 'catalog';
+        $languageIndexOnly = $source->source_scope === 'language';
         if ($taxonomyOnly) {
             // A named category/genre URL is a scoped collection, not another
             // request to crawl the business's entire domain.
             $maximumPages = min($maximumPages, max(10, (int) config('legatus.taxonomy_crawl_max_pages', 250)));
         }
-        if ($source->source_scope === 'language') {
-            // Language indexes also visit product pages for localized
-            // descriptions. Keep each crawl inside shared-host worker limits.
-            $maximumPages = min($maximumPages, 15);
-        }
+        // Language collections need the same restartable listing-page budget
+        // as the main catalog. Product details are enriched in bounded jobs.
         $maximumProducts = max(1, min(10_000, (int) config('legatus.commerce_max_catalog_products', 10000)));
-        $savedState = is_array($source->crawl_state) && ($source->crawl_state['start_url'] ?? null) === $startUrl
+        $savedState = is_array($source->crawl_state)
+            && ($source->crawl_state['start_url'] ?? null) === $startUrl
+            && (! $languageIndexOnly || (int) ($source->crawl_state['indexer_version'] ?? 0) >= 3)
             ? $source->crawl_state
             : [];
         $crawlStartedAt = isset($savedState['started_at'])
@@ -149,7 +151,10 @@ class PublicWebsiteCrawler
                     $this->storeReadablePage($source, $url, $body, $products !== []);
                 }
 
-                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly, $catalogIndexOnly) as $discovered) {
+                foreach ($this->discoverLinks($body, $url, $products, $listingOnly, $taxonomyOnly, $catalogIndexOnly || $languageIndexOnly, $languageIndexOnly && $url === $startUrl ? $startUrl : null) as $discovered) {
+                    if ($languageIndexOnly && ! $this->matchesLanguageScope($startUrl, $discovered)) {
+                        continue;
+                    }
                     $this->enqueue($queue, $queued, $discovered, $host, $maximumPages);
                 }
 
@@ -205,7 +210,7 @@ class PublicWebsiteCrawler
                 'content_hash' => $contentHash,
                 'crawl_state' => null,
                 'last_synced_at' => now(),
-                'index_version' => $classificationOnly ? 2 : (int) $source->index_version,
+                'index_version' => $languageIndexOnly ? 3 : ($classificationOnly ? 2 : (int) $source->index_version),
                 'error' => $queue === []
                     ? null
                     : "Crawl reached the configured {$maximumPages}-page safety limit.",
@@ -215,6 +220,9 @@ class PublicWebsiteCrawler
             }
             if ($catalogIndexOnly && $productCount > 0) {
                 EnrichPublicCatalogProducts::dispatch($source->id);
+            }
+            if ($languageIndexOnly && $productCount > 0) {
+                EnrichPublicLanguageProducts::dispatch($source->id);
             }
         } catch (\Throwable $exception) {
             $source->update([
@@ -269,9 +277,14 @@ class PublicWebsiteCrawler
     }
 
     /** @return list<string> */
-    public function enrichProductPage(KnowledgeSource $source, string $url, string $html): void
+    public function enrichProductPage(KnowledgeSource $source, string $url, string $html, ?Product $knownProduct = null): void
     {
-        $product = $source->agent->products()
+        $product = $knownProduct;
+        if ($product && ($product->agent_id !== $source->agent_id
+            || ($source->source_scope === 'language' && data_get($product->metadata, 'localized.'.trim((string) $source->taxonomy_label).'.product_url') !== $url))) {
+            return;
+        }
+        $product ??= $source->agent->products()
             ->where('metadata->source_id', $source->id)
             ->where('metadata->product_url', $url)
             ->first();
@@ -321,6 +334,7 @@ class PublicWebsiteCrawler
         bool $listingOnly = false,
         bool $taxonomyOnly = false,
         bool $catalogIndexOnly = false,
+        ?string $languageStartUrl = null,
     ): array {
         $dom = new \DOMDocument;
         @$dom->loadHTML('<?xml encoding="utf-8" ?>'.$html);
@@ -346,6 +360,27 @@ class PublicWebsiteCrawler
             }
         }
 
+        if ($languageStartUrl !== null) {
+            // A language home often links to its full collection via an
+            // ordinary anchor, rather than a pagination control. Follow
+            // same-locale collection candidates, not product detail links.
+            $productUrls = collect($products)
+                ->map(fn (array $product) => $this->normalizeUrl($product['url'] ?? data_get($product, 'offers.url')))
+                ->filter()->flip();
+            $candidates = 0;
+            foreach ($xpath->query('//a[@href]') as $node) {
+                $candidate = $this->absoluteUrl($pageUrl, $node->getAttribute('href'));
+                $normalized = $this->normalizeUrl($candidate);
+                if ($normalized === null || $productUrls->has($normalized) || ! $this->matchesLanguageScope($languageStartUrl, $normalized)) {
+                    continue;
+                }
+                $links[] = $normalized;
+                if (++$candidates >= 50) {
+                    break;
+                }
+            }
+        }
+
         return collect($links)
             ->filter(fn ($url) => is_string($url) && trim($url) !== '')
             ->map(fn (string $url) => $this->absoluteUrl($pageUrl, $url))
@@ -353,6 +388,28 @@ class PublicWebsiteCrawler
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function matchesLanguageScope(string $startUrl, string $candidate): bool
+    {
+        if (parse_url($startUrl, PHP_URL_HOST) !== parse_url($candidate, PHP_URL_HOST)) {
+            return false;
+        }
+        parse_str((string) parse_url($startUrl, PHP_URL_QUERY), $startQuery);
+        parse_str((string) parse_url($candidate, PHP_URL_QUERY), $candidateQuery);
+        foreach (['lang', 'locale'] as $key) {
+            if (isset($startQuery[$key]) && $startQuery[$key] !== ($candidateQuery[$key] ?? null)) {
+                return false;
+            }
+        }
+        if (! isset($startQuery['lang']) && ! isset($startQuery['locale'])) {
+            $firstSegment = explode('/', trim((string) parse_url($startUrl, PHP_URL_PATH), '/'))[0] ?? '';
+            $candidatePath = trim((string) parse_url($candidate, PHP_URL_PATH), '/');
+
+            return $firstSegment === '' || $candidatePath === $firstSegment || str_starts_with($candidatePath, $firstSegment.'/');
+        }
+
+        return true;
     }
 
     private function pageUrl(string $url, int $page): string
@@ -502,6 +559,7 @@ class PublicWebsiteCrawler
             'status' => 'processing',
             'crawl_state' => [
                 'start_url' => $startUrl,
+                'indexer_version' => $source->source_scope === 'language' ? 3 : (int) $source->index_version,
                 'started_at' => $startedAt->toIso8601String(),
                 'queue' => array_values($queue),
                 'queued' => array_keys($queued),

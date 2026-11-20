@@ -1170,6 +1170,34 @@ HTML;
         $this->assertSame('processing', $category->fresh()->status);
     }
 
+    public function test_automatic_social_refresh_upgrades_legacy_language_index_before_rotating_again(): void
+    {
+        Queue::fake();
+        $agent = Agent::create(['name' => 'Shop', 'slug' => 'legacy-language-refresh', 'business_name' => 'Shop']);
+        $catalog = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Catalog',
+            'url' => 'https://shop.example/catalog', 'status' => 'ready', 'progress' => 100,
+            'last_synced_at' => now()->subHours(2),
+        ]);
+        $language = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'Secondary language',
+            'name' => 'Secondary language', 'url' => 'https://shop.example/secondary',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 2,
+            'last_synced_at' => now()->subMinutes(5),
+        ]);
+        $agent->socialMediaSchedules()->create([
+            'starts_on' => today(), 'ends_on' => today()->addDay(),
+            'posts_per_day' => 1, 'categories' => [], 'languages' => ['Secondary language'],
+            'providers' => ['facebook'], 'timezone' => 'UTC', 'status' => 'active',
+        ]);
+
+        $this->artisan('legatus:sync-knowledge --auto-social-sources')->assertSuccessful();
+
+        Queue::assertPushed(CrawlPublicWebsite::class, fn (CrawlPublicWebsite $job): bool => $job->sourceId === $language->id);
+        $this->assertSame('processing', $language->fresh()->status);
+        $this->assertSame('ready', $catalog->fresh()->status);
+    }
+
     public function test_seeded_fixture_sources_are_static_labeled_and_embedding_honest(): void
     {
         $this->seed();

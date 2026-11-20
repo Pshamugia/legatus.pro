@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\CrawlPublicWebsite;
 use App\Jobs\EmbedKnowledgeSource;
 use App\Jobs\EnrichPublicCatalogProducts;
+use App\Jobs\EnrichPublicLanguageProducts;
 use App\Models\Agent;
 use App\Services\KnowledgeIngestionService;
 use App\Services\PublicWebsiteCrawler;
@@ -280,6 +281,7 @@ class PublicWebsiteCrawlerTest extends TestCase
 
     public function test_language_catalog_classifies_existing_products_without_overwriting_primary_copy(): void
     {
+        Queue::fake();
         $this->seed();
         config(['services.openai.key' => null]);
         $agent = Agent::firstOrFail();
@@ -313,6 +315,11 @@ class PublicWebsiteCrawlerTest extends TestCase
         });
 
         app(PublicWebsiteCrawler::class)->crawl($language);
+        Queue::assertPushed(EnrichPublicLanguageProducts::class, fn ($job): bool => $job->sourceId === $language->id);
+        (new EnrichPublicLanguageProducts($language->id))->handle(
+            app(PublicWebsiteCrawler::class),
+            app(KnowledgeIngestionService::class),
+        );
 
         $product->refresh();
         $this->assertSame('ქართული წიგნი', $product->name);
@@ -337,6 +344,58 @@ class PublicWebsiteCrawlerTest extends TestCase
         $this->assertSame('Русская книга', data_get($product->fresh()->metadata, 'localized.Russian.name'));
         $this->assertSame('Подробное русское описание книги.', data_get($product->metadata, 'localized.Russian.description'));
         $this->assertSame(['Russian'], data_get($product->metadata, 'languages'));
+    }
+
+    public function test_language_homepage_follows_its_listing_and_all_pagination_without_crossing_locales(): void
+    {
+        Queue::fake();
+        $this->seed();
+        config([
+            'services.openai.key' => null,
+            'legatus.public_crawl_max_pages' => 40,
+            'legatus.public_crawl_batch_pages' => 5,
+        ]);
+        $agent = Agent::firstOrFail();
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
+            'name' => 'Website language: English', 'url' => 'https://bukinistebi.ge/?lang=en',
+        ]);
+        $source->update(['crawl_state' => [
+            'start_url' => 'https://bukinistebi.ge/?lang=en',
+            'queue' => ['https://bukinistebi.ge/products/old-homepage-card'],
+            'queued' => ['https://bukinistebi.ge/?lang=en', 'https://bukinistebi.ge/products/old-homepage-card'],
+            'visited' => ['https://bukinistebi.ge/?lang=en'],
+        ]]);
+
+        Http::fake(function ($request) {
+            $url = $request->url();
+            if ($url === 'https://bukinistebi.ge/?lang=en') {
+                return Http::response('<html><body><a href="/catalog?lang=en">Browse products</a><a href="/catalog?lang=ru">Other locale</a></body></html>');
+            }
+            parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+            $page = max(1, (int) ($query['page'] ?? 1));
+            if (parse_url($url, PHP_URL_PATH) === '/catalog' && ($query['lang'] ?? null) === 'en' && $page <= 16) {
+                return Http::response(
+                    $this->catalogPage("English item {$page}", "EN-{$page}", 10, "/products/item-{$page}", null, $page < 16 ? $page + 1 : null),
+                    200,
+                    ['Content-Type' => 'text/html'],
+                );
+            }
+
+            return Http::response('', 404);
+        });
+
+        $crawler = app(PublicWebsiteCrawler::class);
+        foreach (range(1, 4) as $batch) {
+            $crawler->crawl($source);
+        }
+
+        $this->assertSame('ready', $source->fresh()->status);
+        $this->assertSame(16, $source->fresh()->items_found);
+        $this->assertNull($source->fresh()->error);
+        $this->assertDatabaseHas('products', ['agent_id' => $agent->id, 'sku' => 'EN-16']);
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), 'lang=ru') || str_contains($request->url(), '/products/item-'));
+        Queue::assertPushed(EnrichPublicLanguageProducts::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
     public function test_taxonomy_sync_removes_legacy_passages_and_counts_shared_products(): void

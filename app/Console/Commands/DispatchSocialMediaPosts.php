@@ -18,6 +18,18 @@ class DispatchSocialMediaPosts extends Command
 
     public function handle(): int
     {
+        // Do not burst-publish days of missed slots after a catalog or
+        // provider outage clears. Keep their audit rows and let future slots
+        // continue with the still-unused products.
+        SocialMediaPost::query()
+            ->where('status', 'scheduled')
+            ->where('scheduled_for', '<', now('UTC')->subDay())
+            ->whereHas('schedule', fn ($query) => $query->where('status', 'active'))
+            ->update([
+                'status' => 'skipped',
+                'failure_reason' => 'The scheduled time passed more than a day ago. This slot was skipped to avoid publishing a backlog at once.',
+            ]);
+
         // A hard stop during this non-idempotent request must not trigger a
         // second Story automatically and create a duplicate in Meta.
         SocialMediaPost::query()
