@@ -337,6 +337,7 @@
     </main>
 </div>
 
+@push('head')
 <style nonce="{{ request()->attributes->get('csp_nonce') }}">
 .platform-mark.threads{background:#111;color:#fff}
 .preview-product-setting{display:grid;grid-template-columns:minmax(190px,.45fr) minmax(0,1fr);align-items:center;gap:16px;padding:14px 16px;margin:0 0 18px;border:1px solid var(--line);border-radius:14px;background:#f7faf7}.preview-product-setting span,.preview-product-setting small{display:block}.preview-product-setting small{margin-top:4px;color:var(--muted);font-size:10px;line-height:1.45}.preview-product-setting input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;background:#fff;padding:11px 12px;color:var(--ink)}
@@ -380,6 +381,7 @@
 }
 @media(max-width:380px){.image-style-grid{grid-template-columns:minmax(0,1fr)}.template-panel,.schedule-form,.connection-panel,.schedule-list{padding:14px}}
 </style>
+@endpush
 
 <script nonce="{{ request()->attributes->get('csp_nonce') }}">
 (() => {

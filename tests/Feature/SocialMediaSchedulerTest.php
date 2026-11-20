@@ -39,6 +39,25 @@ class SocialMediaSchedulerTest extends TestCase
         config()->set('meta.retries', 0);
     }
 
+    public function test_scheduler_styles_are_available_before_the_page_body_renders(): void
+    {
+        [$user] = $this->tenant('scheduler-first-paint');
+
+        $html = $this->actingAs($user)->get(route('social-media.index'))
+            ->assertOk()
+            ->getContent();
+
+        $headEnd = strpos($html, '</head>');
+        $bodyStart = strpos($html, '<body>');
+        $schedulerStyles = strpos($html, '.template-workspace{display:grid');
+
+        $this->assertNotFalse($headEnd);
+        $this->assertNotFalse($bodyStart);
+        $this->assertNotFalse($schedulerStyles);
+        $this->assertLessThan($headEnd, $schedulerStyles);
+        $this->assertLessThan($bodyStart, $schedulerStyles);
+    }
+
     public function test_owner_builds_a_tenant_scoped_multi_channel_schedule_from_public_products(): void
     {
         [$user, $agent] = $this->tenant('scheduler-owner');
