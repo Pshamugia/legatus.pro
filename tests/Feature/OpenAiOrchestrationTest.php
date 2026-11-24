@@ -3623,6 +3623,116 @@ class OpenAiOrchestrationTest extends TestCase
         $this->assertSame([], $response->json('products'));
     }
 
+    public function test_empty_public_comment_catalog_search_goes_to_human_without_a_public_reply(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $conversation = $agent->conversations()->create([
+            'visitor_id' => 'public-comment-empty-category',
+            'status' => 'ai',
+            'channel' => 'facebook_comment',
+            'context' => ['reply_mode' => 'public_comment'],
+        ]);
+        config(['services.openai.key' => 'test-key', 'services.openai.hybrid_enabled' => false]);
+
+        Http::fakeSequence()
+            ->push(['results' => [['flagged' => false]]])
+            ->push(['id' => 'public-broad-context', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'is_delivery_request' => false, 'delivery_request_type' => 'none',
+                    'is_human_request' => false, 'human_request_evidence' => null,
+                    'requested_discount_percent' => null, 'discount_request_evidence' => null,
+                    'is_business_knowledge_request' => false, 'knowledge_query' => null, 'knowledge_scope' => null,
+                    'is_catalog_follow_up' => true, 'catalog_scope_action' => 'none',
+                    'recommendation_scope' => 'none', 'recommendation_query' => null,
+                    'recommendation_category' => null, 'recommendation_occasion' => null,
+                    'resolved_query' => 'Unobtainium furniture', 'resolved_queries' => ['Unobtainium furniture'],
+                    'referenced_product_id' => null, 'resolved_category' => null,
+                    'catalog_match_scope' => 'entity_family', 'exclude_product_ids' => [],
+                    'expects_complete_set' => false,
+                ])]],
+            ]]])
+            ->push(['id' => 'public-broad-search', 'output' => [[
+                'type' => 'function_call', 'name' => 'search_products', 'call_id' => 'public-broad-call',
+                'arguments' => json_encode([
+                    'query' => 'Unobtainium furniture', 'category' => null,
+                    'language' => null, 'match_scope' => 'entity_family',
+                    'max_price' => null, 'exclude_product_ids' => [],
+                ]),
+            ]]])
+            ->push(['id' => 'public-broad-draft', 'output' => [[
+                'type' => 'message', 'content' => [['type' => 'output_text', 'text' => json_encode([
+                    'text' => 'I could not verify this category right now.',
+                    'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+                    'escalation_reason' => null, 'product_ids' => [], 'sources' => [],
+                    'factual_claims' => [],
+                ])]],
+            ]]]);
+
+        $result = app(ConversationEngine::class)->handle(
+            $agent, 'Do you have Unobtainium furniture?',
+            'facebook_comment', 'public-comment-empty-category', 'comment-empty-category-1',
+        );
+
+        $this->assertTrue($result['handoff']);
+        $this->assertNull($result['text']);
+        $this->assertArrayNotHasKey('message_id', $result);
+        $this->assertSame('human', $conversation->fresh()->status);
+        $this->assertSame('high', $conversation->fresh()->priority);
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
+        $this->assertSame(1, $conversation->messages()->where('role', 'customer')->count());
+        $this->assertNotNull($conversation->fresh()->handoff_reason);
+        $this->assertContains('public_comment_catalog_review', collect(AgentRun::latest('id')->firstOrFail()->tools_used)->pluck('name')->all());
+    }
+
+    public function test_any_public_comment_handoff_never_creates_an_assistant_message(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $salesAgent = \Mockery::mock(SalesAgentService::class);
+        $salesAgent->shouldReceive('reply')->once()->andReturn([
+            'text' => 'A customer-facing handoff notice must not appear in public.',
+            'intent' => 'handoff', 'confidence' => 1, 'handoff' => true,
+            'escalation_reason' => 'The answer needs an operator.',
+            'products' => [], 'sources' => [], 'tools_used' => [],
+        ]);
+
+        $result = (new ConversationEngine($salesAgent))->handle(
+            $agent, 'Can you confirm this?', 'instagram_comment',
+            'public-comment-review', 'comment-review-1',
+        );
+
+        $this->assertNull($result['text']);
+        $this->assertArrayNotHasKey('message_id', $result);
+        $conversation = $agent->conversations()->where('visitor_id', 'public-comment-review')->firstOrFail();
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
+    }
+
+    public function test_public_comment_with_a_catalog_search_but_no_verified_answer_is_suppressed_at_final_boundary(): void
+    {
+        $this->seed();
+        $agent = Agent::firstOrFail();
+        $salesAgent = \Mockery::mock(SalesAgentService::class);
+        $salesAgent->shouldReceive('reply')->once()->andReturn([
+            'text' => 'I could not check that category right now.',
+            'intent' => 'discovery', 'confidence' => 1, 'handoff' => false,
+            'products' => [], 'sources' => [], 'tools_used' => ['search_products'],
+        ]);
+
+        $result = (new ConversationEngine($salesAgent))->handle(
+            $agent, 'Do you have this category?', 'facebook_comment',
+            'public-comment-unsupported', 'comment-unsupported-1',
+        );
+
+        $this->assertNull($result['text']);
+        $this->assertTrue($result['handoff']);
+        $this->assertArrayNotHasKey('message_id', $result);
+        $conversation = $agent->conversations()->where('visitor_id', 'public-comment-unsupported')->firstOrFail();
+        $this->assertSame('human', $conversation->status);
+        $this->assertSame(0, $conversation->messages()->where('role', 'assistant')->count());
+    }
+
     public function test_short_punctuation_follow_up_preserves_the_customer_language_for_catalog_miss(): void
     {
         $this->seed();

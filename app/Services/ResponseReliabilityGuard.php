@@ -108,6 +108,21 @@ final class ResponseReliabilityGuard
             }
         }
 
+        if (str_ends_with($conversation->channel, '_comment')
+            && ! $handoff
+            && $products->isEmpty()
+            && $tools->intersect(self::PRODUCT_EVIDENCE_TOOLS)->isNotEmpty()
+            && empty($reply['sources'])
+            && in_array($intent, ['clarification', 'discovery', 'price', 'stock', 'recommendation'], true)) {
+            // A catalog lookup without a verified result must not produce a
+            // public explanation, negative stock claim, or rephrase request.
+            // The operator can inspect the preserved customer turn instead.
+            $issues[] = 'public_comment_without_verified_catalog_answer';
+            $handoff = true;
+            $intent = 'handoff';
+            $text = '';
+        }
+
         if ($issues !== []) {
             $tools->push('reliability_guard');
             if (! $synthetic) {

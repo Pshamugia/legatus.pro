@@ -1649,6 +1649,7 @@ class OpenAiSalesOrchestrator
         }
 
         if ($escalationReason
+            && data_get($conversation->context, 'reply_mode') !== 'public_comment'
             && ($clarification = $this->missingProductIdentityClarification($message, $data, $usedCollection)) !== null) {
             // An ordinary stock question with no resolvable product identity
             // is not a safety incident and does not need a human operator.
@@ -1736,6 +1737,19 @@ class OpenAiSalesOrchestrator
             $escalationReason = null;
         }
 
+        if (($exactLookupMiss || $broadLookupMiss)
+            && data_get($conversation->context, 'reply_mode') === 'public_comment'
+            && $conversation->fresh()->status !== 'human') {
+            // An empty catalog search is not a useful public answer. Preserve
+            // the comment and search trace for an operator without posting a
+            // misleading "not found" or a technical explanation to everyone.
+            $reason = 'No matching product was verified for this public comment.';
+            $this->forceHandoff($conversation, $reason, 'Check the current catalog and reply to the comment only after verifying the answer.');
+            $data = $this->handoffReply('', $reason, ['public_comment_catalog_review']);
+            $escalationReason = null;
+            $used[] = ['name' => 'public_comment_catalog_review', 'arguments' => [], 'result' => ['ok' => true]];
+        }
+
         if (data_get($conversation->context, 'reply_mode') === 'public_comment'
             && $conversation->fresh()->status !== 'human'
             && $this->publicCommentLanguageMismatch($message, (string) ($data['text'] ?? ''), collect($used))) {
@@ -1749,7 +1763,8 @@ class OpenAiSalesOrchestrator
         }
 
         if ($escalationReason) {
-            $handoffEnabled = $agent->humanHandoffEnabled();
+            $publicComment = data_get($conversation->context, 'reply_mode') === 'public_comment';
+            $handoffEnabled = $publicComment || $agent->humanHandoffEnabled();
             if ($handoffEnabled) {
                 $this->forceHandoff($conversation, $escalationReason, 'Review the verified conversation context and confirm the safest next step.');
             }
@@ -1758,9 +1773,9 @@ class OpenAiSalesOrchestrator
             $data['handoff'] = $handoffEnabled;
             $data['intent'] = $handoffEnabled ? 'handoff' : 'discovery';
             $data['escalation_reason'] = $handoffEnabled ? $escalationReason : null;
-            $data['text'] = $handoffEnabled
+            $data['text'] = $publicComment ? '' : ($handoffEnabled
                 ? $this->safeHandoffText($message)
-                : $this->safeUnavailableText($message);
+                : $this->safeUnavailableText($message));
         }
 
         $toolNames = collect($used)->pluck('name')->unique()->values();

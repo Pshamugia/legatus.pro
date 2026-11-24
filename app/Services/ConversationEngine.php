@@ -139,6 +139,27 @@ class ConversationEngine
             ));
         }
 
+        if (str_ends_with($channel, '_comment') && ($reply['handoff'] ?? false)) {
+            // A public comment that needs human judgment must not create even
+            // an internal assistant draft for the outbound dispatcher to see.
+            $conversation->update([
+                'status' => 'human',
+                'intent' => 'handoff',
+                'priority' => 'high',
+                'handoff_reason' => $conversation->handoff_reason
+                    ?: ($reply['escalation_reason'] ?? 'A public comment needs human review.'),
+                'handoff_summary' => $conversation->handoff_summary
+                    ?: 'Review the public comment and verified evidence before replying.',
+                'last_message_at' => now(),
+            ]);
+
+            return $this->rememberResponse($customerMessage, $this->humanQueueResponse(
+                $conversation,
+                $customerMessage,
+                $requestId,
+            ));
+        }
+
         if (($reply['silent'] ?? false) === true) {
             $conversation->update(['intent' => 'conversation', 'last_message_at' => now()]);
 
