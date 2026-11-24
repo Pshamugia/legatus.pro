@@ -723,7 +723,10 @@ class MetaTransportTest extends TestCase
                 'type' => 'message',
                 'content' => [[
                     'type' => 'output_text',
-                    'text' => json_encode(['action' => 'review', 'reason' => 'Customer-specific order issue.']),
+                    'text' => json_encode([
+                        'action' => 'review', 'reason' => 'Customer-specific order issue.',
+                        'post_product_reference' => false, 'post_product_reference_evidence' => null,
+                    ]),
                 ]],
             ]],
         ])]);
@@ -748,6 +751,83 @@ class MetaTransportTest extends TestCase
                 && $schema === ['reply', 'silent', 'review']
                 && str_contains((string) data_get($request->data(), 'instructions'), 'public social-media comment');
         });
+    }
+
+    public function test_comment_about_the_posts_product_requires_a_verified_post_link_before_any_catalog_search(): void
+    {
+        config()->set('services.openai.key', 'test-key');
+        $comment = 'მთავარი დაგავიწყდათ, წიგნის ფასი დაწერეთ, თორემ რეკლამა კარგია.';
+        $evidence = 'წიგნის ფასი დაწერეთ';
+        Http::fake(['api.openai.com/*' => Http::response([
+            'output' => [[
+                'type' => 'message',
+                'content' => [[
+                    'type' => 'output_text',
+                    'text' => json_encode([
+                        'action' => 'reply', 'reason' => 'Public product question.',
+                        'post_product_reference' => true,
+                        'post_product_reference_evidence' => $evidence,
+                    ]),
+                ]],
+            ]],
+        ])]);
+        $connection = $this->connection('facebook', 'page-unlinked-post-comment');
+        $conversation = $connection->agent->conversations()->create([
+            'channel_connection_id' => $connection->id,
+            'visitor_id' => 'post-price-commenter',
+            'channel' => 'facebook_comment', 'status' => 'ai',
+            'context' => ['source_type' => 'social_comment', 'reply_mode' => 'public_comment'],
+        ]);
+
+        $unlinked = app(PublicCommentGate::class)->decide($comment, $conversation);
+        $this->assertSame('review', $unlinked['action']);
+        $this->assertStringContainsString('not linked', $unlinked['reason']);
+
+        $conversation->update(['context' => array_merge($conversation->context, ['comment_product_id' => 42])]);
+        $linked = app(PublicCommentGate::class)->decide($comment, $conversation->fresh());
+        $this->assertSame('reply', $linked['action']);
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'text.format.schema.properties.post_product_reference.type') === 'boolean'
+            && str_contains((string) data_get($request->data(), 'instructions'), 'generic product noun is not an independent identity'));
+    }
+
+    public function test_unlinked_post_price_feedback_never_enters_the_sales_engine_or_sends_a_public_reply(): void
+    {
+        Queue::fake();
+        config()->set('services.openai.key', 'test-key');
+        $comment = 'მთავარი დაგავიწყდათ, წიგნის ფასი დაწერეთ, თორემ რეკლამა კარგია.';
+        Http::fake(['api.openai.com/*' => Http::response([
+            'output' => [[
+                'type' => 'message',
+                'content' => [[
+                    'type' => 'output_text',
+                    'text' => json_encode([
+                        'action' => 'reply', 'reason' => 'Public product question.',
+                        'post_product_reference' => true,
+                        'post_product_reference_evidence' => 'წიგნის ფასი დაწერეთ',
+                    ]),
+                ]],
+            ]],
+        ])]);
+        $connection = $this->connection('facebook', 'page-price-feedback');
+        $inbound = $connection->channelMessages()->create([
+            'direction' => 'inbound', 'provider_message_id' => 'price-feedback-comment',
+            'provider_sender_id' => 'price-feedback-customer',
+            'provider_recipient_id' => 'page-price-feedback',
+            'message_type' => 'comment', 'status' => 'received',
+            'payload' => ['text' => $comment, 'post_id' => 'external-unlinked-post'],
+            'received_at' => now(),
+        ]);
+        $engine = \Mockery::mock(ConversationEngine::class);
+        $engine->shouldNotReceive('handle');
+
+        (new ProcessMetaInboundMessage($inbound->id))->handle(
+            $engine, app(ChannelMessageDispatcher::class), null, app(PublicCommentGate::class),
+        );
+
+        $this->assertSame('processed', $inbound->fresh()->status);
+        $this->assertSame('human', $connection->agent->conversations()->sole()->status);
+        $this->assertSame(0, $connection->channelMessages()->where('direction', 'outbound')->count());
+        Queue::assertNothingPushed();
     }
 
     public function test_meta_send_job_replies_to_facebook_and_instagram_comments_on_public_endpoints(): void
