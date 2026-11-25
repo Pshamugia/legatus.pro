@@ -2501,6 +2501,49 @@ class SocialMediaSchedulerTest extends TestCase
         $this->assertTrue($schedule->posts->every(fn ($post): bool => $post->description === 'Verified public description.'));
     }
 
+    public function test_a_lone_secondary_language_source_cannot_label_primary_catalog_products_as_translations(): void
+    {
+        [$user, $agent] = $this->tenant('secondary-language-is-not-primary');
+        $this->connections($agent);
+        $catalogSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Catalog',
+            'url' => 'https://shop.example/catalog', 'status' => 'ready', 'progress' => 100,
+        ]);
+        $englishSource = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'language', 'taxonomy_label' => 'English',
+            'name' => 'Website language: English', 'url' => 'https://shop.example/?lang=en',
+            'status' => 'ready', 'progress' => 100, 'index_version' => 3,
+        ]);
+        $primaryAttributes = $this->product('Primary Catalog Product', 'Books', 3);
+        $primaryAttributes['metadata']['source_id'] = $catalogSource->id;
+        $primaryAttributes['metadata']['localized']['English'] = [
+            'description' => 'A partial language enrichment without a verified title or product link.',
+        ];
+        $primary = $agent->products()->create($primaryAttributes);
+        $englishAttributes = $this->product('English Product', 'Books', 3);
+        $englishAttributes['metadata']['source_id'] = $englishSource->id;
+        $englishAttributes['metadata']['source_url'] = $englishSource->url;
+        $english = $agent->products()->create($englishAttributes);
+
+        Http::fake(['https://shop.example/*' => Http::response('not-an-image')]);
+        $this->actingAs($user)->post(route('social-media.store'), [
+            'starts_on' => now()->addDay()->toDateString(), 'ends_on' => now()->addDay()->toDateString(),
+            'posts_per_day' => 1, 'providers' => ['facebook'], 'timezone' => 'Asia/Tbilisi',
+            'languages' => ['English'],
+        ])->assertSessionHasNoErrors();
+
+        $post = $agent->socialMediaPosts()->sole();
+        $this->assertSame($english->id, $post->product_id);
+        $this->assertSame('English Product', $post->title);
+        $post->update(['product_id' => $primary->id, 'title' => $primary->name, 'status' => 'preparing']);
+
+        $safeIds = app(SocialMediaScheduler::class)->prepareDueSlot($post->schedule->fresh('agent'), $post->scheduled_for);
+
+        $this->assertSame([$post->id], $safeIds);
+        $this->assertSame($english->id, $post->fresh()->product_id);
+        $this->assertSame('English Product', $post->fresh()->title);
+    }
+
     public function test_secondary_website_language_uses_its_own_source_base_record_and_restarts_after_exhaustion(): void
     {
         [$user, $agent] = $this->tenant('secondary-language-base-cycle');

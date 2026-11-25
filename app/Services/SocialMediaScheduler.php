@@ -454,29 +454,35 @@ class SocialMediaScheduler
         $languageSources = $agent->knowledgeSources()
             ->where('source_scope', 'language')
             ->oldest('id')
-            ->get(['id', 'taxonomy_label', 'status']);
-        $primaryLanguage = trim((string) optional(
-            $languageSources->first(fn ($source): bool => $source->status === 'ready' && filled($source->taxonomy_label)),
-        )->taxonomy_label);
-        $primaryLanguageKey = Str::lower($primaryLanguage);
+            ->get(['id', 'url', 'taxonomy_label', 'status']);
         $sourceLanguageKeys = $languageSources
             ->filter(fn ($source): bool => filled($source->taxonomy_label))
             ->mapWithKeys(fn ($source): array => [(int) $source->id => Str::lower(trim((string) $source->taxonomy_label))]);
 
-        return $products->flatMap(function ($product) use ($wanted, $primaryLanguageKey, $sourceLanguageKeys): array {
+        return $products->flatMap(function ($product) use ($wanted, $languageSources, $sourceLanguageKeys): array {
             $localized = (array) data_get($product->metadata, 'localized', []);
-            $localizedKeys = collect(array_keys($localized))
+            $localizedKeys = collect($localized)
+                ->filter(fn ($variant): bool => is_array($variant)
+                    && filled($variant['name'] ?? null)
+                    && $this->publicHttpUrl($variant['product_url'] ?? null))
+                ->keys()
                 ->mapWithKeys(fn ($language): array => [Str::lower(trim((string) $language)) => (string) $language]);
             $sourceLanguageKey = $sourceLanguageKeys->get((int) data_get($product->metadata, 'source_id'));
+            $catalogSourceUrl = (string) data_get($product->metadata, 'source_url', '');
 
-            return $wanted->filter(function (string $language) use ($localizedKeys, $primaryLanguageKey, $sourceLanguageKey): bool {
+            return $wanted->filter(function (string $language) use ($localizedKeys, $sourceLanguageKey, $languageSources, $catalogSourceUrl): bool {
                 $languageKey = Str::lower($language);
 
+                // The first ready language source may be a secondary locale.
+                // Base catalog copy belongs to it only when its URL scope
+                // actually contains the catalog source, not merely its host.
                 return $localizedKeys->has($languageKey)
                     || ($sourceLanguageKey !== null && $sourceLanguageKey === $languageKey)
-                    || ($primaryLanguageKey !== ''
-                        && $languageKey === $primaryLanguageKey
-                        && ($sourceLanguageKey === null || $sourceLanguageKey === $primaryLanguageKey));
+                    || ($sourceLanguageKey === null && $languageSources->contains(fn ($source): bool =>
+                        $source->status === 'ready'
+                        && Str::lower(trim((string) $source->taxonomy_label)) === $languageKey
+                        && $this->languageSourceCoversCatalog((string) $source->url, $catalogSourceUrl)
+                    ));
             })
                 ->map(function (string $language) use ($product, $localizedKeys): array {
                     $verifiedLanguage = $localizedKeys->get(Str::lower($language), $language);
@@ -485,6 +491,32 @@ class SocialMediaScheduler
                 })
                 ->values()->all();
         })->shuffle()->values();
+    }
+
+    private function languageSourceCoversCatalog(string $languageUrl, string $catalogUrl): bool
+    {
+        if ($languageUrl === '' || $catalogUrl === '') {
+            return false;
+        }
+
+        $language = parse_url($languageUrl);
+        $catalog = parse_url($catalogUrl);
+        if (! is_array($language) || ! is_array($catalog)
+            || ! isset($language['host'], $catalog['host'])
+            || Str::lower($language['host']) !== Str::lower($catalog['host'])) {
+            return false;
+        }
+
+        $languagePath = trim((string) ($language['path'] ?? ''), '/');
+        $catalogPath = trim((string) ($catalog['path'] ?? ''), '/');
+        if ($languagePath !== '' && $catalogPath !== $languagePath && ! str_starts_with($catalogPath, $languagePath.'/')) {
+            return false;
+        }
+
+        parse_str((string) ($language['query'] ?? ''), $languageQuery);
+        parse_str((string) ($catalog['query'] ?? ''), $catalogQuery);
+
+        return collect($languageQuery)->every(fn ($value, $key): bool => ($catalogQuery[$key] ?? null) === $value);
     }
 
     private function dailyTimes(CarbonImmutable $day, int $count): array
