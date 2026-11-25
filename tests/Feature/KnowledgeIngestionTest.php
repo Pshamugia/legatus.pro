@@ -1059,6 +1059,40 @@ HTML;
         Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
     }
 
+    public function test_ready_catalog_with_a_failed_refresh_resumes_its_saved_crawl_after_backoff(): void
+    {
+        Queue::fake();
+        $agent = Agent::create(['name' => 'Shop', 'slug' => 'paused-ready-catalog', 'business_name' => 'Shop']);
+        $savedCursor = [
+            'start_url' => 'https://shop.example/catalog',
+            'queue' => ['https://shop.example/catalog?page=3'],
+            'visited' => ['https://shop.example/catalog'],
+        ];
+        $source = $agent->knowledgeSources()->create([
+            'type' => 'url', 'source_scope' => 'catalog', 'name' => 'Paused catalog',
+            'url' => 'https://shop.example/catalog', 'status' => 'ready',
+            'progress' => 100, 'items_found' => 2371,
+            'last_synced_at' => now()->subDays(10),
+            'error' => 'Website synchronization paused safely.',
+            'crawl_state' => $savedCursor,
+        ]);
+
+        $this->artisan('legatus:resume-knowledge')->assertSuccessful();
+        Queue::assertNotPushed(CrawlPublicWebsite::class);
+
+        $source->update(['updated_at' => now()->subHour()]);
+        $this->artisan('legatus:resume-knowledge')
+            ->expectsOutputToContain('Resumed crawl')
+            ->assertSuccessful();
+
+        $this->assertSame('processing', $source->fresh()->status);
+        $this->assertSame(99, $source->fresh()->progress);
+        $this->assertNull($source->fresh()->error);
+        $this->assertSame($savedCursor, $source->fresh()->crawl_state);
+        $this->assertSame(2371, $source->fresh()->items_found);
+        Queue::assertPushed(CrawlPublicWebsite::class, fn ($job): bool => $job->sourceId === $source->id);
+    }
+
     public function test_deleting_uploaded_source_removes_only_its_managed_file(): void
     {
         Storage::fake('local');

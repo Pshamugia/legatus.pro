@@ -18,8 +18,19 @@ class ResumeKnowledge extends Command
         $query = KnowledgeSource::query()
             ->where('type', 'url')
             ->whereIn('status', ['processing', 'ready', 'failed'])
-            ->where('progress', '>', 1);
-        $query->where('progress', '<', 100);
+            ->where('progress', '>', 1)
+            ->where(function ($query): void {
+                $query->where('progress', '<', 100)
+                    ->orWhere(function ($failed): void {
+                        // A failed crawl can retain a complete previous index.
+                        // Its status is then ready/100 with an error, which the
+                        // ordinary refresh deliberately excludes. Retry the
+                        // saved cursor after a bounded backoff instead of
+                        // leaving that catalog permanently frozen.
+                        $failed->whereNotNull('error')
+                            ->where('updated_at', '<=', now()->subMinutes(30));
+                    });
+            });
 
         if ($host = trim((string) $this->option('host'))) {
             $query->where('url', 'like', '%://'.$host.'/%');
@@ -28,7 +39,11 @@ class ResumeKnowledge extends Command
         $count = 0;
         $query->each(function (KnowledgeSource $source) use (&$count): void {
             if ($source->isListingIndex()) {
-                $source->update(['status' => 'processing', 'error' => null]);
+                $source->update([
+                    'status' => 'processing',
+                    'progress' => min(99, (int) $source->progress),
+                    'error' => null,
+                ]);
                 CrawlPublicWebsite::dispatch($source->id);
                 $this->info("Resumed crawl #{$source->id} {$source->name} from {$source->progress}%");
                 $count++;
