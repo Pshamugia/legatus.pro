@@ -471,6 +471,7 @@ class SocialMediaSchedulerTest extends TestCase
                 ->push(['error' => ['message' => 'Temporary Instagram failure']], 500)
                 ->push(['id' => 'retry-container'])
                 ->push(['id' => 'retry-instagram-post']),
+            'https://graph.facebook.test/*retry-container*' => Http::response(['status_code' => 'FINISHED']),
         ]);
 
         try {
@@ -2463,6 +2464,7 @@ class SocialMediaSchedulerTest extends TestCase
 
         Http::fake([
             'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'localized-container'])->push(['id' => 'localized-post']),
+            'https://graph.facebook.test/*localized-container*' => Http::response(['status_code' => 'FINISHED']),
         ]);
         $post->update(['status' => 'queued']);
         (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
@@ -2860,6 +2862,9 @@ class SocialMediaSchedulerTest extends TestCase
         Http::fake([
             'https://graph.facebook.test/*/photos*' => Http::response(['id' => 'fb-photo-1', 'post_id' => 'page-1_fb-post-1']),
             'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'container-1'])->push(['id' => 'ig-post-1']),
+            'https://graph.facebook.test/*container-1*' => Http::sequence()
+                ->push(['status_code' => 'IN_PROGRESS'])
+                ->push(['status_code' => 'FINISHED']),
         ]);
         foreach (SocialMediaPost::query()->get() as $post) {
             (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));
@@ -2886,6 +2891,9 @@ class SocialMediaSchedulerTest extends TestCase
             && $request['url'] === 'https://shop.example/images/product.jpg'
             && str_contains((string) $request['caption'], 'https://shop.example/products/scheduled-product'));
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media?') && $request['image_url'] === 'https://shop.example/images/product.jpg');
+        $this->assertSame(2, collect(Http::recorded())->filter(
+            fn (array $exchange): bool => str_contains($exchange[0]->url(), '/container-1?'),
+        )->count());
         Http::assertSent(fn ($request) => str_contains($request->url(), '/ig-1/media_publish') && $request['creation_id'] === 'container-1');
     }
 
@@ -3058,6 +3066,9 @@ class SocialMediaSchedulerTest extends TestCase
             }
             if (str_contains($request->url(), '/ig-1/media')) {
                 return Http::response(['id' => 'ig-story-container']);
+            }
+            if (str_contains($request->url(), '/ig-story-container')) {
+                return Http::response(['status_code' => 'FINISHED']);
             }
 
             return Http::response([], 404);
@@ -3700,6 +3711,7 @@ class SocialMediaSchedulerTest extends TestCase
         ]);
         Http::fake([
             'https://graph.facebook.test/*/media*' => Http::sequence()->push(['id' => 'description-container'])->push(['id' => 'description-post']),
+            'https://graph.facebook.test/*description-container*' => Http::response(['status_code' => 'FINISHED']),
         ]);
 
         (new PublishSocialMediaPost($post->id))->handle(app(MetaGraphClient::class), app(SocialMediaTemplateRenderer::class));

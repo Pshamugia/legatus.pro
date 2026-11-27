@@ -237,6 +237,8 @@ class MetaGraphClient
         $creationId = (string) ($container['id'] ?? '');
         throw_if($creationId === '', new \RuntimeException('Meta did not create an Instagram media container.'));
 
+        $this->waitForInstagramContainer($connection, $creationId, 'post');
+
         return $this->authorizedRequest($connection->access_token, retry: false)
             ->post($this->url($connection->external_account_id.'/media_publish'), [
                 'creation_id' => $creationId,
@@ -275,6 +277,8 @@ class MetaGraphClient
         $creationId = (string) ($container['id'] ?? '');
         throw_if($creationId === '', new \RuntimeException('Meta did not create an Instagram Story container.'));
 
+        $this->waitForInstagramContainer($connection, $creationId, 'Story');
+
         return $this->authorizedRequest($connection->access_token, retry: false)
             ->post($this->url($connection->external_account_id.'/media_publish'), [
                 'creation_id' => $creationId,
@@ -303,6 +307,30 @@ class MetaGraphClient
             'status_code',
             '',
         );
+    }
+
+    private function waitForInstagramContainer(ChannelConnection $connection, string $containerId, string $kind): void
+    {
+        $status = '';
+        for ($attempt = 0; $attempt < 12; $attempt++) {
+            $result = $this->authorizedRequest($connection->access_token, retry: false)
+                ->get($this->url($containerId), ['fields' => 'status_code,status'])
+                ->throw()
+                ->json();
+            $status = strtoupper(trim((string) ($result['status_code'] ?? $result['status'] ?? '')));
+
+            if ($status === 'FINISHED') {
+                return;
+            }
+            if (in_array($status, ['ERROR', 'EXPIRED'], true)) {
+                throw new \RuntimeException("Instagram could not prepare the {$kind} container ({$status}).");
+            }
+            if ($attempt < 11 && ! app()->environment('testing')) {
+                usleep(1000000);
+            }
+        }
+
+        throw new \RuntimeException("Instagram did not finish preparing the {$kind} container in time.");
     }
 
     public function publishInstagramReelContainer(ChannelConnection $connection, string $containerId): array
